@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Node Maintenance</title>
+  <link rel="icon" type="image/png" sizes="144x144" href="/favicon-144x144.png">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon.ico">
+  <meta charset="UTF-8">
+
+  <!-- ipv ouderwetse xmlhttprequest-->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    
+  <style>
+  </style>    
+    
+</head>
+
+<body onload="onBodyLoad()">
+
+  <script>
+    'use strict';
+    let button;
+    let nodeResponse;
+
+    function onBodyLoad() { 
+      button = document.getElementById('button');
+      button.onclick = buttonOnClick;
+    } // onBodyLoad
+
+    function buttonOnClick() {
+      doRadioCommand();
+    }
+
+    function doRadioCommand() {
+      let nodeId = document.getElementById("nodeId").value;
+      let command = document.getElementById("command").value;
+      let param = document.getElementById("param").value;
+      let data = document.getElementById("data").value;
+      axios.get(`/radio?to=${nodeId}&type=2&cmd=${command}&param=${param}&data=${data}`, {responseType : 'json'})
+      .then((res) => {
+        nodeResponse = res.data;
+        showNodeResponse();
+      }, (err) => {
+          console.log(err);
+      });
+    } // doRadioCommand
+
+    function showNodeResponse() {
+      let spanNodeResponse = document.getElementById('nodeResponse');
+      if (nodeResponse){
+        if (nodeResponse.tx)
+          spanNodeResponse.innerHTML = 'tx :' + nodeResponse.tx + '<br>';
+        if (nodeResponse.rx)
+          spanNodeResponse.innerHTML += 'rx :' + nodeResponse.rx + '<br>';
+          if (nodeResponse.cmd) {
+          spanNodeResponse.innerHTML += 'cmd = ' + nodeResponse.cmd.id + '<br>';
+          spanNodeResponse.innerHTML += 'param = ' + nodeResponse.cmd.param + '<br>';
+          if ((nodeResponse.cmd.id == 9) || (nodeResponse.cmd.id == 7)) {
+            // response data omzetten naar een string
+            spanNodeResponse.innerHTML += 'data = ' + String.fromCharCode(...nodeResponse.cmd.data) + '<br>'
+          }
+          else { // eigenlijk alleen nog GET_PARAM_VALUE geeft data
+            spanNodeResponse.innerHTML += 'data = ' + nodeResponse.cmd.data.join(' ') + '<br>';
+          }
+        }
+        if (nodeResponse.reply) {
+          spanNodeResponse.innerHTML += 'reply = ' + nodeResponse.reply.id + '<br>';
+          spanNodeResponse.innerHTML += 'param = ' + nodeResponse.reply.param + '<br>';
+          if ((nodeResponse.reply.id == 9) || (nodeResponse.reply.id == 7)) {
+            // response data omzetten naar een string
+            spanNodeResponse.innerHTML += 'data = ' + String.fromCharCode(...nodeResponse.reply.data) + '<br>'
+          }
+          else { // eigenlijk alleen nog GET_PARAM_VALUE geeft data
+            spanNodeResponse.innerHTML += 'data = ' + nodeResponse.reply.data.join(' ') + '<br>';
+          }
+        }
+      }
+    } // showNodeResponse
+
+  </script>
+
+  <h1>Node Maintenance</h1>
+    <label for="nodeId">Node ID:</label>
+    <input type="number" id="nodeId" name="nodeId" value="5"><br>
+    <label for="command">Command:</label>
+    <input type="number" id="command" name="command" value="9"><br>
+    <label for="param">Parameter:</label>
+    <input type="number" id="param" name="param" value="0"><br>
+    <label for="data">Data:</label>
+    <input type="text" id="data" name="data" value=""><br>
+    <button id="button">Send</button><br>
+
+    <span id="nodeResponse"></span>
+
+    <p> Commands:
+
+    <br>#define CMD_STAY_AWAKE              1  // + on/off
+    <br>#define CMD_REBOOT                  2
+    <br>#define CMD_RESET_EEPROM            3
+    <br>#define CMD_GET_PAYLOAD_ITEM_COUNT  4
+    <br>#define CMD_GET_PAYLOAD_ITEM_TYPE   5
+    <br>#define CMD_GET_PARAMETER_COUNT     6
+    <br>#define CMD_GET_PARAM_NAME          7 // + paramId
+    <br>#define CMD_RELOAD_EEPROM           8
+    <br>//#define CMD_SET_PARAM_NAME          8 // + paramId + paramName
+    <br>#define CMD_GET_NODE_NAME           9
+    <br>#define CMD_SET_NODE_NAME           10 // + [] + nodeName
+    <br>#define CMD_GET_PARAM_VALUE         11 // + paramId
+    <br>#define CMD_SET_PARAM_VALUE         12 // + paramId + paramValue
+  </p>
+</body>
+</html>
