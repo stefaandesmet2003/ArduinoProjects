@@ -5,7 +5,7 @@
 #include "config.h"
 #include "cloudlog.h"
 
-void cloudlog_log(String logString) {
+void cloudlog_log(uint8_t payloadId, String logString) {
 
   Serial.print("cloudlog: "); Serial.println(logString);
 
@@ -14,8 +14,17 @@ void cloudlog_log(String logString) {
   client->setInsecure();
 
   HTTPClient https;
+  String log_url;
+  
+  // TEMP : quick test
+  char *logUrlPathSuffix[] = {"/dummy2/log","/tempie2/log",""};
+  if (strlen(logUrlPathSuffix[payloadId])) {
+    log_url = log_cloudurl + logUrlPathSuffix[payloadId];
+  }
+  else
+    return; // no logging required for this payloadId
 
-  if (https.begin(*client, log_cloudurl)) {
+  if (https.begin(*client, log_url)) {
     // opgelet : geen ':' bij de header key!!!!
     https.setAuthorization(cloud_user.c_str(), cloud_pass.c_str());
     https.addHeader("Content-Type", "text/plain");

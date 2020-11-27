@@ -41,9 +41,11 @@ function updatePageContents()
   spanWifiRSSI.innerHTML = deviceStatus.wifiRSSI;
   spanCurrentSensorData.innerHTML = '<br>';
   if (sensorData){
-    if (sensorData.solarValue != undefined) spanCurrentSensorData.innerHTML+= `solar : ${(sensorData.solarValue*5.0/1023).toFixed(2)}V <br>`;
-    if (sensorData.batteryValue != undefined) spanCurrentSensorData.innerHTML+= `battery : ${(sensorData.batteryValue/1000).toFixed(2)}V <br>`; // na de update met de readVcc trick
-    if (sensorData.packetsOK != undefined) spanCurrentSensorData.innerHTML+= `packetsOK : ${sensorData.packetsOK} <br>`;
-    if (sensorData.packetsNOK != undefined) spanCurrentSensorData.innerHTML+=  `packetsNOK : ${sensorData.packetsNOK} <br>`;
+    for (aProp in sensorData) {
+      if (aProp == "solarValue") aValue = (sensorData.solarValue*5.0/1023).toFixed(2);
+      else if (aProp == "batteryValue") aValue = (sensorData.batteryValue/1000).toFixed(2); // na de update met de readVcc trick
+      else aValue = sensorData[aProp];
+      spanCurrentSensorData.innerHTML+= `${aProp} : ${aValue} <br>`
+    }
   }
 } // updatePageContents

@@ -35,19 +35,26 @@ RF24Network network(radio);     // Network uses that radio
 
 const uint16_t this_node = 00;  // Address of hub node in Octal format ( 04,031, etc)
 
-struct dataPayload_t {          // Structure of our payload
-  uint16_t solarValue;
-  uint16_t batteryValue;
-  uint16_t packetsOK;
-  uint16_t packetsNOK;
-};
+// TEMP : fixed configuration & structures for the supported sensors
+#define DUMMY_NODE_ID   1
+#define TEMPIE_NODE_ID  2
 
-dataPayload_t curSensorData[5];
+// the names of the payload items to come from config, now only in url handler
+// the types are UINT8, UINT16 & float for now
+// first payload item is the payload type
+
+#define PAYLOADTYPE_DUMMY_DATA    0
+#define PAYLOADTYPE_TEMPIE_DATA   1
+#define PAYLOADTYPE_TEMPIE_STATUS 2
+// first payload item is payloadType uint8_t
+uint8_t payloadItemSizes[3][6] = {{1,2,2,2,2,0},{1,4,4,4,4,4},{1,2,2,2,0,0}}; // just for the 2 nodes here
+
+uint8_t curPayloadData[3][22];
 
 //#define READING_INTERVAL 60000 // in ms
 #define LOGGING_INTERVAL 60000 // 1minutes
 
-uint32_t lastLogMillis; // temperature logging interval
+uint32_t lastLogMillis; // logging interval
 uint32_t blinkMillis; // temp: led on during temperature conversion (blocking) & blinking otherwise
 uint8_t sensorIdToWake = 0xFF;
 
@@ -83,24 +90,72 @@ String getContentType(String filename){ // determine the filetype of a given fil
   return "text/plain";
 } // getContentType
 
+// work around exceptions on pointer casts when data are not boundary aligned
+static uint16_t getUint16 (uint8_t *data) {
+  uint16_t a16;
+  memcpy(&a16, data, 2);
+  return a16;
+} // getUint16
+
+static float getFloat (uint8_t *data) {
+  float aFloat;
+  memcpy(&aFloat, data, 4);
+  return aFloat;
+
+} // getFloat
+
+
 /**************************************************************/
 /*   SERVER HANDLERS                                          */
 /**************************************************************/
 
 // app specific endpoint
-// /sensor?id=<sensorId> 1..5
+// /sensor?id=<sensorId>
 void handleSensorRequest()
 {
   String message;
   uint8_t sensorId = 1;
   for (uint8_t i=0;i<server.args();i++)
     if (server.argName(i) == "id") sensorId = server.arg(i).toInt();
+
   
-  if ((sensorId >= 1) && (sensorId <=5)) {
-    message = "{\"solarValue\": " + String(curSensorData[sensorId-1].solarValue) +
-                ",\"batteryValue\": " + String(curSensorData[sensorId-1].batteryValue) + 
-                ",\"packetsOK\": " + String(curSensorData[sensorId-1].packetsOK) + 
-                ",\"packetsNOK\": " + String(curSensorData[sensorId-1].packetsNOK) + "}";             
+  if (sensorId == DUMMY_NODE_ID) {
+    // TODO - the deserializing info should come from config
+    /*
+    message = "{\"sunnie last data\": ";
+    for (int i=0;i<sizeof(curPayloadData[0]);i++) {
+      message += String(curPayloadData[0][i]) + ' ';
+    }
+    message += "}";
+    */
+    
+    message = "{\"solarValue\": " + String(getUint16(curPayloadData[0]+1)) +
+                ",\"batteryValue\": " + String(getUint16(curPayloadData[0]+3)) + 
+                ",\"packetsOK\": " + String(getUint16(curPayloadData[0]+5)) + 
+                ",\"packetsNOK\": " + String(getUint16(curPayloadData[0]+7)) + "}";             
+    
+  }
+  else if (sensorId == TEMPIE_NODE_ID) {
+    /*
+    message = "{\"tempie last data\": ";
+    for (int i=0;i<sizeof(curPayloadData[1]);i++) {
+      message += String(curPayloadData[1][i]) + ' ';
+    }
+    message += ",\"tempie last status\": ";
+    for (int i=0;i<sizeof(curPayloadData[2]);i++) {
+      message += String(curPayloadData[2][i]) + ' ';
+    }
+    message += "}";
+    */
+
+    message = "{\"DS18B20Temperature\": " + String(getFloat(curPayloadData[1]+1),2) +
+              ",\"BMP280Pressure\": " + String(getFloat(curPayloadData[1]+5),2) + 
+              ",\"BMP280Temperature\": " + String(getFloat(curPayloadData[1]+9),2) + 
+              ",\"SI7021Humidity\": " + String(getFloat(curPayloadData[1]+13),2) + 
+              ",\"SI7021Temperature\": " + String(getFloat(curPayloadData[1]+17),2) + 
+              ",\"vccValue\": " + String(getUint16(curPayloadData[2]+1)) + 
+              ",\"packetsOK\": " + String(getUint16(curPayloadData[2]+3)) + 
+              ",\"packetsNOK\": " + String(getUint16(curPayloadData[2]+5)) + "}";
   }
   else {
     // invalid sensorId
@@ -587,21 +642,35 @@ void loop() {
   while ( network.available() ) {
     
     RF24NetworkHeader inHeader;
-    network.peek(inHeader);
+    uint8_t cntBytes = network.peek(inHeader);
 
     if (inHeader.type == HEADER_DATA) {
-      dataPayload_t data;
-      Serial.print("receiving data from node "); Serial.println(inHeader.from_node);
-      network.read(inHeader,&data,sizeof(data));
-      // TEMP : only nodeId 1..5 are handled so far
-      if ((inHeader.from_node >=1) && (inHeader.from_node <=5))
-        curSensorData[inHeader.from_node-1] = data;
+      Serial.print("received "); Serial.print(cntBytes);
+      Serial.print(" bytes from node "); Serial.println(inHeader.from_node); 
+      // TODO : consistency check if nbrOfBytes read correspond to the expected payload size
+      // read data without parsing
+      uint8_t payloadType;
+      network.peek(inHeader, &payloadType, 1);
+      Serial.print("payload type : "); Serial.print(payloadType);
+      if (payloadType <= 2){ // TEMP : fixed payload types for now
+        cntBytes = network.read(inHeader,curPayloadData[payloadType],sizeof(curPayloadData[payloadType]));
+        Serial.print(","); Serial.print(cntBytes); Serial.print(" bytes read: ");
+        for (int i=0;i<cntBytes;i++) {
+          Serial.print(curPayloadData[payloadType][i],HEX);Serial.print(' ');
+        }
+        Serial.println();
+      }
+      else {
+        Serial.println("unknown payload type, discarding data!");
+        network.read(inHeader,NULL,0); // clear frame queue, discard unknown payload
+      }
 
       // if requested try to keep the sensor awake
       if (inHeader.from_node == sensorIdToWake) {
         RF24NetworkHeader outHeader(sensorIdToWake,HEADER_COMMAND);
         commandReplyPayload_t outCommand;
         outCommand.id = CMD_STAY_AWAKE;
+        outCommand.param = 1;
         network.write(outHeader,&outCommand,sizeof(outCommand));
         sensorIdToWake = 0xFF; // try only once
       }
@@ -616,6 +685,7 @@ void loop() {
       for (int i=0;i<8;i++) { Serial.print(inReply.data[i],HEX); Serial.print(" "); }
       Serial.println();
       // TODO : handle response data
+      network.read(inHeader,NULL,0); // clear the frame queue
      }
     else if (inHeader.type == HEADER_COMMAND) {
       commandReplyPayload_t inCommand;
@@ -627,6 +697,7 @@ void loop() {
       for (int i=0;i<8;i++) { Serial.print(inCommand.data[i],HEX); Serial.print(" "); }
       Serial.println();
       // TODO : command ignored for now
+      network.read(inHeader,NULL,0); // clear the frame queue
      }
     else {
       Serial.println("received unknown header!");
@@ -635,22 +706,40 @@ void loop() {
   }
 
   // logging every LOGGING_INTERVAL
-  // TODO: so far only node 1 is logged
+  // TODO: replace fixed node config with something flexible
   if ((log_cloud || log_local) && (currentMillis - lastLogMillis > LOGGING_INTERVAL)) {
 
+    String logString;
     lastLogMillis = currentMillis;
 
     uint32_t actualTime = ntp_GetUnixDateTime();
-    String logString = String(actualTime) + "," + String(curSensorData[0].solarValue) + "," + String(curSensorData[0].batteryValue) +
-                                            "," + String(curSensorData[0].packetsOK) + "," + String(curSensorData[0].packetsNOK);
-    if (log_local) {
-      File tempLog = SPIFFS.open("/log.csv", "a");
-      tempLog.print(logString);
-      tempLog.println();
-      tempLog.close();
-    }
-    if (log_cloud) {
-      cloudlog_log(logString);
+    // tempie status not logged for now
+    // TODO : logging per node, and log all the different payload types together per node in a csv
+    // TODO : check why spiffs needs root slash
+    char *logFileNames[] = {"/dummy.csv","/tempie.csv",""}; 
+    for (int payloadType=0;payloadType<3;payloadType++) {
+      uint8_t *data = curPayloadData[payloadType];
+      uint8_t idxData = 1; // start after the payload type item in the payload data
+      logString = String(actualTime);
+      for (int i=1;i<6;i++) {
+        if (payloadItemSizes[payloadType][i] == 2) {
+          logString += "," + String(getUint16(data+idxData)); // uint16 item type
+          idxData += 2;
+        }
+        else if (payloadItemSizes[payloadType][i] == 4) {
+          logString += "," + String(getFloat(data+idxData),2); // float item type
+          idxData += 4;
+        }
+      }
+      if (log_local && strlen(logFileNames[payloadType])) {
+        File tempLog = SPIFFS.open(logFileNames[payloadType], "a");
+        tempLog.print(logString);
+        tempLog.println();
+        tempLog.close();
+      }
+      if (log_cloud && strlen(logFileNames[payloadType])) {
+        cloudlog_log(payloadType,logString);
+      }
     }
   }
 

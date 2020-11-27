@@ -326,7 +326,7 @@
     } // parseCSV
 
     function loadCSV() {
-      axios.get("log.csv")
+      axios.get("dummy.csv")
       .then((res) => {
         deviceData = parseCSV(res.data);
         // init view : filter 1 maand data
@@ -368,7 +368,7 @@
       <canvas id="myChart"></canvas>
       <!-- <canvas id="myChart" width="400" height="400"></canvas> -->
     </div>
-    <p><a href="log.csv" download="deviceLog.csv">download hub local logging data</a></p>
+    <p><a href="dummy.csv" download="dummy.csv">download hub local logging data (only sensorId=1 = dummy for now)</a></p>
     <p><a href="edit.html">Edit</a></p>
 
 </body>

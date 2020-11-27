@@ -66,17 +66,17 @@ uint32_t lastSleepMillis;
 
 int solarPin = A0;
 
-uint16_t solarValue = 0; 
-uint16_t vccValue = 0;
-uint16_t packetsOK = 0;
-uint16_t packetsNOK = 0;
+#define PAYLOADTYPE_DUMMY_DATA 0
 
 struct dataPayload_t {
+  uint8_t  payloadType = PAYLOADTYPE_DUMMY_DATA;
   uint16_t solarValue;
   uint16_t vccValue;
   uint16_t packetsOK;
   uint16_t packetsNOK;
 };
+
+dataPayload_t curSensorData;
 
 #define PAYLOAD_ITEM_COUNT  4
 uint8_t payloadItemTypes[PAYLOAD_ITEM_COUNT] = {PAYLOAD_TYPE_UINT16,PAYLOAD_TYPE_UINT16,
@@ -234,8 +234,8 @@ void handleRadioCommand () {
   Serial.println();
   */
   bool ok = network.write(outHeader,&outReply,sizeof(outReply));
-  if (ok) packetsOK ++;
-  else packetsNOK++;
+  if (ok) curSensorData.packetsOK ++;
+  else curSensorData.packetsNOK++;
 
 } // handleRadioCommand
 
@@ -291,14 +291,14 @@ void loop() {
   {
     radioTxLastMillis = millis();
     // dummy sensor data
-    solarValue = (uint16_t) analogRead(solarPin);
-    vccValue = readVcc();
+    curSensorData.solarValue = (uint16_t) analogRead(solarPin);
+    curSensorData.vccValue = readVcc();
 
-    dataPayload_t payload = { solarValue, vccValue, packetsOK, packetsNOK };
     RF24NetworkHeader header(baseNodeAddress,HEADER_DATA);
-    bool ok = network.write(header,&payload,sizeof(payload));
-    if (ok) packetsOK ++;
-    else packetsNOK++;
+    bool ok = network.write(header,&curSensorData,sizeof(curSensorData));
+    Serial.print("sending data :");Serial.println(ok);
+    if (ok) curSensorData.packetsOK ++;
+    else curSensorData.packetsNOK++;
   }
 
   // stay awake for another 1000 ms after sending data, zodat de hub nog een command kan sturen, bv STAY AWAKE
