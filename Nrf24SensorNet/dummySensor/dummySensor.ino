@@ -61,7 +61,7 @@ uint16_t myNodeAddress = DEFAULT_NODE_ADDRESS; // our address
 uint32_t radioTxInterval = DEFAULT_RADIO_TX_INTERVAL; // periodic data transmission in ms
 
 uint32_t radioTxLastMillis;
-bool stayAwake = true; // sleeping on/off
+bool stayAwake = false; // sleeping on/off
 uint32_t lastSleepMillis;
 
 int solarPin = A0;
