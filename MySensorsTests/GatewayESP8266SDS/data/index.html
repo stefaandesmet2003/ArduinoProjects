@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>NRF24 HUB Dashboard</title>
+  <link rel="icon" type="image/png" sizes="144x144" href="/favicon-144x144.png">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon.ico">
+  <meta charset="UTF-8">
+
+  <!-- ipv ouderwetse xmlhttprequest-->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <!-- ofwel moment.js en chartjs afzonderlijk invoegen-->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.3/Chart.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs"></script>  
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+  <script src="deviceControl.js"></script>
+  <script src="chartTempie.js"></script>
+    
+  <style>
+  </style>    
+    
+</head>
+
+<body onload="onBodyLoad()">
+
+  <script>
+    'use strict';
+
+    function onBodyLoad() {
+      getDeviceStatus();
+      getSensorData(3);
+      document.getElementById('buttonRefresh').onclick = buttonRefreshOnClick;
+      let nodeId = document.getElementById("inputNodeId").value;
+      document.getElementById("spanNodeId").innerHTML = nodeId;
+      loadChartTempie();
+
+    } // onBodyLoad
+
+    function buttonRefreshOnClick() {
+      let nodeId = document.getElementById("inputNodeId").value;
+      getSensorData(nodeId);
+    } // buttonRefreshOnClick
+
+  </script>
+
+  <h1>Hub Status</h1>
+    <p>Current Time : <span id="currentTime"> --:--:-- </span></p>
+    <p>Current Sensor Data : </p>   
+    <label for="inputNodeId">Node ID:</label>
+    <input type="number" id="inputNodeId" name="inputNodeId" value="3">
+    <button id="buttonRefresh">Refresh</button>
+    <br>
+    <p><span id="currentSensorData"> unknown </span></p>
+    <p>Connected to : <span id="wifiSSID"> unknown </span>( <span id="wifiRSSI"> -- </span> )</p>
+  <h1>Node <span id="spanNodeId">??</span> History</h1>
+    <div id="chart_div">
+      <!-- canvas zonder fixed W/H-->
+      <canvas id="myChart"></canvas>
+      <!-- <canvas id="myChart" width="400" height="400"></canvas> -->
+    </div>
+    <p><a href="edit.html">Edit</a></p>
+
+</body>
+</html>
