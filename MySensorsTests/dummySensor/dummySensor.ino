@@ -91,7 +91,7 @@ void before() {
 
 	// set reporting interval for all the sensors
 	nodeManager.setReportIntervalSeconds(60); // nodeManager.setReportIntervalMinutes(10);
-	nodeManager.setSleepSeconds(10); // set sleep interval
+	nodeManager.setSleepSeconds(11); // set sleep interval
 
   battery.setMinVoltage(3.2);
   battery.setMaxVoltage(4.2);

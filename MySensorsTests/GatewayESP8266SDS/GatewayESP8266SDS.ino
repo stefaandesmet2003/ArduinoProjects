@@ -196,6 +196,15 @@ struct SensorDataDummy_t {
   uint32_t lastSeenMillis;
 };
 
+struct SensorDataDummyNM_t {
+  float solarVoltage;
+  float batVoltage;
+  uint8_t batLevel;
+  uint32_t lastReportMillis;
+  uint32_t lastSeenMillis;
+};
+
+
 struct SensorDataShower_t {
   float dhtTemperature;
   float dhtHumidity;
@@ -206,12 +215,14 @@ struct SensorDataShower_t {
   uint32_t lastSeenMillis;
 };
 
-SensorDataTempie_t curSensorDataTempie;
-SensorDataDummy_t curSensorDataDummy;
-SensorDataShower_t curSensorDataShower;
+SensorDataTempie_t curSensorDataTempie; // 3
+SensorDataShower_t curSensorDataShower; // 4
+SensorDataDummy_t curSensorDataDummy; // 1
+SensorDataDummyNM_t curSensorDataDummyNM; // 99
 
 bool isTempieOnline = false;
 bool isShowerOnline = false;
+bool isDummyNMOnline = false;
 
 /**************************************************************/
 /*   HELPER FUNCTIONS                                         */
@@ -285,6 +296,13 @@ void handleSensorRequest()
               ",\"batVoltage\": " + String(curSensorDataShower.batVoltage,2) + 
               ",\"lastReport\": " + String(millis() - curSensorDataShower.lastReportMillis) +              
               ",\"lastSeen\": " + String(millis() - curSensorDataShower.lastSeenMillis) + "}";             
+  }
+  else if (sensorId == 99) {
+    message = "{\"solarVoltage\": " + String(curSensorDataDummyNM.solarVoltage,2) + 
+              ",\"batLevel\": " + String(curSensorDataDummyNM.batLevel) + 
+              ",\"batVoltage\": " + String(curSensorDataDummyNM.batVoltage,2) + 
+              ",\"lastReport\": " + String(millis() - curSensorDataDummyNM.lastReportMillis) +              
+              ",\"lastSeen\": " + String(millis() - curSensorDataDummyNM.lastSeenMillis) + "}";             
   }
   else {
     // invalid sensorId
@@ -657,7 +675,7 @@ void setup() {
 void receive(const MyMessage &message) {
   uint8_t nodeId = message.getSender();
   uint8_t sensorId;
-  if (nodeId == 3) { // we gaan tempie loggen
+  if (nodeId == 3) { // tempie
     curSensorDataTempie.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
       sensorId = message.getSensor();
@@ -673,7 +691,7 @@ void receive(const MyMessage &message) {
       else if (message.getType() == I_PRE_SLEEP_NOTIFICATION) {}; // we could do something here to keep the device awake next time it wakes up
     }
   } 
-  else if (nodeId == 4) { // shower sensor data
+  else if (nodeId == 4) { // shower sensor
     curSensorDataShower.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
       sensorId = message.getSensor();
@@ -688,7 +706,20 @@ void receive(const MyMessage &message) {
       else if (message.getType() == I_PRE_SLEEP_NOTIFICATION) {}; // we could do something here to keep the device awake next time it wakes up
     }
   }
-  else if (nodeId == 1) { // we gaan dummy loggen
+  else if (nodeId == 99) { // dummyNM
+    curSensorDataDummyNM.lastSeenMillis = millis();
+    if (message.getCommand()== C_SET) {
+      sensorId = message.getSensor();
+      if (sensorId == 201) curSensorDataDummyNM.batVoltage = message.getFloat();
+      else if (sensorId == 202) curSensorDataDummyNM.solarVoltage = message.getFloat();
+      curSensorDataDummyNM.lastReportMillis = millis();
+    }
+    else if (message.getCommand()== C_INTERNAL) {
+      if (message.getType() == I_BATTERY_LEVEL) curSensorDataDummyNM.batLevel = message.getByte();
+      else if (message.getType() == I_PRE_SLEEP_NOTIFICATION) {}; // we could do something here to keep the device awake next time it wakes up
+    }
+  }
+  else if (nodeId == 1) { // dummy
     curSensorDataDummy.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
       sensorId = message.getSensor();
@@ -758,6 +789,21 @@ void loop() {
   else if ((!isShowerOnline) && (currentMillis - curSensorDataShower.lastSeenMillis) < 10000){
     isShowerOnline = true;
     String logString = "shower,online," + String(actualTime);
+    File logFile = SPIFFS.open("/onoff.csv", "a");
+    logFile.println(logString);
+    logFile.close();
+  }
+
+  if (isDummyNMOnline && (currentMillis - curSensorDataDummyNM.lastSeenMillis) > 300000){
+    isDummyNMOnline = false;
+    String logString = "dummyNM,offline," + String(actualTime);
+    File logFile = SPIFFS.open("/onoff.csv", "a");
+    logFile.println(logString);
+    logFile.close();
+  }
+  else if ((!isDummyNMOnline) && (currentMillis - curSensorDataDummyNM.lastSeenMillis) < 10000){
+    isDummyNMOnline = true;
+    String logString = "dummyNM,online," + String(actualTime);
     File logFile = SPIFFS.open("/onoff.csv", "a");
     logFile.println(logString);
     logFile.close();
