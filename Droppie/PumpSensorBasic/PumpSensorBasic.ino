@@ -8,7 +8,6 @@ data[1] : charging
 data[2:11] : batVoltage, 0..1023 (10-bit ADC)
 data[12:23] : distanceCm, 0..4095 (12-bit)
 data[24:31] : XOR of bytes 0..2
-
 charging
 **********
 the remote sensor indicates whether it needs charging
@@ -16,7 +15,6 @@ The pump sensor is always on, and doesn't need charging.
 The pump sensor provides active level opentherm current (20mA) for charging the remote sensor
 When no communication is received from the remote sensor, the pump sensor turns on charging
 (in an attempt to revive a potentially dead battery)
-
 tank volume calculation
 *************************
 using defines for tank geometry for now :
@@ -27,13 +25,11 @@ The sensor is mounted above the max water level; this is the minimum distanceCm 
 #define SENSOR_OFFSET_CM        20 // height of the sensor above the max water level
 The actual water volume in the tank is then:
 tankLiters = TANK_VOLUME - (distanceCm - SENSOR_OFFSET_CM)*TANKVOLUME_PER_CM
-
 TODO: can we make these values configurable over mysensors, and stored in eeprom?
 so we don't need firmware update after install
 TODO : idem comms interval
 TODO : discard out-of-whack measurements, or average? 
 TODO : this should be done on the remote sensor
-
 TODO : possibility to push config from pump sensor -> remote sensor
 like sleep interval, or charging thresholds
 */

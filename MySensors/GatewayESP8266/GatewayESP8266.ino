@@ -1,37 +1,10 @@
+/* MySensors GatewayESP8266 example 
+ * with own additions for storing data locally and in cloud
+ * 01/2021 : node configuration is fixed for now
+ * 
+ */
+
 /*
- * The MySensors Arduino library handles the wireless radio link and protocol
- * between your home built sensors/actuators and HA controller of choice.
- * The sensors forms a self healing radio network with optional repeaters. Each
- * repeater and gateway builds a routing tables in EEPROM which keeps track of the
- * network topology allowing messages to be routed to nodes.
- *
- * Created by Henrik Ekblad <henrik.ekblad@mysensors.org>
- * Copyright (C) 2013-2019 Sensnology AB
- * Full contributor list: https://github.com/mysensors/MySensors/graphs/contributors
- *
- * Documentation: http://www.mysensors.org
- * Support Forum: http://forum.mysensors.org
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- *******************************
- *
- * REVISION HISTORY
- * Version 1.0 - Henrik Ekblad
- * Contribution by a-lurker and Anticimex,
- * Contribution by Norbert Truchsess <norbert.truchsess@t-online.de>
- * Contribution by Ivo Pullens (ESP8266 support)
- *
- * DESCRIPTION
- * The EthernetGateway sends data received from sensors to the WiFi link.
- * The gateway also accepts input on ethernet interface, which is then sent out to the radio network.
- *
- * VERA CONFIGURATION:
- * Enter "ip-number:port" in the ip-field of the Arduino GW device. This will temporarily override any serial configuration for the Vera plugin.
- * E.g. If you want to use the default values in this sketch enter: 192.168.178.66:5003
- *
  * LED purposes:
  * - To use the feature, uncomment any of the MY_DEFAULT_xx_LED_PINs in your sketch, only the LEDs that is defined is used.
  * - RX (green) - blink fast on radio message received. In inclusion mode will blink fast only on presentation received
@@ -80,9 +53,8 @@
 
 #define MY_GATEWAY_ESP8266
 
-// we willen dat niet in github, werkt hier omdat esp dit al heeft opgeslagen
-// anders hangt gateway init in een endless loop
-// todo : kunnen we onze eigen startWifi niet laten uitvoeren vóór de MySensors code??
+// don't want this to end up on github
+// do own WiFi init in before(), otherwise gateway init hangs in an endless loop
 #define MY_WIFI_SSID ""
 #define MY_WIFI_PASSWORD ""
 
@@ -91,7 +63,7 @@
 
 // Set the hostname for the WiFi Client. This is the hostname
 // it will pass to the DHCP server if not static.
-#define MY_HOSTNAME "ESP8266_GW"
+#define MY_HOSTNAME "" // sds, from flash config
 
 // Enable MY_IP_ADDRESS here if you want a static ip address (no DHCP)
 //#define MY_IP_ADDRESS 192,168,178,87
@@ -175,8 +147,29 @@ uint32_t rebootMillis;
 uint32_t lastLogMillis; // logging interval
 uint32_t blinkMillis; // temp: led on during temperature conversion (blocking) & blinking otherwise
 
-// node 3 = TEMPIE, we gaan die loggen
-struct SensorDataTempie_t {
+// node 1 - a dummy test sensor
+typedef struct {
+  uint16_t solarVoltage;
+  uint16_t packetsOK;
+  uint16_t packetsNOK;
+  uint8_t batLevel;
+  uint32_t lastReportMillis;
+  uint32_t lastSeenMillis;
+} SensorDataDummy_t;
+
+// node 2 - pump sensor, monitoring rain tank and pump activity
+typedef struct {
+  bool remoteOK;        // child 1
+  uint16_t tankLiters;  // child 2
+  bool tankEmpty;       // child 3
+  bool batCharging;     // child 4
+  uint8_t batLevel;     // internal
+  uint32_t lastReportMillis;
+  uint32_t lastSeenMillis;
+} SensorDataDroppie_t;
+
+// node 3 = TEMPIE, a weather data test sensor
+typedef struct {
   float si7021Temperature;
   float si7021Humidity;
   float bmp280Temperature;
@@ -185,42 +178,37 @@ struct SensorDataTempie_t {
   uint8_t batLevel;
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
-};
+} SensorDataTempie_t;
 
-struct SensorDataDummy_t {
-  uint16_t solarVoltage;
-  uint16_t packetsOK;
-  uint16_t packetsNOK;
+// node 4 - a shower monitoring sensor
+typedef struct  {
+  float dhtTemperature;
+  float dhtHumidity;
+  int32_t lightLevel; // NodeManager sensor sends 0..100 level as int32_t
+  float batVoltage;
   uint8_t batLevel;
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
-};
+} SensorDataShower_t;
 
-struct SensorDataDummyNM_t {
+// node 99 - a dummy test sensor with NodeManager framework
+typedef struct {
   float solarVoltage;
   float batVoltage;
   uint8_t batLevel;
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
-};
+} SensorDataDummyNM_t;
 
 
-struct SensorDataShower_t {
-  float dhtTemperature;
-  float dhtHumidity;
-  int32_t lightLevel; // zo stuurt NodeManager sensor een 0..100 level (wordt voor verzending gecast naar int32_t
-  float batVoltage;
-  uint8_t batLevel;
-  uint32_t lastReportMillis;
-  uint32_t lastSeenMillis;
-};
-
+SensorDataDummy_t curSensorDataDummy; // 1
+SensorDataDroppie_t curSensorDataDroppie; // 2
 SensorDataTempie_t curSensorDataTempie; // 3
 SensorDataShower_t curSensorDataShower; // 4
-SensorDataDummy_t curSensorDataDummy; // 1
 SensorDataDummyNM_t curSensorDataDummyNM; // 99
 
 bool isTempieOnline = false;
+bool isDroppieOnline = false;
 bool isShowerOnline = false;
 bool isDummyNMOnline = false;
 
@@ -272,11 +260,20 @@ void handleSensorRequest()
   
   if (sensorId == 1) {
     message = "{\"solarValue\": " + String(curSensorDataDummy.solarVoltage) +
-                ",\"batteryLevel\": " + String(curSensorDataDummy.batLevel) + 
-                ",\"packetsOK\": " + String(curSensorDataDummy.packetsOK) + 
-                ",\"packetsNOK\": " + String(curSensorDataDummy.packetsNOK) +              
-                ",\"lastReport\": " + String(millis() - curSensorDataDummy.lastReportMillis) +              
-                ",\"lastSeen\": " + String(millis() - curSensorDataDummy.lastSeenMillis) + "}";             
+              ",\"batteryLevel\": " + String(curSensorDataDummy.batLevel) + 
+              ",\"packetsOK\": " + String(curSensorDataDummy.packetsOK) + 
+              ",\"packetsNOK\": " + String(curSensorDataDummy.packetsNOK) +              
+              ",\"lastReport\": " + String(millis() - curSensorDataDummy.lastReportMillis) +              
+              ",\"lastSeen\": " + String(millis() - curSensorDataDummy.lastSeenMillis) + "}";             
+  }
+  else if (sensorId == 2) {
+    message = "{\"remoteOK\": " + String(curSensorDataDroppie.remoteOK) + 
+              ",\"tankLiters\": " + String(curSensorDataDroppie.tankLiters) +     
+              ",\"tankEmpty\": " + String(curSensorDataDroppie.tankEmpty) + 
+              ",\"batCharging\": " + String(curSensorDataDroppie.batCharging) + 
+              ",\"batLevel\": " + String(curSensorDataDroppie.batLevel) + 
+              ",\"lastReport\": " + String(millis() - curSensorDataDroppie.lastReportMillis) +              
+              ",\"lastSeen\": " + String(millis() - curSensorDataDroppie.lastSeenMillis) + "}";             
   }
   else if (sensorId == 3) {
     message = "{\"BMP280Pressure\": " + String(curSensorDataTempie.bmp280Pressure,2) + 
@@ -332,7 +329,6 @@ bool handleFileRead(String path){
     return false;
   }
   // authentication OK --> continue
-  
   Serial.println("handleFileRead: " + path);
   if(path.endsWith("/")) path += "index.html";
   String contentType = getContentType(path);
@@ -352,7 +348,6 @@ void handleFileUpload() {
   if(!server.authenticate((const char*) www_user.c_str(), (const char*) www_pass.c_str()))
     return server.requestAuthentication();  
   // authentication OK --> continue
-  
   if(server.uri() != "/edit") return;
   HTTPUpload& upload = server.upload();
   if(upload.status == UPLOAD_FILE_START){
@@ -376,7 +371,6 @@ void handleFileDelete() {
   if(!server.authenticate((const char*) www_user.c_str(), (const char*) www_pass.c_str()))
     return server.requestAuthentication();  
   // authentication OK --> continue
-  
   if(server.args() == 0) return server.send(500, "text/plain", "BAD ARGS");
   String path = server.arg(0);
   Serial.println("handleFileDelete: " + path);
@@ -393,7 +387,6 @@ void handleFileCreate(){
   if(!server.authenticate((const char*) www_user.c_str(), (const char*) www_pass.c_str()))
     return server.requestAuthentication();  
   // authentication OK --> continue
-  
   if(server.args() == 0)
     return server.send(500, "text/plain", "BAD ARGS");
   String path = server.arg(0);
@@ -416,7 +409,6 @@ void handleFileList() {
   if(!server.authenticate((const char*) www_user.c_str(), (const char*) www_pass.c_str()))
     return server.requestAuthentication();  
   // authentication OK --> continue
-
   if(!server.hasArg("dir")) {server.send(500, "text/plain", "BAD ARGS"); return;}
   
   String path = server.arg("dir");
@@ -444,7 +436,6 @@ void handleNotFound() {
   if(!server.authenticate((const char*) www_user.c_str(), (const char*) www_pass.c_str()))
     return server.requestAuthentication();  
   // authentication OK --> continue
-
   // check if the file exists in the flash memory (SPIFFS), if so, send it
   // if the requested file or page doesn't exist, return a 404 not found error
   if (!handleFileRead(server.uri())) {        
@@ -646,7 +637,9 @@ void startServer() {
   Serial.println("HTTP server started.");
 } // startServer
 
-void setup() {
+// is called before setup() by MySensors framework
+// we can do our own WiFi init here
+void before() {
     int initCode;
 
   // initialize digital pin LED_BUILTIN as an output.
@@ -668,13 +661,31 @@ void setup() {
   else {
     // TODO : fallback to a access point to allow manual config over wifi
   }
+} // before
 
+void setup() {
+  // all done in before()
 } // setup
 
 // will be called by the MySensors framework
 void receive(const MyMessage &message) {
   uint8_t nodeId = message.getSender();
   uint8_t sensorId;
+  if (nodeId == 2) { // droppie
+    curSensorDataDroppie.lastSeenMillis = millis();
+    if (message.getCommand()== C_SET) {
+      sensorId = message.getSensor();
+      if (sensorId == 1) curSensorDataDroppie.remoteOK = message.getBool();
+      else if (sensorId == 2) curSensorDataDroppie.tankLiters = message.getUInt();
+      else if (sensorId == 3) curSensorDataDroppie.tankEmpty = message.getBool();
+      else if (sensorId == 4) curSensorDataDroppie.batCharging = message.getBool();
+      curSensorDataDroppie.lastReportMillis = millis();
+    }
+    else if (message.getCommand()== C_INTERNAL) {
+      if (message.getType() == I_BATTERY_LEVEL) curSensorDataDroppie.batLevel = message.getByte();
+      else if (message.getType() == I_PRE_SLEEP_NOTIFICATION) {}; // we could do something here to keep the device awake next time it wakes up
+    }
+  } 
   if (nodeId == 3) { // tempie
     curSensorDataTempie.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
@@ -729,7 +740,6 @@ void receive(const MyMessage &message) {
         else if (message.getType() == V_VAR2) curSensorDataDummy.packetsNOK = message.getUInt();
       }
       curSensorDataDummy.lastReportMillis = millis();
-      curSensorDataDummy.lastSeenMillis = millis();
     }
     else if (message.getCommand()== C_INTERNAL) {
       if (message.getType() == I_BATTERY_LEVEL) curSensorDataDummy.batLevel = message.getByte();
@@ -826,6 +836,20 @@ void loop() {
     if (log_cloud) {
       cloudlog_log(logString);
     }
+
+    // droppie : local log only for now (TODO : need more flexible cloudlog implementation)
+    // TODO : decide if sensors need logging when offline
+    logString = String(actualTime) + "," + String(currentMillis - curSensorDataDroppie.lastSeenMillis) + 
+                "," + String(curSensorDataDroppie.remoteOK) + 
+                "," + String(curSensorDataDroppie.tankLiters) + "," + String(curSensorDataDroppie.tankEmpty) + 
+                "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging);
+    if (log_local) {
+      File logFile = SPIFFS.open("/droppie.csv", "a");
+      logFile.print(logString);
+      logFile.println();
+      logFile.close();
+    }
+
     // TEMP : log van de shower sensor enkel als het licht brandt
     if (isShowerOnline && curSensorDataShower.lightLevel > 15) {
       logString = String(actualTime) + "," + String(currentMillis - curSensorDataShower.lastSeenMillis) + "," + 

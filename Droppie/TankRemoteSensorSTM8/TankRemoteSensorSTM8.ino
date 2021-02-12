@@ -5,9 +5,9 @@
 32-bit dataframe :
 data[0] : TankEmpty
 data[1] : charging
-data[2:11] : batVoltage, 0..1023 (10-bit ADC)
+data[2:11] : batAnalogRead, 0..1023 (10-bit ADC)
 data[12:23] : distanceCm, 0..4095 (12-bit)
-data[24:31] : XOR of bytes 0..2
+data[24:31] : XOR of bytes 0..2 XOR 0xAA -> the last XOR avoids that 0xFFFFFFFF is seen as valid frame
 
 battery voltage measurement
 ****************************
@@ -34,7 +34,7 @@ we take 870 & 970 as thresholds
 #define PIN_INPUT_ECHO                PA2
 #define PIN_OUTPUT_TURNOFF_CHARGING   PC3
 #define PIN_INPUT_LEVEL_SENSOR        PD4
-#define PIN_INPUT_BATVOLTAGE          A0 // ==PC4
+#define PIN_INPUT_BATREFERENCE          A0 // ==PC4
 // and additionally for opentherm comms
 //#define T_RX_PIN  PD2
 //#define T_TX_PIN  PD3
@@ -45,22 +45,21 @@ uint32_t txMillis;
 bool waitResponse = false;
 // charging as default, in case we can't communicate, at least we can build up charge, and other side should do the same
 // is mcu = dead, the opentherm-TX output will be low, and bus voltage will be 15V and facilitate charging
-bool charging = true; 
-int batVoltage = 1023; // need this combination at startup to force charging at startup
+bool batCharging = true; 
+int batAnalogRead = 1023; // need this combination at startup to force charging at startup
 
 volatile uint8_t dummy;
 INTERRUPT_HANDLER(AWU_IRQHandler, ITC_IRQ_AWU) {
   dummy = AWU->CSR; // read to clear int flag
-  AWU->CSR = 0; // does this help the hickups??
 }
 
-static uint32_t buildDataFrame(bool tankEmpty, bool charging, int batVoltage, uint32_t distanceCm) {
+static uint32_t buildDataFrame(bool tankEmpty, bool batCharging, int batAnalogRead, uint32_t distanceCm) {
   uint32_t retVal;
   uint32_t xorVal;
-  charging &= 0x1; // to be sure
+  batCharging &= 0x1; // to be sure
   distanceCm = distanceCm & 0xFFF; // keep 12 bits, 0..4095 is more than enough, range is 500cm
-  retVal = (distanceCm << 12) | (batVoltage << 2) | (charging << 1) | (tankEmpty & 0x1); // batVoltage is 10bits, so we can shift left without losing data
-  xorVal = (retVal & 0xFF) ^ ((retVal >> 8) & 0xFF) ^ ((retVal >> 16) & 0xFF);
+  retVal = (distanceCm << 12) | (batAnalogRead << 2) | (batCharging << 1) | (tankEmpty & 0x1); // batAnalogRead is 10bits, so we can shift left without losing data
+  xorVal = (retVal & 0xFF) ^ ((retVal >> 8) & 0xFF) ^ ((retVal >> 16) & 0xFF) ^ 0xAA;
   retVal = retVal | ((xorVal & 0xFF) << 24);
   return retVal;
 
@@ -136,7 +135,7 @@ void loop() {
     // if we always keep charging on during sleep, the battery may never discharge, because of permanent low current from PumpSensor?
     // like permanent trickle charging
     // drawback : the chg_off circuit consumes 0.2mA (R7 too small:/)
-    if (charging) {
+    if (batCharging) {
       digitalWrite(PIN_OUTPUT_TURNOFF_CHARGING, false); // turn on charging
     }
     digitalWrite(LED_BUILTIN,HIGH);
@@ -144,31 +143,32 @@ void loop() {
     // awake again
     digitalWrite(LED_BUILTIN,LOW); // builtin led on while awake
     
-    // we measure the batVoltage based on the 15V bus voltage (zener reference)
+    // we measure the battery voltage based on the 15V bus voltage (zener reference)
     // therefore disable charging here, because charging pulls bus voltage down
     // set active bus voltage 15V, and hope it's stable after the delay
     digitalWrite(PIN_OUTPUT_TURNOFF_CHARGING, true); // turn off charging
     OT_setTxState(true);
     delay(20); // nodig? (1000ms maakte geen verschil)
 
-    batVoltage = analogRead(PIN_INPUT_BATVOLTAGE);
+    batAnalogRead = analogRead(PIN_INPUT_BATREFERENCE);
     distanceCm = (uint32_t) sonar_ping_cm();
     tankEmpty = digitalRead(PIN_INPUT_LEVEL_SENSOR); // sensor contact closed (reads LOW) = tank not empty, open (reads HIGH) = tank empty
     // charging with hysteresis (see intro)
     // < 870 : stop charging, > 970 start charging
-    if (charging && (batVoltage < 870)) charging = false;
-    else if (!charging && (batVoltage > 970)) charging = true;
+    // < 800 : impossible value (probably error on bus voltage, for instance PumpSensor not powered) -> ignore
+    if (batCharging && (batAnalogRead < 870) && (batAnalogRead > 800)) batCharging = false;
+    else if (!batCharging && (batAnalogRead > 970)) batCharging = true;
 
     Serial_print_s("tankEmpty = ");Serial_println_u(tankEmpty);
-    Serial_print_s("charging:");Serial_println_u(charging);
-    Serial_print_s("batVoltage = ");Serial_println_u(batVoltage);
+    Serial_print_s("batCharging:");Serial_println_u(batCharging);
+    Serial_print_s("batAnalogRead = ");Serial_println_u(batAnalogRead);
     Serial_print_s("distanceCm = ");Serial_println_u(distanceCm);
 
     // send these values over opentherm
     OT_setTxState(false);
     digitalWrite(PIN_OUTPUT_TURNOFF_CHARGING, true); // turn off charging, to enable modem function
     // delay not required here, tested
-    otData = buildDataFrame(tankEmpty,charging,batVoltage,distanceCm);
+    otData = buildDataFrame(tankEmpty,batCharging,batAnalogRead,distanceCm);
     Serial_print_s("sending now : ");Serial_println_ub(otData,HEX);
     txMillis = millis();
     OT_writeFrameInt(otData);
