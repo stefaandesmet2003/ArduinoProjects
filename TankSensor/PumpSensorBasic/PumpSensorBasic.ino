@@ -1,4 +1,6 @@
 // compile for AVR
+// basic version of PumpSensor to test the remote tank sensor
+// without NRF24 radio
 #include "Opentherm.h"
 
 /*
