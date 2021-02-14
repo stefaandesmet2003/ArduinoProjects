@@ -3,7 +3,7 @@
 
 /*
 implementation uses either a pin change interrupt or analog compare interrupt on rxPin
-Therefire rxPin is fixed for the moment : AIN1 = PD7 = PCINT23
+Therefore rxPin is fixed for the moment : AIN1 = PD7 = PCINT23
 timer2 is used for bitbang write timing and rx timeout handling
 */
 

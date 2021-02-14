@@ -56,9 +56,8 @@ uses MySensors, but without NodeManager framework
 */
 
 #define PIN_OUTPUT_LEVEL_SENSOR       6 // HIGH = contact closed (opto on) = tank not empty, LOW = contact open (opto off) = tank empty
-#define PIN_INPUT_PUMP_ON_TBD         5 // TBD, a current sensor for sensing pump activity
 #define PIN_INPUT_FLOW_SENSOR_TBD     4 // TBD, reading flow sensor pulses to count water consumption
-#define PIN_INPUT_PUMP_CURRENT_TBD    A0 // TBD, reading flow sensor pulses to count water consumption
+#define PIN_INPUT_PUMP_CURRENT        A0 // analog reading from current transformer
 // opentherm comms :
 //#define T_RX_PIN  7
 //#define T_TX_PIN  8
@@ -74,6 +73,16 @@ uses MySensors, but without NodeManager framework
 // this could be 3x the remote sensor measurement interval to account for transmission fails
 // or we could implement retries on the remote..
 #define COMMS_TIMEOUT_INTERVAL  15000 // 60s on final setup, smaller for testing; 
+
+// pump current sensing
+#define ANALOGREAD_ZERO_CURRENT       561 // calibration depends on voltage divider
+// pump current is 3.7A nominal, test measurement gave analog delta (vs ANALOGREAD_ZERO_CURRENT) = 90
+// that is 90/1023*1.1V = 96.8mV, =4.84A peak, = 3.42A rms
+#define PUMPCURRENT_THRESHOLD         50 // amplitude that defines pump on/off
+#define PUMPCURRENT_SAMPLE_INTERVAL   1000 // ms
+bool pumpOn = false;      // pump on/off detection
+uint32_t pumpStartMillis; // for counting pump on-time
+uint32_t pumpSampleCurrentMillis;
  
 // MySensors config
 // MY_NODE_ID needs to be defined before #include
@@ -82,6 +91,8 @@ uses MySensors, but without NodeManager framework
 #define RAINTANK_VOLUME_CHILD_ID  2
 #define LEVEL_SENSOR_CHILD_ID     3
 #define BAT_CHARGING_CHILD_ID     4
+#define PUMPSENSOR_CHILD_ID       5 // custom sensor with pump stats
+
 // and the internal I_BATTERY_LEVEL to indicate battery status of the remote sensor
 
 bool openthermNewData = false;
@@ -90,18 +101,21 @@ uint32_t openthermTxMillis;
 
 typedef struct {
   uint16_t tankLiters;
-  uint16_t distanceCm; // kept for internal ref, not transmitted over MySensors
+  uint16_t distanceCm;      // kept for internal ref, not transmitted over MySensors
   bool tankEmpty;
-  uint16_t batAnalogRead; // kept for internal ref, not transmitted over MySensors
+  uint16_t batAnalogRead;   // kept for internal ref, not transmitted over MySensors
   bool batCharging;
-  uint32_t packetsOK;
-  uint32_t packetsNOK;
+  uint32_t pumpStartsCount;   // number of pump starts, V_VAR1
+  uint32_t pumpOnTimeInSeconds; // total on-time, V_VAR2
+  uint32_t packetsCountOK;    // V_VAR3
+  uint32_t packetsCountNOK;   // V_VAR4
 } sensorData_t;
 
 sensorData_t curSensorData;
 MyMessage sensorMsg; // one structure reused for all messages
-uint32_t radioTxInterval = 30000; // in ms
+uint32_t radioTxInterval = 15000; // in ms
 uint32_t radioTxLastMillis;
+uint8_t radioTxStep; // sending the curSensorData over 2 Tx bursts (total refresh time = 2*radioTxInterval)
 
 // return : true : XOR OK, false : XOR NOK
 static bool parseDataFrame(uint32_t data, sensorData_t *sensorData) {
@@ -132,14 +146,42 @@ static printSensorData() {
   Serial.print("batAnalogRead:");Serial.println(curSensorData.batAnalogRead);
   Serial.print("batLevel:");Serial.println(convBatAnalogRead2BatLevel(curSensorData.batAnalogRead));
   Serial.print("batCharging:");Serial.println(curSensorData.batCharging);
-  Serial.print("packetsOK:");Serial.println(curSensorData.packetsOK);
-  Serial.print("packetsNOK:");Serial.println(curSensorData.packetsNOK);
+  Serial.print("packetsCountOK:");Serial.println(curSensorData.packetsCountOK);
+  Serial.print("packetsCountNOK:");Serial.println(curSensorData.packetsCountNOK);
 } // printSensorData
 
 static updatePacketCounters (bool txOK) {
-  if (txOK) curSensorData.packetsOK ++;
-  else curSensorData.packetsNOK++;
+  if (txOK) curSensorData.packetsCountOK ++;
+  else curSensorData.packetsCountNOK++;
 } // updatePacketCounters
+
+//sample during +- 10ms, or 1/2 50Hz-period
+// the highest value is an estimate for current amplitude
+// blocking implementation for now
+static int samplePumpCurrent() {
+  int samples[10];
+  int retval = 0;
+
+  // take 10 samples over roughly 10ms
+  for (int i=0;i<10;i++) {
+    samples[i] = analogRead(PIN_INPUT_PUMP_CURRENT);
+    delay(1);
+  }
+
+  // convert to current amplitude
+  for (int i=0;i<10;i++) {
+    if (samples[i] > ANALOGREAD_ZERO_CURRENT) 
+      samples[i] = samples[i] - ANALOGREAD_ZERO_CURRENT;
+    else samples[i] = ANALOGREAD_ZERO_CURRENT - samples[i];
+  }
+
+  // find the highest value (estimate for sine amplitude)
+  for (int i=0;i<10;i++) {
+    if (samples[i] > retval) 
+      retval = samples[i];
+  }
+  return retval;
+} // samplePumpCurrent
 
 void presentation() { // MySensors
 	// Send the sketch version information to the gateway and Controller
@@ -149,7 +191,7 @@ void presentation() { // MySensors
 	present(RAINTANK_VOLUME_CHILD_ID, S_WATER, "RainVolume");
 	present(LEVEL_SENSOR_CHILD_ID, S_BINARY, "TankEmpty");
 	present(BAT_CHARGING_CHILD_ID, S_BINARY, "BatCharging");
-
+	present(PUMPSENSOR_CHILD_ID, S_CUSTOM, "Pump");
 } // presentation
 
 void receive(const MyMessage &message) { // MySensors - not used for now
@@ -172,11 +214,17 @@ void before() {
 
 void setup() {
   //Serial.begin(115200); // already done by MySensors (hwInit)
+
+  // using 50A/1V current transformer, set zero at +- 0.6V and expecting much less than +-1V amplitude
+  // so we can use the 1.1V bandgap reference for more accuracy
+  analogReference(INTERNAL);
+
   Serial.println("Start PumpSensor");
 } // setup
 
 void loop() {
   uint32_t otData, otResponse;
+  int pumpCurrent;
 
   // 1. communication with RemoteSensor
   if (OT_available()) {
@@ -218,7 +266,26 @@ void loop() {
     openthermTimeout = true;
   }
 
-  // 2. MySensors communication
+  // 2. pump current sampling
+  if (( millis() - pumpSampleCurrentMillis) >= PUMPCURRENT_SAMPLE_INTERVAL)
+  {
+    pumpSampleCurrentMillis = millis();
+    pumpCurrent = samplePumpCurrent();
+    if ((pumpCurrent > PUMPCURRENT_THRESHOLD) && (!pumpOn)) {
+      pumpStartMillis = pumpSampleCurrentMillis;
+      pumpOn = true;
+      curSensorData.pumpStartsCount += 1;
+      Serial.println("pump on!");
+    }
+    if ((pumpCurrent < PUMPCURRENT_THRESHOLD) && (pumpOn)) {
+      pumpOn = false;
+      curSensorData.pumpOnTimeInSeconds = curSensorData.pumpOnTimeInSeconds + (pumpSampleCurrentMillis - pumpStartMillis) / 1000;
+      Serial.println("pump off!");
+      Serial.print("pumpOnTimeInSeconds = ");Serial.println(curSensorData.pumpOnTimeInSeconds);
+    }
+  }
+
+  // 3. MySensors communication
   // sending data to the gateway/controller
   if (( millis() - radioTxLastMillis) >= radioTxInterval )
   {
@@ -226,27 +293,53 @@ void loop() {
 
     // TODO? split tx over time?
     Serial.print("sending data to gateway...");
-    sensorMsg.setSensor(REMOTE_SENSOR_OK_CHILD_ID);
-    sensorMsg.setType(V_STATUS);
-    sensorMsg.set(!openthermTimeout);
-    updatePacketCounters(send(sensorMsg));
 
-    sensorMsg.setSensor(RAINTANK_VOLUME_CHILD_ID);
-    sensorMsg.setType(V_VOLUME);
-    sensorMsg.set(curSensorData.tankLiters);
-    updatePacketCounters(send(sensorMsg));
+    if (radioTxStep == 0) { // remote sensor data
+      sensorMsg.setSensor(REMOTE_SENSOR_OK_CHILD_ID);
+      sensorMsg.setType(V_STATUS);
+      sensorMsg.set(!openthermTimeout);
+      updatePacketCounters(send(sensorMsg));
 
-    sensorMsg.setSensor(LEVEL_SENSOR_CHILD_ID);
-    sensorMsg.setType(V_STATUS);
-    sensorMsg.set(curSensorData.tankEmpty);
-    updatePacketCounters(send(sensorMsg));
+      sensorMsg.setSensor(RAINTANK_VOLUME_CHILD_ID);
+      sensorMsg.setType(V_VOLUME);
+      sensorMsg.set(curSensorData.tankLiters);
+      updatePacketCounters(send(sensorMsg));
 
-    sensorMsg.setSensor(BAT_CHARGING_CHILD_ID);
-    sensorMsg.setType(V_STATUS);
-    sensorMsg.set(curSensorData.batCharging);
-    updatePacketCounters(send(sensorMsg));
+      sensorMsg.setSensor(LEVEL_SENSOR_CHILD_ID);
+      sensorMsg.setType(V_STATUS);
+      sensorMsg.set(curSensorData.tankEmpty);
+      updatePacketCounters(send(sensorMsg));
 
-    updatePacketCounters(sendBatteryLevel(convBatAnalogRead2BatLevel(curSensorData.batAnalogRead)));
+      sensorMsg.setSensor(BAT_CHARGING_CHILD_ID);
+      sensorMsg.setType(V_STATUS);
+      sensorMsg.set(curSensorData.batCharging);
+      updatePacketCounters(send(sensorMsg));
+
+      updatePacketCounters(sendBatteryLevel(convBatAnalogRead2BatLevel(curSensorData.batAnalogRead)));
+    }
+    else if (radioTxStep == 1) { // local sensor data
+      // todo : send pump info
+      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+      sensorMsg.setType(V_VAR1);
+      sensorMsg.set(curSensorData.pumpStartsCount);
+      updatePacketCounters(send(sensorMsg));
+
+      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+      sensorMsg.setType(V_VAR2);
+      sensorMsg.set(curSensorData.pumpOnTimeInSeconds);
+      updatePacketCounters(send(sensorMsg));
+
+      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+      sensorMsg.setType(V_VAR3);
+      sensorMsg.set(curSensorData.packetsCountOK);
+      updatePacketCounters(send(sensorMsg));
+
+      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+      sensorMsg.setType(V_VAR4);
+      sensorMsg.set(curSensorData.packetsCountNOK);
+      updatePacketCounters(send(sensorMsg));
+    }
+    radioTxStep = (radioTxStep + 1) % 2;
     Serial.println("done!");
   }
 } // loop

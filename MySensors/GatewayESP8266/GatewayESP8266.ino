@@ -164,6 +164,10 @@ typedef struct {
   bool tankEmpty;       // child 3
   bool batCharging;     // child 4
   uint8_t batLevel;     // internal
+  uint32_t pumpStartsCount;   // child 5, V_VAR1
+  uint32_t pumpOnTimeInSeconds; // child 5, V_VAR2
+  uint32_t packetsCountOK;    // child 5, V_VAR3
+  uint32_t packetsCountNOK;   // child 5, V_VAR4
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
 } SensorDataDroppie_t;
@@ -272,6 +276,10 @@ void handleSensorRequest()
               ",\"tankEmpty\": " + String(curSensorDataDroppie.tankEmpty) + 
               ",\"batCharging\": " + String(curSensorDataDroppie.batCharging) + 
               ",\"batLevel\": " + String(curSensorDataDroppie.batLevel) + 
+              ",\"pumpStartsCount\": " + String(curSensorDataDroppie.pumpStartsCount) + 
+              ",\"pumpOnTimeInSeconds\": " + String(curSensorDataDroppie.pumpOnTimeInSeconds) + 
+              ",\"packetsCountOK\": " + String(curSensorDataDroppie.packetsCountOK) + 
+              ",\"packetsCountNOK\": " + String(curSensorDataDroppie.packetsCountNOK) + 
               ",\"lastReport\": " + String(millis() - curSensorDataDroppie.lastReportMillis) +              
               ",\"lastSeen\": " + String(millis() - curSensorDataDroppie.lastSeenMillis) + "}";             
   }
@@ -679,6 +687,12 @@ void receive(const MyMessage &message) {
       else if (sensorId == 2) curSensorDataDroppie.tankLiters = message.getUInt();
       else if (sensorId == 3) curSensorDataDroppie.tankEmpty = message.getBool();
       else if (sensorId == 4) curSensorDataDroppie.batCharging = message.getBool();
+      else if (sensorId == 5) {
+        if (message.getType() == V_VAR1) curSensorDataDroppie.pumpStartsCount = message.getULong();
+        else if (message.getType() == V_VAR2) curSensorDataDroppie.pumpOnTimeInSeconds = message.getULong();
+        else if (message.getType() == V_VAR3) curSensorDataDroppie.packetsCountOK = message.getULong();
+        else if (message.getType() == V_VAR4) curSensorDataDroppie.packetsCountNOK = message.getULong();
+      }
       curSensorDataDroppie.lastReportMillis = millis();
     }
     else if (message.getCommand()== C_INTERNAL) {
@@ -842,7 +856,8 @@ void loop() {
     logString = String(actualTime) + "," + String(currentMillis - curSensorDataDroppie.lastSeenMillis) + 
                 "," + String(curSensorDataDroppie.remoteOK) + 
                 "," + String(curSensorDataDroppie.tankLiters) + "," + String(curSensorDataDroppie.tankEmpty) + 
-                "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging);
+                "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging) + 
+                "," + String(curSensorDataDroppie.pumpStartsCount) + "," + String(curSensorDataDroppie.pumpOnTimeInSeconds) ;
     if (log_local) {
       File logFile = SPIFFS.open("/droppie.csv", "a");
       logFile.print(logString);
