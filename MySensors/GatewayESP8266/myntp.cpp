@@ -30,6 +30,7 @@ extern ESP8266WebServer server;
 static unsigned long ntpbuf2long(byte *buffer);
 static void sendNTPpacket(IPAddress& address);
 
+// local time
 uint32_t ntp_GetDateTime()
 {
   if (!lastNtpUnixTime)

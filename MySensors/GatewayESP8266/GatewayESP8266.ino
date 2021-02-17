@@ -212,9 +212,11 @@ SensorDataShower_t curSensorDataShower; // 4
 SensorDataDummyNM_t curSensorDataDummyNM; // 99
 
 bool isTempieOnline = false;
-bool isDroppieOnline = false;
 bool isShowerOnline = false;
 bool isDummyNMOnline = false;
+
+bool logDroppie = false; // temp, log enkel na een pump start
+MyMessage gwResponseMsg; // this gateway handles certain requests on behalf of a controller
 
 /**************************************************************/
 /*   HELPER FUNCTIONS                                         */
@@ -678,17 +680,32 @@ void setup() {
 // will be called by the MySensors framework
 void receive(const MyMessage &message) {
   uint8_t nodeId = message.getSender();
-  uint8_t sensorId;
+  uint8_t sensorId = message.getSensor();
+
+  // gateway will handle some requests on behalf of a controller, because I don't want to use a controller
+  // nodeId=GATEWAY_ADDRESS are messages from controller, don't interfere with these
+  if ((nodeId != GATEWAY_ADDRESS) && (message.getCommand() == C_INTERNAL)) {
+    if  (message.getType() == I_TIME) { // reply gateway local time back to the node
+      uint32_t gwLocalTime = ntp_GetDateTime();
+      _sendRoute(build(gwResponseMsg,nodeId,NODE_SENSOR_ID,C_INTERNAL,I_TIME,false).set(gwLocalTime));
+      return;
+    }
+    // other internal messages handled per node below
+  }
+
   if (nodeId == 2) { // droppie
     curSensorDataDroppie.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
-      sensorId = message.getSensor();
       if (sensorId == 1) curSensorDataDroppie.remoteOK = message.getBool();
       else if (sensorId == 2) curSensorDataDroppie.tankLiters = message.getUInt();
       else if (sensorId == 3) curSensorDataDroppie.tankEmpty = message.getBool();
       else if (sensorId == 4) curSensorDataDroppie.batCharging = message.getBool();
       else if (sensorId == 5) {
-        if (message.getType() == V_VAR1) curSensorDataDroppie.pumpStartsCount = message.getULong();
+        if (message.getType() == V_VAR1) {
+          uint32_t newPumpStartsCount = message.getULong();
+          if (newPumpStartsCount > curSensorDataDroppie.pumpStartsCount) logDroppie = true; // log an update on the next interval
+          curSensorDataDroppie.pumpStartsCount = newPumpStartsCount;
+        }
         else if (message.getType() == V_VAR2) curSensorDataDroppie.pumpOnTimeInSeconds = message.getULong();
         else if (message.getType() == V_VAR3) curSensorDataDroppie.packetsCountOK = message.getULong();
         else if (message.getType() == V_VAR4) curSensorDataDroppie.packetsCountNOK = message.getULong();
@@ -703,7 +720,6 @@ void receive(const MyMessage &message) {
   if (nodeId == 3) { // tempie
     curSensorDataTempie.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
-      sensorId = message.getSensor();
       if (sensorId == 1) curSensorDataTempie.bmp280Temperature = message.getFloat();
       else if (sensorId == 2) curSensorDataTempie.bmp280Pressure = message.getFloat();
       else if (sensorId == 4) curSensorDataTempie.si7021Temperature = message.getFloat();
@@ -719,7 +735,6 @@ void receive(const MyMessage &message) {
   else if (nodeId == 4) { // shower sensor
     curSensorDataShower.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
-      sensorId = message.getSensor();
       if (sensorId == 1) curSensorDataShower.dhtTemperature = message.getFloat();
       else if (sensorId == 2) curSensorDataShower.dhtHumidity = message.getFloat();
       else if (sensorId == 4) curSensorDataShower.lightLevel = message.getLong();
@@ -734,7 +749,6 @@ void receive(const MyMessage &message) {
   else if (nodeId == 99) { // dummyNM
     curSensorDataDummyNM.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
-      sensorId = message.getSensor();
       if (sensorId == 201) curSensorDataDummyNM.batVoltage = message.getFloat();
       else if (sensorId == 202) curSensorDataDummyNM.solarVoltage = message.getFloat();
       curSensorDataDummyNM.lastReportMillis = millis();
@@ -747,13 +761,17 @@ void receive(const MyMessage &message) {
   else if (nodeId == 1) { // dummy
     curSensorDataDummy.lastSeenMillis = millis();
     if (message.getCommand()== C_SET) {
-      sensorId = message.getSensor();
       if (sensorId == 1) {
         if (message.getType() == V_VOLTAGE) curSensorDataDummy.solarVoltage = message.getUInt();
         else if (message.getType() == V_VAR1) curSensorDataDummy.packetsOK = message.getUInt();
         else if (message.getType() == V_VAR2) curSensorDataDummy.packetsNOK = message.getUInt();
       }
       curSensorDataDummy.lastReportMillis = millis();
+    }
+    // test : gateway responds to a request on behalf of a controller
+    else if ((message.getCommand()== C_REQ) && (sensorId == 1)) {
+      if (message.getType() == V_VAR1) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR1,false).set(curSensorDataDummy.packetsOK));
+      else if (message.getType() == V_VAR2) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR2,false).set(curSensorDataDummy.packetsNOK));
     }
     else if (message.getCommand()== C_INTERNAL) {
       if (message.getType() == I_BATTERY_LEVEL) curSensorDataDummy.batLevel = message.getByte();
@@ -851,14 +869,16 @@ void loop() {
       cloudlog_log(logString);
     }
 
-    // droppie : local log only for now (TODO : need more flexible cloudlog implementation)
+    // TODO : droppie : local log only for now (TODO : need more flexible cloudlog implementation)
+    // TODO : droppie : only log after a pump start update until rain tank sensor is operational
     // TODO : decide if sensors need logging when offline
-    logString = String(actualTime) + "," + String(currentMillis - curSensorDataDroppie.lastSeenMillis) + 
-                "," + String(curSensorDataDroppie.remoteOK) + 
-                "," + String(curSensorDataDroppie.tankLiters) + "," + String(curSensorDataDroppie.tankEmpty) + 
-                "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging) + 
-                "," + String(curSensorDataDroppie.pumpStartsCount) + "," + String(curSensorDataDroppie.pumpOnTimeInSeconds) ;
-    if (log_local) {
+    if (logDroppie && log_local) {
+      logDroppie = false; // reset the flag
+      logString = String(actualTime) + "," + String(currentMillis - curSensorDataDroppie.lastSeenMillis) + 
+                  "," + String(curSensorDataDroppie.remoteOK) + 
+                  "," + String(curSensorDataDroppie.tankLiters) + "," + String(curSensorDataDroppie.tankEmpty) + 
+                  "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging) + 
+                  "," + String(curSensorDataDroppie.pumpStartsCount) + "," + String(curSensorDataDroppie.pumpOnTimeInSeconds) ;
       File logFile = SPIFFS.open("/droppie.csv", "a");
       logFile.print(logString);
       logFile.println();

@@ -150,8 +150,8 @@ static printSensorData() {
   Serial.print("packetsCountNOK:");Serial.println(curSensorData.packetsCountNOK);
 } // printSensorData
 
-static updatePacketCounters (bool txOK) {
-  if (txOK) curSensorData.packetsCountOK ++;
+static void updatePacketCounters (bool txOK) {
+  if (txOK) curSensorData.packetsCountOK++;
   else curSensorData.packetsCountNOK++;
 } // updatePacketCounters
 

@@ -1,5 +1,7 @@
 /*
  * uses MySensors, but without NodeManager framework
+ * 
+ * dummy is presented as a S_MULTIMETER device to show the solar voltage
 
  * A0 : solar cell voltage over a resistor divider
  * vcc = lipo battery on a 5V nano/pro mini, read via readVcc function (internal reference)
@@ -12,72 +14,84 @@
 #define MY_NODE_ID 1
 #include <MySensors.h>
 
-#define CHILD_ID 1                              // Id of the sensor child
+#define CHILD_ID  1   // Id of the sensor child
+#define solarPin  A0
 
-// wat wil je sturen naar controller?
-// let's present this dummy as a S_MULTIMETER to show the solar voltage
-// solarValue, vccValue, packetsOK, packetsNOK
+// msgs to send to the gateway/controller
+// can be a single MyMessage instance that's reconfigured before every tx, in order to save memory
+// solarValue, vccValue, packetsCountOK, packetsCountNOK
 MyMessage solarValueMsg(CHILD_ID,V_VOLTAGE);
-MyMessage packetsOKMsg(CHILD_ID,V_VAR1);
-MyMessage packetsNOKMsg(CHILD_ID,V_VAR2);
+MyMessage packetsCountOKMsg(CHILD_ID,V_VAR1);
+MyMessage packetsCountNOKMsg(CHILD_ID,V_VAR2);
 // todo : battery via internal message type?
 
 // aanpasbare parameters ? bv. TxInterval, sleepMode, NodeName : TODO
-
 uint32_t radioTxInterval = 3000; // 3s default
 uint32_t radioTxLastMillis;
-bool stayAwake = false; // sleeping on/off
-uint32_t lastSleepMillis;
+bool stayAwake = false; // sleeping on/off between tx intervals
 
-bool initPacketsOK, initPacketsNOK = false;
+bool initPacketsOK = false;
+bool initPacketsNOK = false;
+bool initLocalTime = false;
 
-int solarPin = A0;
-
-struct sensorData_t {
+typedef struct {
   uint16_t solarValue;
   uint16_t vccValue;
-  uint16_t packetsOK;
-  uint16_t packetsNOK;
-};
+  uint16_t packetsCountOK;
+  uint16_t packetsCountNOK;
+} sensorData_t;
 sensorData_t curSensorData;
+
+static void updatePacketCounters (bool txOK) {
+  if (txOK) curSensorData.packetsCountOK++;
+  else curSensorData.packetsCountNOK++;
+} // updatePacketCounters
 
 void setup(void)
 {
   bool txOK;
   // Fetch last known packet counter values from gw
-	txOK = request(CHILD_ID, V_VAR1); // packetsOK
-  if (txOK) Serial.println(F("setup:request V_VAR1 ok"));
-	txOK = request(CHILD_ID, V_VAR2); // packetsNOK
-  if (txOK) Serial.println(F("setup:request V_VAR2 ok"));
+  // -> moved to loop
+  radioTxLastMillis = millis();
 } // setup
 
 void presentation()
 {
 	// Send the sketch version information to the gateway and Controller
-	sendSketchInfo("Dummy Sensor", "0.2");
+	updatePacketCounters(sendSketchInfo("Dummy Sensor", "0.2"));
 
 	// Register this device as a multimeter device
-	present(CHILD_ID, S_MULTIMETER, "DUMMY");
+	updatePacketCounters(present(CHILD_ID, S_MULTIMETER, "DUMMY"));
 } // presentation
+
+void receiveTime(uint32_t localTime) {
+  Serial.print("local time = ");
+  Serial.println(localTime);
+  initLocalTime = true;
+}
 
 void receive(const MyMessage &message)
 {
   uint8_t msgType = message.getType();
   Serial.print(F("receiving msgType:"));Serial.println(msgType);
 
-	if (msgType==V_VAR1) { // packetsOK
-		uint16_t packetsOK=message.getUInt();
-		Serial.print("Received last packetsOK from gw:");
-		Serial.println(packetsOK);
-    curSensorData.packetsOK += packetsOK;
-    initPacketsOK = true;
+	if (msgType==V_VAR1) { // packetsCountOK
+		uint16_t packetsCountOK = message.getUInt();
+		Serial.print("Received last packetsCountOK from gw/ctrl:");
+		Serial.println(packetsCountOK);
+    if (!initPacketsOK){
+      curSensorData.packetsCountOK += packetsCountOK;
+      initPacketsOK = true;
+    } 
 	}
-	else if (msgType==V_VAR2) { // packetsNOK
-		uint16_t packetsNOK=message.getUInt();
-		Serial.print("Received last packetsNOK from gw:");
-		Serial.println(packetsNOK);
-    curSensorData.packetsNOK += packetsNOK;
-    initPacketsNOK = true;
+	else if (msgType==V_VAR2) { // packetsCountNOK
+		uint16_t packetsCountNOK = message.getUInt();
+		Serial.print("Received last packetsCountNOK from gw/ctrl:");
+		Serial.println(packetsCountNOK);
+    if (!initPacketsNOK) {
+      curSensorData.packetsCountNOK += packetsCountNOK;
+      initPacketsNOK = true;
+    }
 	}
   else {
     Serial.print("received unknown type : "); Serial.println(msgType);
@@ -88,7 +102,8 @@ void loop() {
   bool txOK;
 
   // sending data to the gateway/controller
-  if ((radioTxInterval != 0xFFFFFFFF) && ( millis() - radioTxLastMillis >= radioTxInterval ))
+  if (((stayAwake) && (radioTxInterval != 0xFFFFFFFF) && (millis()-radioTxLastMillis >=radioTxInterval)) 
+   || (!stayAwake)) // if sleeping between transmits
   {
     radioTxLastMillis = millis();
     // dummy sensor data
@@ -99,53 +114,44 @@ void loop() {
     Serial.print("vccValue:");Serial.println(curSensorData.vccValue);
     uint8_t batteryLevel = (uint8_t) ((100.0*(curSensorData.vccValue - 2700)) / (4200-2700)); // dropout = 2700, max = 4200
     Serial.print("batteryLevel:");Serial.println(batteryLevel);
+    Serial.print("packetsCountOK : "); Serial.print(curSensorData.packetsCountOK);
+    Serial.print(", packetsCountNOK : "); Serial.println(curSensorData.packetsCountNOK);
 
-    Serial.println("sending data :");
-    txOK = send (solarValueMsg.set(curSensorData.solarValue));
-    if (txOK) curSensorData.packetsOK ++;
-    else curSensorData.packetsNOK++;
-
-    Serial.print("packetsOK : "); Serial.print(curSensorData.packetsOK);
-    Serial.print(", packetsNOK : "); Serial.println(curSensorData.packetsNOK);
+    Serial.println("sending data!");
+    updatePacketCounters(send(solarValueMsg.set(curSensorData.solarValue)));
     if (initPacketsOK) {
-      txOK = send (packetsOKMsg.set(curSensorData.packetsOK));
-      if (txOK) curSensorData.packetsOK ++;
-      else curSensorData.packetsNOK++;
+      updatePacketCounters(send(packetsCountOKMsg.set(curSensorData.packetsCountOK)));
     }
     else {
-      // request again
-      Serial.println(F("retry request V_VAR1"));
-      txOK = request(CHILD_ID, V_VAR1); // packetsOK
-      if (!txOK) Serial.println(F("request V_VAR1 retry failed"));
+      // request initial value from gw/ctrl
+      Serial.println(F("request V_VAR1 initial value"));
+      txOK = request(CHILD_ID, V_VAR1); // packetsCountOK
+      if (!txOK) Serial.println(F("request V_VAR1 failed"));
+      updatePacketCounters(txOK);
     }
     if (initPacketsNOK){
-      txOK = send (packetsNOKMsg.set(curSensorData.packetsNOK));
-      if (txOK) curSensorData.packetsOK ++;
-      else curSensorData.packetsNOK++;
+      updatePacketCounters(send(packetsCountNOKMsg.set(curSensorData.packetsCountNOK)));
     }
     else {
-      // request again
-      Serial.println(F("retry request V_VAR2"));
-      txOK = request(CHILD_ID, V_VAR2); // packetsNOK      
-      if (!txOK) Serial.println(F("request V_VAR2 retry failed"));
+      // request initial value from gw/ctrl
+      Serial.println(F("request V_VAR2 initial value"));
+      txOK = request(CHILD_ID, V_VAR2); // packetsCountNOK      
+      if (!txOK) Serial.println(F("request V_VAR2 failed"));
+      updatePacketCounters(txOK);
     }
-    txOK  = sendBatteryLevel(batteryLevel);
-    if (txOK) curSensorData.packetsOK ++;
-    else curSensorData.packetsNOK++;
+    updatePacketCounters(sendBatteryLevel(batteryLevel));
 
+    if (!initLocalTime) { // request local time
+      Serial.println(F("request local time"));
+      updatePacketCounters(requestTime()); 
+    }
     // TODO : we kunnen nog andere dinges sturen  (MySensorsCore.h): sendSignalStrength, sendTXPowerLevel
-
-    // stay awake for another 1000 ms after sending data
-    lastSleepMillis = millis();
-
   }
 
-  // stay awake for another 1000 ms after sending data
-  if ((millis() - lastSleepMillis) > 1000) {
-    if (!stayAwake) {
-      lastSleepMillis = millis();
-      sleep(3000,true); // smart sleep for 3 seconds, dan is er eerst een 500ms wait zodat de controller nog wat kan sturen
-    }
+  if (!stayAwake) {
+    Serial.flush();
+    sleep(radioTxInterval,true); // smart sleep for 3 seconds, dan is er eerst een 500ms wait zodat de controller nog wat kan sturen
+    Serial.println("woke up!");
   }
 } // loop
 
