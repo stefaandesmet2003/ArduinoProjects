@@ -168,7 +168,10 @@ void loop() {
       delay(100);
     }
     pinMode(LED_BUILTIN,INPUT);
+    RF24_sleep(); // == transportDisable
     halt();
+    //wakeup
     pinMode(LED_BUILTIN,OUTPUT);
+    RF24_standBy(); // == transportReInitialise
   }
 } // loop
