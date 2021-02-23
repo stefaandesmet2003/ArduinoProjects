@@ -195,6 +195,15 @@ typedef struct  {
   uint32_t lastSeenMillis;
 } SensorDataShower_t;
 
+// node 5 - home ventilation sensor
+typedef struct  {
+  bool fanOn;
+  char fanSpeed[7]; // V_HVAC_SPEED : "Min", "Normal","Max", "Auto" (and "Normal" not supported for us)
+  bool alarmActive;
+  uint32_t lastReportMillis;
+  uint32_t lastSeenMillis;
+} SensorDataFan_t;
+
 // node 99 - a dummy test sensor with NodeManager framework
 typedef struct {
   float solarVoltage;
@@ -204,11 +213,11 @@ typedef struct {
   uint32_t lastSeenMillis;
 } SensorDataDummyNM_t;
 
-
 SensorDataDummy_t curSensorDataDummy; // 1
 SensorDataDroppie_t curSensorDataDroppie; // 2
 SensorDataTempie_t curSensorDataTempie; // 3
 SensorDataShower_t curSensorDataShower; // 4
+SensorDataFan_t curSensorDataFan; // 5
 SensorDataDummyNM_t curSensorDataDummyNM; // 99
 
 bool isTempieOnline = false;
@@ -303,6 +312,13 @@ void handleSensorRequest()
               ",\"batVoltage\": " + String(curSensorDataShower.batVoltage,2) + 
               ",\"lastReport\": " + String(millis() - curSensorDataShower.lastReportMillis) +              
               ",\"lastSeen\": " + String(millis() - curSensorDataShower.lastSeenMillis) + "}";             
+  }
+  else if (sensorId == 5) {
+    message = "{\"fanOn\": " + String(curSensorDataFan.fanOn) + 
+              ",\"fanSpeed\": \"" + curSensorDataFan.fanSpeed + /* fanSpeed = string -> in quotes! */
+              "\",\"alarmActive\": " + String(curSensorDataFan.alarmActive) + 
+              ",\"lastReport\": " + String(millis() - curSensorDataFan.lastReportMillis) +              
+              ",\"lastSeen\": " + String(millis() - curSensorDataFan.lastSeenMillis) + "}";             
   }
   else if (sensorId == 99) {
     message = "{\"solarVoltage\": " + String(curSensorDataDummyNM.solarVoltage,2) + 
@@ -744,6 +760,22 @@ void receive(const MyMessage &message) {
     else if (message.getCommand()== C_INTERNAL) {
       if (message.getType() == I_BATTERY_LEVEL) curSensorDataShower.batLevel = message.getByte();
       else if (message.getType() == I_PRE_SLEEP_NOTIFICATION) {}; // we could do something here to keep the device awake next time it wakes up
+    }
+  }
+  else if (nodeId == 5) { // fan sensor
+    curSensorDataFan.lastSeenMillis = millis();
+    if (message.getCommand()== C_SET) {
+      if ((sensorId == 1) && (message.getType() == V_STATUS)) {
+        curSensorDataFan.fanOn = message.getBool();
+      }
+      else if ((sensorId == 1) && (message.getType() == V_HVAC_SPEED)) {
+        strncpy(curSensorDataFan.fanSpeed, message.getString(),7);
+        // message.getString(curSensorDataFan.fanSpeed) -> probably works too, but copies all string bytes without respecting the fanSpeed[] length
+      }
+      else if ((sensorId == 2) && (message.getType() == V_STATUS)) {
+        curSensorDataFan.alarmActive = message.getBool();
+      }
+      curSensorDataFan.lastReportMillis = millis();
     }
   }
   else if (nodeId == 99) { // dummyNM
