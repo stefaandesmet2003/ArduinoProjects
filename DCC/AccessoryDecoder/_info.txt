@@ -1,0 +1,110 @@
+getest :
+ arduino uno bevat de commandstation_vLenz software (met de pc-interface van lenz li101). Deze soft communiceert
+via de seriële poort (naar usb-pc) met JMRI
+de geteste functies zijn uitgevoerd via JMRI
+CV's lezen/schrijven via service mode programming. Kies Simple Programmer, en kies 'lenz' interface ipv default 'internal'
+(open expressnet traffic venster om te verifiëren dat effectief commando's naar het command station worden gestuurd)
+
+- CV's schrijven via service mode programming.  bv CV1 (adres). 
+- schrijven naar CV8 triggert een factory reset van de accessory decoder.
+- CVs lezen werkt
+- turnouts bedienen werkt
+in JMRI begint turnout bij '1' = base address 0, sub address 0, output 0 (closed), output 1 (thrown)
+turnout 2 = base address 0, sub address 1, output 0 en 1
+(turnout 0 wordt behandeld als turnout4)
+JMRI stuurt 4 commando's voor de wissel : output On en kort daarna 3x output Off (zie dump hieronder)
+
+opgelet : in de command station wordt de feedback op pc-interface niet juist opgebouwd omdat
+in parser.cpp #if (XPRESSNET_ENABLED == 1) : SDS moet nog aanvullen wat uitgecomment is want
+de variabele pcm_build wordt slechts gedeeltelijk gevuld (0x42) alvorens pc_send_lenz (lijn 1000 in parser.cpp)
+TODO!!!
+JMRI XpressNet Traffic dump : 
+[packet: 52 00 89 DB]  Accessory Decoder Operations Request: Turnout Address 1(Base Address 0,Sub Address 0) Turn Output 1 On.
+[01 04 05]  Command Successfully Sent/Normal Operations Resumed after timeout
+[42 14 01 57]  Feedback Response:Turnout with out Feedback  Turnout: 81 State: Thrown Left; Turnout: 82 State: Not Operated
+[packet: 52 00 81 D3]  Accessory Decoder Operations Request: Turnout Address 1(Base Address 0,Sub Address 0) Turn Output 1 Off.
+[01 04 05]  Command Successfully Sent/Normal Operations Resumed after timeout
+[packet: 52 00 81 D3]  Accessory Decoder Operations Request: Turnout Address 1(Base Address 0,Sub Address 0) Turn Output 1 Off.
+[42 14 01 57]  Feedback Response:Turnout with out Feedback  Turnout: 81 State: Thrown Left; Turnout: 82 State: Not Operated
+[01 04 05]  Command Successfully Sent/Normal Operations Resumed after timeout
+[42 14 01 57]  Feedback Response:Turnout with out Feedback  Turnout: 81 State: Thrown Left; Turnout: 82 State: Not Operated
+[packet: 52 00 81 D3]  Accessory Decoder Operations Request: Turnout Address 1(Base Address 0,Sub Address 0) Turn Output 1 Off.
+[01 04 05]  Command Successfully Sent/Normal Operations Resumed after timeout
+[42 14 01 57]  Feedback Response:Turnout with out Feedback  Turnout: 81 State: Thrown Left; Turnout: 82 State: Not Operated
+
+
+
+- ack pin functionaliteit werkt. (connecteer A2 van de accessory decoder = DccAckPin, met D3 van de CommandStation).
+
+de command station stuurt 5+3 service packets (5 in de progctrl.cycles[] variable + 3 extra (eeprom variable eadr_extend_prog_command)
+Zonder de ACK verbinding tussen AccDec en CS ontvangt AccDec effectief 8 packets.
+Met ACK verbinding aangesloten stopt de CS met repeats sturen van zodra de ACK wordt ontvangen, typisch na 4 packets.
+De ack wordt geactiveerd na 2 identieke packets (volgens nmra specificatie)
+
+probleemke:
+testen van de sdsdecoder, dan lukt connectie A3 met CommandStationLenz-D3 niet. Als je D3 open laat op command station,
+dan stuurt het command station maar 1 service mode packet (blijft het wachten op een ack of zo??)
+als je D3 brugt naar GND, dan lukt CV write wel (CV read natuurlijk niet, want er komt geen correcte ack van de decoder)
+
+todo : 
+- routine om de factory defaults te schrijven in eeprom bij de eerste startup als er geen data in eeprom zitten
+- een deel van de CVs worden in dcc.init geschreven --> allemaal samen
+- cv programming : service mode packets : als er 5 identieke worden gestuurd wordt 4x geschreven
+NmraDcc.cpp : writeCV : mag CVs enkel schrijven in programming mode!! (of tijdens factory reset)
+
+
+
+*********************************************************************************************************
+hardware-definitie
+A0 progkey
+A1 progled
+A2 ackout
+D10 output0
+D9 output1
+D8 output2
+D7 output3
+D6 output4
+D5 output5
+D4 output6
+D3 output7
+D2 DCCin
+
+(eigenlijk nog 8 IOs over voor toetsen)
+TODO!!
+A3 key1 (bv)
+
+
+*********************************************************************************************************
+CV's definities
+1.algemene CV's
+CV1 	Decoder_Address_LSB	RW	1
+CV9	Decoder_Address_MSB	RW	0
+CV29	Config			R	0x80 (Basic Accessory Decoder)
+CV8	Manufacturer ID		R	0x0D (DIY)
+CV7 	VersionID		R	10 (in Dcc.init voorlopig, moet naar factory defaults)
+bit6 : output-address (1) / decoder-address (0)
+zou schrijfbaar moeten zijn, nog checken hoe JMRI elk van de modes verwerkt
+CV31/CV32			R	0
+CV33 	DecoderSwMode		RW	0
+-> software modes uit te breiden, voorlopig :
+	- mode 0 = wisseldecoder
+	- mode 1 = lichtdecoder (nog implementeren)	
+CV34	Safe Mode		R	0
+--> internal CV : enkel schrijfbaar door het programma zelf (niet via service mode!)
+--> in safe mode zijn alle outputs 0, en knippert de led snel
+--> ofwel is een verkeerde CV geschreven en moet een factory reset uitgevoerd worden
+--> ofwel is er een watchdog-reset gebeurd (te resetten door op de progled te drukken)
+CV35 config Turnout : save state Yes/No
+CV36 saved state van de wissels : TODO!!
+2. CV's voor de wisseldecoder (CV33 = 0)
+pulse-tijd voor de wisseloutputs : CV-value x 50ms
+CVx = 0 : geen puls, level output
+CV3	TimeOnOutput1		RW	5
+CV4	TimeOnOutput2		RW	5
+CV5	TimeOnOutput3		RW	5
+CV6	TimeOnOutput4		RW	5
+
+3. CV's voor een lichtdecoder (CV33 = 1)
+
+4. CV's voor een multifunction-decoder
+<TODO>

@@ -23,7 +23,9 @@
 // hardware configuration
 #define PIN_BUTTON  PD3
 
+// firmware config
 #define DEBOUNCE_TIME   100 // for the remote control button
+#define CMD_RETRIES     5
 
 // fan sensor config that we want to control
 #define FAN_NODE_ID     5
@@ -45,6 +47,7 @@ uint32_t radioResponseTimeoutInterval = 2000; // in ms
 uint32_t radioTxLastMillis; // for response timeout
 uint32_t debounceMillis;
 bool buttonPressed = false;
+uint8_t radioTxRetries;
 
 static void portd_irq (void) {
   buttonPressed = true;
@@ -132,6 +135,7 @@ void loop() {
     // toggle fan on/off
     curSensorData.fanOn = !curSensorData.fanOn;
     curSensorData.fanWaitResponse = true;
+    radioTxRetries = 0;
 #ifdef SDS_USE_SERIAL
     Serial_println_s("Button pressed!");
 #endif
@@ -140,11 +144,14 @@ void loop() {
 
   // 2. MySensors communication
   // sending request to fan
-  if ((curSensorData.fanWaitResponse) && ((millis()-radioTxLastMillis) >= radioResponseTimeoutInterval))
+  if ((curSensorData.fanWaitResponse) && 
+      ((millis()-radioTxLastMillis) >= radioResponseTimeoutInterval) &&
+      (radioTxRetries <= CMD_RETRIES))
   {
 #ifdef SDS_USE_SERIAL
     Serial_print_s("sending request to fan : ");Serial_println_u(curSensorData.fanOn);
 #endif
+    radioTxRetries++;
     MyMessage_setDestination(&sensorMsg, FAN_NODE_ID);
     MyMessage_setSensor(&sensorMsg, FAN_CHILD_ID);
     MyMessage_setType(&sensorMsg, V_STATUS);
@@ -154,6 +161,10 @@ void loop() {
 #ifdef SDS_USE_SERIAL
     Serial_println_s("done!");
 #endif
+  }
+
+  if (radioTxRetries > CMD_RETRIES) { // prevent waiting forever if fan doesn't respond
+    curSensorData.fanWaitResponse = false;
   }
 
   if (!curSensorData.fanWaitResponse) {
