@@ -373,14 +373,14 @@ void setup() {
     set_opendcc_state(RUN_OKAY);         // start up with power enabled
     
     // dcc_startup_messages();          // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
-    //setup_lcd();
+    setup_lcd();
 
 } // setup
 
 void loop() 
 {
     // put your main code here, to run repeatedly:
-    //sds run_state();                     // check short and keys
+    run_state();                     // check short and keys
     run_organizer();                 // run command organizer, depending on state,
                                    // it will execute normal track operation
                                    // or programming
@@ -403,9 +403,9 @@ void loop()
     #if (XPRESSNET_ENABLED == 1)
         run_xpressnet();
     #endif
-/*
+
     keys_Update();
     ui_Update();   
-*/
+
 
 } // loop
