@@ -52,17 +52,6 @@
 // LINK:      http://ruppweb.dyndns.org/xray/comp/decoder.htm
 //            (calculate long addresses)
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/eeprom.h>
-#include <util/delay.h>
-#include <avr/pgmspace.h>          // put var to program memory
-
-#include <string.h>
-
 #include "config.h"                // general structures and definitions
 #include "status.h"                // timeout engine, set_state
 #include "dccout.h"                // next message
@@ -590,7 +579,7 @@ void run_prog_inner_task(void)
                     partsum = 0;
                     for (i=0; i<20; i++)
                       {
-                        _mydelay_us(10);                   
+                        delayMicroseconds(10);                   
                         if (ACK_IS_DETECTED) partsum++;
                       }
                     if (partsum < 17) return;               // exits here, seems not to be a real ACK
@@ -1486,5 +1475,3 @@ unsigned char my_XPT_Term (void)
     prog_result = PT_TERM;
     return(0);
   }
-
-

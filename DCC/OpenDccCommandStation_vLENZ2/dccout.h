@@ -56,10 +56,6 @@ extern volatile unsigned char feedback_ready;      // MSB: if 1: the query is do
 #endif
 
 
-//extern ISR(TIMER1_COMPA_vect);
-
-void timer1_simu(void);                       // call this in a loop during simulation
-
 void init_dccout(void);                      // call once at boot up
 
 void dccout_enable_cutout(void);             // create railcom cutout

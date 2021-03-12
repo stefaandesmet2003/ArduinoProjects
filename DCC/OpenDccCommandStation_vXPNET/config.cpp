@@ -33,18 +33,6 @@
 //            
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdio.h>                 // using sscanf and sprintf increases prog. by 4k!
-#include <inttypes.h>
-#include <avr/pgmspace.h>          // put var to program memory
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/eeprom.h>
-#include <util/delay.h>
-
-#include <string.h>
-
 #include "config.h"                // general structures and definitions
 //sds #include "rs232.h"                 // tx ready
 
@@ -64,9 +52,6 @@ unsigned char invert_accessory = 0;  // Uhlenbrock seems to invert red and green
 unsigned char xpressnet_feedback_mode;  // defines the address mapping of
 										// feedbacks in Xpressnet
                                         // read from CV29
-
-unsigned char bidi_messages_enabled;  // 0: standard OpenDCC
-                                      // 1: location messages enabled
 
 const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 
@@ -90,18 +75,14 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 //       for siumlation: normal eeprom
 // Offsets are defined in config.h
 
-#if (DEBUG==3)
-uint8_t ee_mem[] EEMEM =
-#else
-   #if (__AVR_ATmega32__)
-        uint8_t ee_mem[] EEMEM =
-   #elif (__AVR_ATmega644P__)
-        uint8_t ee_mem[]  __attribute__((section(".EECV")))=
-   #elif (__AVR_ATmega328P__)//SDS : atmega328
-        uint8_t ee_mem[] EEMEM =
-   #else 
-        #warning EEPROM Definition for this AVR missing
-   #endif
+#if (__AVR_ATmega32__)
+     uint8_t ee_mem[] EEMEM =
+#elif (__AVR_ATmega644P__)
+     uint8_t ee_mem[]  __attribute__((section(".EECV")))=
+#elif (__AVR_ATmega328P__)//SDS : atmega328
+     uint8_t ee_mem[] EEMEM =
+#else 
+     #warning EEPROM Definition for this AVR missing
 #endif
 {
     [eadr_OpenDCC_Version]          = OPENDCC_VERSION,

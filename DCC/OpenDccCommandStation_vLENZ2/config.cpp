@@ -33,25 +33,11 @@
 //            
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdio.h>                 // using sscanf and sprintf increases prog. by 4k!
-#include <inttypes.h>
-#include <avr/pgmspace.h>          // put var to program memory
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/eeprom.h>
-#include <util/delay.h>
-
-#include <string.h>
-
 #include "config.h"                // general structures and definitions
-//sds #include "rs232.h"                 // tx ready
-
 
 //======================================================================
 // some globals used throughout OpenDCC
-
+// SDS TODO 2021 : kunnen die niet weg?
 unsigned char invert_accessory = 0;  // Uhlenbrock seems to invert red and green
                                      // with accessory commands - Lenz not
                                      // we do the same!
@@ -60,22 +46,17 @@ unsigned char invert_accessory = 0;  // Uhlenbrock seems to invert red and green
                                      // Bit 1: invert IB, Bit 0: invert Lenz
                                      // read from CV12
                                      
-
 unsigned char xpressnet_feedback_mode;  // defines the address mapping of
 										// feedbacks in Xpressnet
                                         // read from CV29
-
-unsigned char bidi_messages_enabled;  // 0: standard OpenDCC
-                                      // 1: location messages enabled
-
 const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 
 
 //======================================================================
 
-// Die folgende (assemblerï¿½hnliche) Defintion der EEPROM-Variablen ist
+// Die folgende (assembler ahnliche) Defintion der EEPROM-Variablen ist
 // erforderlich, um diese compilerunabhï¿½ngig auf feste Adressen zu legen.
-// Auf diese Adressen kann von auï¿½en mit den Befehl zum Lesen und Schreiben
+// Auf diese Adressen kann von aussen mit den Befehl zum Lesen und Schreiben
 // von Sonderoptionen zugegriffen werden.
 
 // The following definitions (quite similar to assembler) are neccesary
@@ -90,18 +71,14 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 //       for siumlation: normal eeprom
 // Offsets are defined in config.h
 
-#if (DEBUG==3)
-uint8_t ee_mem[] EEMEM =
-#else
-   #if (__AVR_ATmega32__)
-        uint8_t ee_mem[] EEMEM =
-   #elif (__AVR_ATmega644P__)
-        uint8_t ee_mem[]  __attribute__((section(".EECV")))=
-   #elif (__AVR_ATmega328P__)//SDS : atmega328
-        uint8_t ee_mem[] EEMEM =
-   #else 
-        #warning EEPROM Definition for this AVR missing
-   #endif
+#if (__AVR_ATmega32__)
+     uint8_t ee_mem[] EEMEM =
+#elif (__AVR_ATmega644P__)
+     uint8_t ee_mem[]  __attribute__((section(".EECV")))=
+#elif (__AVR_ATmega328P__)//SDS : atmega328
+     uint8_t ee_mem[] EEMEM =
+#else 
+     #warning EEPROM Definition for this AVR missing
 #endif
 {
     [eadr_OpenDCC_Version]          = OPENDCC_VERSION,
@@ -222,5 +199,3 @@ uint8_t ee_mem[] EEMEM =
 
 // feedback_s88_type    EAN   0: Ack-Feedback
 //                            1: Position Feedback  
-
-

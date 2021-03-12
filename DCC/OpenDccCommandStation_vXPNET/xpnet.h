@@ -26,17 +26,5 @@
 
 
 void init_xpressnet(void);
-
 void run_xpressnet(void);                       // multitask replacement
-
 void xp_send_message(unsigned char slot, unsigned char *str);   // send a message to this slot
-
-// debug only
-
-extern unsigned char rx_message[17];             // current message from client
-
-extern unsigned char tx_message[17];             // current message from master
-
-
-
-

@@ -23,13 +23,6 @@
 //            to organizer.c
 //
 
-
 void init_parser(void);
-
 void run_parser(void);
-
 void pc_send_lenz(unsigned char *str);   // *str is the raw message, no xor; xor is added by pc_send
-
-// void event_send(t_BC_message mess); // send a broadcast message
-
-

@@ -103,7 +103,7 @@ uint32_t app_GetFuncs (uint16_t locAddr)
         retval = retval | ((locobuffer[lb_index].f12_f9 & 0x0F) << 9);
 #if (DCC_F13_F28 == 1)
         retval = retval | (locobuffer[lb_index].f20_f13 << 13);
-        retval = retval | (locobuffer[lb_index].f28_f21 << 21);
+        retval = retval | ((uint32_t)locobuffer[lb_index].f28_f21 << 21); // TODO 2021: moeten dan niet alle lijnen cast naar uint32_t hebben?
 #endif 
         return (retval);
     }
@@ -264,3 +264,4 @@ void app_GetLocName( uint16_t locAddr, char *locName )
 
 
 #endif // ANALOG_OLD_STUFF
+

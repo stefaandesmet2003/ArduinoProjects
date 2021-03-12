@@ -60,18 +60,6 @@
 //            
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdio.h>                 // using sscanf and sprintf increases prog. by 4k!
-#include <inttypes.h>
-#include <avr/pgmspace.h>          // put var to program memory
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/eeprom.h>
-#include <util/delay.h>
-
-#include <string.h>
-
 #include "config.h"                // general structures and definitions
 #include "status.h"
 #include "database.h"              // for database broadcast
@@ -80,24 +68,16 @@
 #if (PARSER == LENZ)
   #include "lenz_parser.h"         // tell pc about status changes       
 #endif
-#if (PARSER == INTELLIBOX)
-  #include "ibox_parser.h"         
-#endif
 
 #include "programmer.h"
 
 //SDS #include "s88.h"
 #include "organizer.h"
 #include "xpnet.h"        
-#if (XPRESSNET_TUNNEL == 1)
-  #include "tunnel_fifo.h"        
-#endif
-
 
 #if (XPRESSNET_ENABLED == 1)
 
 // generell fixed messages
-
 unsigned char xp_datenfehler[] = {0x61, 0x80};             // xor wrong
 unsigned char xp_busy[] = {0x61, 0x81};                    // busy
 unsigned char xp_unknown[] = {0x61, 0x82};                 // unknown command
@@ -119,67 +99,39 @@ unsigned char xp_BC_locos_aus[] = {0x81, 0x00};            // Alle Loks gestoppt
 //             slot is called.
 
 unsigned char slot_use_counter[32];
-
-
 unsigned char used_slot;        // 1 .. 31 (actual position for used ones)
 unsigned char unused_slot;      // 1 .. 31 (actual position for unused ones)
 
-
-unsigned char get_next_slot(void)
-  {
-    used_slot++;             // advance
-    while (used_slot < 32)
-      {        
-        if (slot_use_counter[used_slot] > 0)
-          {
-            // this is a used slot, try it
-            slot_use_counter[used_slot]--;
-            return(used_slot);
-          }
-        used_slot++;
-      }
-    used_slot=0;
-    
-    // no more used slot found - return a unsued one
-    unused_slot++;
-    if (unused_slot == 32) unused_slot = 1;  // wrap
-    return(unused_slot);
+static unsigned char get_next_slot(void)
+{
+  used_slot++;             // advance
+  while (used_slot < 32) {        
+    if (slot_use_counter[used_slot] > 0)
+    {
+      // this is a used slot, try it
+      slot_use_counter[used_slot]--;
+      return(used_slot);
+    }
+    used_slot++;
   }
+  used_slot=0;
+  
+  // no more used slot found - return a unsued one
+  unused_slot++;
+  if (unused_slot == 32) unused_slot = 1;  // wrap
+  return(unused_slot);
+} // get_next_slot
 
 
-void set_slot_used(unsigned char slot)
-  {
-    slot_use_counter[slot] = 255;           // alive
-  }
+static void set_slot_used(unsigned char slot)
+{
+  slot_use_counter[slot] = 255;           // alive
+}
 
-void set_slot_to_watch(unsigned char slot)
-  {
-    slot_use_counter[slot] = 10;           // nearly dead
-  }
-
-
-/*
-void test_slots(void)
-  {
-    unsigned char i;
-    set_slot_used(4);
-    for (i=0; i < 5; i++)
-      {
-        PORTA = get_next_slot();
-      }
-    set_slot_used(5);
-    for (i=0; i < 25; i++)
-      {
-        PORTA = get_next_slot();
-      }
-    set_slot_used(6);
-    for (i=0; i < 100; i++)
-      {
-        PORTA = get_next_slot();
-      }
-  }
-*/
-
+static void set_slot_to_watch(unsigned char slot)
+{
+  slot_use_counter[slot] = 10;           // nearly dead
+}
 
 //===============================================================================
 //
@@ -202,13 +154,11 @@ void test_slots(void)
 // 4.a) Xpressnet variables
 //
 //-------------------------------------------------------------------------------
-
 unsigned char current_slot;     // 1 .. 31
 #define ACK_ID      0x00
 #define FUTURE_ID   0x20        // A message with future ID to slot is Feedback broadcast (see also s88.c)
 #define CALL_ID     0x40
 #define MESSAGE_ID  0x60
-
 
 unsigned char rx_message[17];             // current message from client
 unsigned char rx_index;
@@ -226,367 +176,325 @@ unsigned char xpnet_version[] = {0x63, 0x21,
 // 2.b) Xpressnet Send routines
 
 void xp_send_message(unsigned char slot_id, unsigned char *str)
-  {
-    unsigned char n, total, my_xor;
- 
-    n = 0;
-    my_xor = str[0];
-    total = str[0] & 0x0F;
-    
-    while (!XP_tx_ready()) ;                 // busy waiting! (but shouldn't happen)
+{
+  unsigned char n, total, my_xor;
 
-    XP_send_call_byte(slot_id);              // send slot (9th bit is 1)
-    XP_send_byte(str[0]);                    // send header
+  n = 0;
+  my_xor = str[0];
+  total = str[0] & 0x0F;
+  
+  while (!XP_tx_ready()) ;                 // busy waiting! (but shouldn't happen)
 
-    while (n != total)
-      {
-         n++;
-         my_xor ^= str[n];
-         XP_send_byte(str[n]);              // send data
-      }    
-    XP_send_byte(my_xor);                   // send xor
-  }
+  XP_send_call_byte(slot_id);              // send slot (9th bit is 1)
+  XP_send_byte(str[0]);                    // send header
 
+  while (n != total) {
+    n++;
+    my_xor ^= str[n];
+    XP_send_byte(str[n]);              // send data
+  }    
+  XP_send_byte(my_xor);                   // send xor
+} // xp_send_message
 
 void xp_send_message_to_current_slot(unsigned char *str)
-  {
-    xp_send_message(MESSAGE_ID | current_slot, str);
-  }
+{
+  xp_send_message(MESSAGE_ID | current_slot, str);
+}
 
 void xp_send_bc_message(void)
-  {
-    switch(opendcc_state)
-      {
-        case RUN_OKAY:             // DCC running
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
-            break;
-        case RUN_STOP:             // DCC Running, all Engines Emergency Stop
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
-            break;
-        case RUN_OFF:              // Output disabled (2*Taste, PC)
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-            break;
-        case RUN_SHORT:            // Kurzschlu�
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-            break;
-        case RUN_PAUSE:            // DCC Running, all Engines Speed 0
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
-            break;
+{
+  switch(opendcc_state) {
+    case RUN_OKAY:             // DCC running
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
+      break;
+    case RUN_STOP:             // DCC Running, all Engines Emergency Stop
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+      break;
+    case RUN_OFF:              // Output disabled (2*Taste, PC)
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
+      break;
+    case RUN_SHORT:            // Kurzschlu�
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
+      break;
+    case RUN_PAUSE:            // DCC Running, all Engines Speed 0
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+      break;
 
-        case PROG_OKAY:
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_progmode);  
-            break;
-        case PROG_SHORT:           //
-            xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_progshort);  
-            break;
-        case PROG_OFF:
-            break;
-        case PROG_ERROR:
-            break;
-      }
-    status_event.changed_xp = 0;            // broad cast done
-  }
+    case PROG_OKAY:
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_progmode);  
+      break;
+    case PROG_SHORT:           //
+      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_progshort);  
+      break;
+    case PROG_OFF:
+      break;
+    case PROG_ERROR:
+      break;
+    }
+  status_event.changed_xp = 0;            // broad cast done
+} // xp_send_bc_message
 
 #if (DCC_FAST_CLOCK == 1)
 void xp_send_fast_clock(unsigned char slot_id)
-  {
-    // 0x05 0x01 TCODE0 {TCODE1 TCODE2 TCODE3} 
-    tx_message[0] = 0x05;
-    tx_message[1] = 0xF1;
-    tx_message[2] = 0x00 | fast_clock.minute;
-    tx_message[3] = 0x80 | fast_clock.hour;
-    tx_message[4] = 0x40 | fast_clock.day_of_week;
-    tx_message[5] = 0xC0 | fast_clock.ratio;
+{
+  // 0x05 0x01 TCODE0 {TCODE1 TCODE2 TCODE3} 
+  tx_message[0] = 0x05;
+  tx_message[1] = 0xF1;
+  tx_message[2] = 0x00 | fast_clock.minute;
+  tx_message[3] = 0x80 | fast_clock.hour;
+  tx_message[4] = 0x40 | fast_clock.day_of_week;
+  tx_message[5] = 0xC0 | fast_clock.ratio;
 
-    xp_send_message(MESSAGE_ID | slot_id, tx_ptr = tx_message);
-        
-    status_event.clock = 0;            // fast clock broad cast done
-  }
+  xp_send_message(MESSAGE_ID | slot_id, tx_ptr = tx_message);
+  status_event.clock = 0;            // fast clock broad cast done
+} // xp_send_fast_clock
 #endif
 
-void xp_send_read_occ(void)
-  {
-    tx_message[0] = 0x61;
-    tx_message[1] = 0x23;
-    xp_send_message(MESSAGE_ID | 0, tx_ptr = tx_message);  // as broadcast
-        
-    status_event.read_occ = 0;            // read_occ:  broad cast done
-  }
-
-
 void xpnet_send_prog_result(void)
-  {
-    // Messages:
-	// 61 11: ready
-	// 61 12: short - Kurzschluss
-	// 61 13: cant read - Daten nicht gefunden
-	// 61 1f: busy
-	// 63 10 EE D: EE=adr, D=Daten; nur f�r Register oder Pagemode, wenn bei cv diese Antwort, dann kein cv!
-	// 63 14 CV D: CV=cv, D=Daten: nur wenn cv gelesen wurde; 14,15,16,17
+{
+  // Messages:
+  // 61 11: ready
+  // 61 12: short - Kurzschluss
+  // 61 13: cant read - Daten nicht gefunden
+  // 61 1f: busy
+  // 63 10 EE D: EE=adr, D=Daten; nur f�r Register oder Pagemode, wenn bei cv diese Antwort, dann kein cv!
+  // 63 14 CV D: CV=cv, D=Daten: nur wenn cv gelesen wurde; 14,15,16,17
 
-    if (prog_event.busy) 
-      {
-        tx_message[0] = 0x61;
-		tx_message[1] = 0x1f;
-		xp_send_message_to_current_slot(tx_ptr = tx_message); 
-      }
-    else
-      {
-    	switch (prog_result)
-    	  {
-            case PT_OKAY:
-                switch (prog_qualifier)
-                  {
-                    case PQ_REGMODE:
-                        tx_message[0] = 0x63;
-                        tx_message[1] = 0x10;
-                        tx_message[2] = prog_cv;
-                        tx_message[3] = prog_data;
-                        xp_send_message_to_current_slot(tx_ptr = tx_message); 
-                        break;
-                    case PQ_CVMODE_B0:
-                        tx_message[0] = 0x63;
-                        tx_message[1] = prog_cv / 256;              // use higher address bit to modify header code
-                        tx_message[1] &= 0x3; 
-                        tx_message[1] += 0x14;                      // header codes 0x14, 0x15, 0x16, 0x17
-                        tx_message[2] = (unsigned char) prog_cv;    // in any case: use fraktional part.
-                        tx_message[3] = prog_data;
-                        xp_send_message_to_current_slot(tx_ptr = tx_message); 
-                        break;
-                    default:
-                        tx_message[0] = 0x61;
-            		    tx_message[1] = 0x11;     // ready
-    	        	    xp_send_message_to_current_slot(tx_ptr = tx_message); 
-    		            break; 
-                  }
-                break;
-            case PT_TIMEOUT:            // here all other stuff as well
-            case PT_NOACK:
-            case PT_NODEC:               // No decoder detected
-            case PT_ERR:      
-            case PT_BITERR:  
-            case PT_PAGERR: 
-            case PT_SELX:    
-            case PT_DCCQD_Y:
-            case PT_DCCQD_N: 
-            case PT_TERM:
-            case PT_NOTASK:  
-            case PT_NOTERM:
-                tx_message[0] = 0x61;
-    		    tx_message[1] = 0x13;               // not found
-    		    xp_send_message_to_current_slot(tx_ptr = tx_message); 
-    		    break; 
-
-            case PT_SHORT:
-                tx_message[0] = 0x61;
-    		    tx_message[1] = 0x12;
-    		    xp_send_message_to_current_slot(tx_ptr = tx_message); 
-    		    break;
-          }
-      }
-  }
-
-
-void xp_send_busy(void)
-  {
-    xp_send_message_to_current_slot(tx_ptr = xp_busy); 
-  }
-
-void xp_send_status(void)
-  {
-    // Format: Headerbyte Daten 1 Daten 2 X-Or-Byte
-    // Hex : 0x62 0x22 S X-Or-Byte
-    // S:
-    // Bit 0: wenn 1, Anlage in Notaus
-    // Bit 1: wenn 1, Anlage in Nothalt
-    // Bit 2: Zentralen-Startmode (0 = manueller Start, 1 = automatischer Start)
-    // Bit 3: wenn 1, dann Programmiermode aktiv
-    // Bit 4: reserviert
-    // Bit 5: reserviert
-    // Bit 6: wenn 1, dann Kaltstart in der Zentrale
-    // Bit 7: wenn 1, dann RAM-Check-Fehler in der Zentrale
-    // Besonderheiten: siehe bei Lenz
-    unsigned char my_status = 0;
-    tx_message[0] = 0x62;
-	tx_message[1] = 0x22;
-    if (opendcc_state == RUN_OFF) my_status |= 0x01; //SDS bits omgewisseld
-    if (opendcc_state == RUN_STOP) my_status |= 0x02; //SDS bits omgewisseld
-    // my_status &= ~0x04;  // manueller Start
-    if ( (opendcc_state == PROG_OKAY)
-       | (opendcc_state == PROG_SHORT)
-       | (opendcc_state == PROG_OFF)
-       | (opendcc_state == PROG_ERROR) ) my_status |= 0x08;          // Programmiermode
-    tx_message[2] = my_status;
+  if (prog_event.busy) {
+    tx_message[0] = 0x61;
+    tx_message[1] = 0x1f;
     xp_send_message_to_current_slot(tx_ptr = tx_message); 
   }
+  else {
+    switch (prog_result) {
+      case PT_OKAY:
+        switch (prog_qualifier) {
+          case PQ_REGMODE:
+            tx_message[0] = 0x63;
+            tx_message[1] = 0x10;
+            tx_message[2] = prog_cv;
+            tx_message[3] = prog_data;
+            xp_send_message_to_current_slot(tx_ptr = tx_message); 
+            break;
+          case PQ_CVMODE_B0:
+            tx_message[0] = 0x63;
+            tx_message[1] = prog_cv / 256;              // use higher address bit to modify header code
+            tx_message[1] &= 0x3; 
+            tx_message[1] += 0x14;                      // header codes 0x14, 0x15, 0x16, 0x17
+            tx_message[2] = (unsigned char) prog_cv;    // in any case: use fraktional part.
+            tx_message[3] = prog_data;
+            xp_send_message_to_current_slot(tx_ptr = tx_message); 
+            break;
+          default:
+            tx_message[0] = 0x61;
+            tx_message[1] = 0x11;     // ready
+            xp_send_message_to_current_slot(tx_ptr = tx_message); 
+            break; 
+        }
+        break;
+      case PT_TIMEOUT:            // here all other stuff as well
+      case PT_NOACK:
+      case PT_NODEC:               // No decoder detected
+      case PT_ERR:      
+      case PT_BITERR:  
+      case PT_PAGERR: 
+      case PT_SELX:    
+      case PT_DCCQD_Y:
+      case PT_DCCQD_N: 
+      case PT_TERM:
+      case PT_NOTASK:  
+      case PT_NOTERM:
+        tx_message[0] = 0x61;
+        tx_message[1] = 0x13;               // not found
+        xp_send_message_to_current_slot(tx_ptr = tx_message); 
+        break; 
+
+      case PT_SHORT:
+        tx_message[0] = 0x61;
+        tx_message[1] = 0x12;
+        xp_send_message_to_current_slot(tx_ptr = tx_message); 
+        break;
+    }
+  }
+} // xpnet_send_prog_result
+
+void xp_send_busy(void)
+{
+  xp_send_message_to_current_slot(tx_ptr = xp_busy); 
+}
+
+// bit0-1 : zijn blijkbaar omgewisseld tussen xpnet v3 en v3.6!
+// we houden hier v3.6
+void xp_send_status(void)
+{
+  // Format: Headerbyte Daten 1 Daten 2 X-Or-Byte
+  // Hex : 0x62 0x22 S X-Or-Byte
+  // S:
+  // Bit 0: wenn 1, Anlage in Notaus
+  // Bit 1: wenn 1, Anlage in Nothalt
+  // Bit 2: Zentralen-Startmode (0 = manueller Start, 1 = automatischer Start)
+  // Bit 3: wenn 1, dann Programmiermode aktiv
+  // Bit 4: reserviert
+  // Bit 5: reserviert
+  // Bit 6: wenn 1, dann Kaltstart in der Zentrale
+  // Bit 7: wenn 1, dann RAM-Check-Fehler in der Zentrale
+  // Besonderheiten: siehe bei Lenz
+  unsigned char my_status = 0;
+  tx_message[0] = 0x62;
+  tx_message[1] = 0x22;
+  if (opendcc_state == RUN_OFF) my_status |= 0x01; //SDS bits omgewisseld
+  if (opendcc_state == RUN_STOP) my_status |= 0x02; //SDS bits omgewisseld
+  // my_status &= ~0x04;  // manueller Start
+  if ( (opendcc_state == PROG_OKAY)
+      | (opendcc_state == PROG_SHORT)
+      | (opendcc_state == PROG_OFF)
+      | (opendcc_state == PROG_ERROR) ) my_status |= 0x08;          // Programmiermode
+  tx_message[2] = my_status;
+  xp_send_message_to_current_slot(tx_ptr = tx_message); 
+} // xp_send_status
 
 
 void xp_send_loco_addr(unsigned int addr)     
-  {
-        tx_message[0] = 0xE3;
-        tx_message[1] = 0x30;                   // 0x30 + KKKK; here KKKK=0, normal loco addr
-        if (addr == 0) tx_message[1] |= 0x04;   // KKKK=4 -> no result fould
-        if (addr > XP_SHORT_ADDR_LIMIT)
-          {
-            tx_message[2] = addr / 256;
-            tx_message[2] |= 0xC0;
-          }
-        else tx_message[2] = 0;
-        tx_message[3] = (unsigned char)addr;
-        xp_send_message_to_current_slot(tx_ptr = tx_message);
+{
+  tx_message[0] = 0xE3;
+  tx_message[1] = 0x30;                   // 0x30 + KKKK; here KKKK=0, normal loco addr
+  if (addr == 0) tx_message[1] |= 0x04;   // KKKK=4 -> no result fould
+  if (addr > XP_SHORT_ADDR_LIMIT) {
+    tx_message[2] = addr / 256;
+    tx_message[2] |= 0xC0;
   }
+  else tx_message[2] = 0;
+  tx_message[3] = (unsigned char)addr;
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // xp_send_loco_addr
 
-unsigned char convert_format[4] = 
-  {
-    0b000,      // DCC14
-    0b001,      // DCC27
-    0b010,      // DCC28
-    0b100,      // DCC128
-  };
-
+unsigned char convert_format[4] = {
+  0b000,      // DCC14
+  0b001,      // DCC27
+  0b010,      // DCC28
+  0b100,      // DCC128
+};
 
 void xp_send_lokdaten(unsigned int addr)
-  {
-    register unsigned char i, data;
-    register unsigned char speed;
-    
-    i = scan_locobuffer(addr);
+{
+  register unsigned char i, data;
+  register unsigned char speed;
+  
+  i = scan_locobuffer(addr);
 
-    tx_message[0] = 0xE4;                       // Headerbyte = 0xE4
-    tx_message[1] = 0x00;                       // Byte1 = Kennung = 0000BFFF:  B=0: nicht besetzt
-                                                // FFF=Fahrstufen: 000=14, 001=27, 010=28, 100=128
-    if (i==SIZE_LOCOBUFFER)                     // not found - was not used yet
-      {
-        tx_message[1] |= convert_format[get_loco_format(addr)];  // ask eeprom about speed steps
-        tx_message[2] = 0;                          // no Speed
-        tx_message[3] = 0;                          // no functions
-        tx_message[4] = 0; 
-      }
-    else
-      {
-        if ( (locobuffer[i].owned_by_pc)  ||
-             (locobuffer[i].slot != current_slot)  )  tx_message[1] |= 0b0001000;
-
-        speed = convert_speed_to_rail(locobuffer[i].speed, locobuffer[i].format);
-        switch(locobuffer[i].format)
-          {
-            case DCC14:
-                tx_message[2] = speed;    //Byte2 = Speed = R000 VVVV;
-                break;
-            case DCC27:
-                tx_message[1] |= 0b001;
-                if (speed < 1)
-                  {
-                    tx_message[2] = speed; 
-                  }
-                else
-                  {          
-                    data = (speed & 0x1F) + 2;    // map internal speed 2..29 to external 4..31
-                    data = (data>>1) | ((data & 0x01) <<4);
-                    tx_message[2] = data | (speed & 0x80); 
-                  }
-                break;
-            case DCC28:
-                tx_message[1] |= 0b010;           
-                if (speed < 1)
-                  {
-                    tx_message[2] = speed; 
-                  }
-                else
-                  {          
-                    data = (speed & 0x1F) + 2;    // map internal speed 2..29 to external 4..31
-                    data = (data>>1) | ((data & 0x01) <<4);
-                    tx_message[2] = data | (speed & 0x80); 
-                  }
-                break;
-            case DCC128:
-                tx_message[1] |= 0b100;          
-                tx_message[2] = speed;    //Byte2 = Speed = RVVV VVVV;
-                break;
-          }
-        tx_message[3] = (locobuffer[i].fl << 4) | locobuffer[i].f4_f1;
-        tx_message[4] = (locobuffer[i].f12_f9 << 4) | locobuffer[i].f8_f5;
-
-      }
-    xp_send_message_to_current_slot(tx_ptr = tx_message);
+  tx_message[0] = 0xE4; // Headerbyte = 0xE4
+  tx_message[1] = 0x00; // Byte1 = Kennung = 0000BFFF:  B=0: nicht besetzt
+                        // FFF=Fahrstufen: 000=14, 001=27, 010=28, 100=128
+  if (i==SIZE_LOCOBUFFER) { // not found - was not used yet
+    tx_message[1] |= convert_format[get_loco_format(addr)];  // ask eeprom about speed steps
+    tx_message[2] = 0;                          // no Speed
+    tx_message[3] = 0;                          // no functions
+    tx_message[4] = 0; 
   }
+  else {
+    if ((locobuffer[i].owned_by_pc) ||
+        (locobuffer[i].slot != current_slot))  tx_message[1] |= 0b0001000;
+
+    speed = convert_speed_to_rail(locobuffer[i].speed, locobuffer[i].format);
+    switch(locobuffer[i].format) {
+      case DCC14:
+        tx_message[2] = speed;    //Byte2 = Speed = R000 VVVV;
+        break;
+      case DCC27:
+        tx_message[1] |= 0b001;
+        if (speed < 1) {
+          tx_message[2] = speed; 
+        }
+        else {          
+          data = (speed & 0x1F) + 2;    // map internal speed 2..29 to external 4..31
+          data = (data>>1) | ((data & 0x01) <<4);
+          tx_message[2] = data | (speed & 0x80); 
+        }
+        break;
+      case DCC28:
+        tx_message[1] |= 0b010;           
+        if (speed < 1) {
+            tx_message[2] = speed; 
+        }
+        else {          
+          data = (speed & 0x1F) + 2;    // map internal speed 2..29 to external 4..31
+          data = (data>>1) | ((data & 0x01) <<4);
+          tx_message[2] = data | (speed & 0x80); 
+        }
+        break;
+      case DCC128:
+        tx_message[1] |= 0b100;          
+        tx_message[2] = speed;    //Byte2 = Speed = RVVV VVVV;
+        break;
+    }
+    tx_message[3] = (locobuffer[i].fl << 4) | locobuffer[i].f4_f1;
+    tx_message[4] = (locobuffer[i].f12_f9 << 4) | locobuffer[i].f8_f5;
+  }
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // xp_send_lokdaten
 
 #if (DCC_F13_F28 == 1)
 void xp_send_funct_level_f13_f28(unsigned int addr)
-  {
-    register unsigned char i;
-    
-    i = scan_locobuffer(addr);
+{
+  register unsigned char i;
+  
+  i = scan_locobuffer(addr);
 
-    tx_message[0] = 0xE3;                       // Headerbyte = 0xE3
-    tx_message[1] = 0x52;                       // Byte1 = Kennung
-    if (i==SIZE_LOCOBUFFER)                     // not found - was not used yet
-      {
-        tx_message[2] = 0;                          // no functions
-        tx_message[3] = 0;                          // no functions
-      }
-    else
-      {
-        tx_message[2] = locobuffer[i].f20_f13;
-        tx_message[3] = locobuffer[i].f28_f21;
-      }
-    xp_send_message_to_current_slot(tx_ptr = tx_message);
+  tx_message[0] = 0xE3;
+  tx_message[1] = 0x52;
+  if (i==SIZE_LOCOBUFFER) { // not found - was not used yet
+    tx_message[2] = 0; // no functions
+    tx_message[3] = 0; // no functions
   }
+  else {
+    tx_message[2] = locobuffer[i].f20_f13;
+    tx_message[3] = locobuffer[i].f28_f21;
+  }
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // xp_send_funct_level_f13_f28
 #endif
 
 // we answer, but this is not really supported (not stored in locobuffer).
+// SDs : DUMMY!
 void xp_send_loco_func_status(unsigned int addr)
-  {
-    tx_message[0] = 0xE3;                       // Headerbyte = 0xE3
-    tx_message[1] = 0x80;                       // Byte1 = Kennung = 10000000
-    tx_message[2] = 0x00;                       // Byte2 = 000sSSSS; s=F0, SSSS=F4...F1
-    tx_message[3] = 0;                          // Byte3 = SSSSSSSS; SSSSSSSS=F12...F5
-    xp_send_message_to_current_slot(tx_ptr = tx_message);
-  }
+{
+  tx_message[0] = 0xE3; // Headerbyte = 0xE3
+  tx_message[1] = 0x80; // Byte1 = Kennung = 10000000
+  tx_message[2] = 0x00; // Byte2 = 000sSSSS; s=F0, SSSS=F4...F1
+  tx_message[3] = 0;    // Byte3 = SSSSSSSS; SSSSSSSS=F12...F5
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // xp_send_loco_func_status
 
 void xp_send_lok_stolen(unsigned char slot, unsigned int lokaddr)
-  {
-    tx_message[0] = 0xE3;                       // Headerbyte = 0xE3
-    tx_message[1] = 0x40;                       // Byte1 = Kennung = 01000000
-    tx_message[2] = (unsigned char) (lokaddr / 256);                           
-    tx_message[3] = (unsigned char) (lokaddr);   
-    if (lokaddr > XP_SHORT_ADDR_LIMIT)
-      {
-        tx_message[2] |= 0xc0;                                              
-      }
-    xp_send_message(MESSAGE_ID | slot, tx_message);
+{
+  tx_message[0] = 0xE3;
+  tx_message[1] = 0x40;
+  tx_message[2] = (unsigned char) (lokaddr / 256);                           
+  tx_message[3] = (unsigned char) (lokaddr);   
+  if (lokaddr > XP_SHORT_ADDR_LIMIT) {
+    tx_message[2] |= 0xc0;                                              
   }
+  xp_send_message(MESSAGE_ID | slot, tx_message);
+} // xp_send_lok_stolen
 
 void xp_send_stolen_loks(void)
-  {
-    unsigned char i;
+{
+  unsigned char i;
 
-    for (i=0; i<SIZE_LOCOBUFFER; i++)
-      {
-        if (locobuffer[i].owner_changed  && locobuffer[i].owned_by_pc)
-          {
-            locobuffer[i].owner_changed = 0;
-            xp_send_lok_stolen( locobuffer[i].slot, locobuffer[i].address);
-            return;  // exit here, send only one locomotive
-          }
-      }    
-    organizer_state.lok_stolen_by_pc = 0;      // thats all
-  }
-
-void xp_send_special_option(unsigned int addr)
-  {
-    tx_message[0] = 0x24;                           // Headerbyte
-    tx_message[1] = 0x28;                           // Byte1 = Kennung = 0x28
-    tx_message[2] = (unsigned char) (addr / 256);   // high
-    tx_message[3] = (unsigned char) (addr);         // low
-    tx_message[4] = eeprom_read_byte((uint8_t *) addr);
-    xp_send_message_to_current_slot(tx_ptr = tx_message);
-  }
+  for (i=0; i<SIZE_LOCOBUFFER; i++) {
+    if (locobuffer[i].owner_changed  && locobuffer[i].owned_by_pc) {
+      locobuffer[i].owner_changed = 0;
+      xp_send_lok_stolen( locobuffer[i].slot, locobuffer[i].address);
+      return;  // exit here, send only one locomotive
+    }
+  }    
+  organizer_state.lok_stolen_by_pc = 0;      // thats all
+} // xp_send_stolen_loks
 
 //-----------------------------------------------------------------------------------------------------
 // List of all messages from the client
@@ -688,719 +596,537 @@ void xp_send_special_option(unsigned int addr)
 
 
 void xp_parser(void)
-  {
-    unsigned int addr;
-    t_data16 xaddr;
-    unsigned char speed = 0;
-    unsigned char activate, coil;
-    t_format format;
-    unsigned char processed = 0;
-    unsigned char retval;
-        
-    switch(rx_message[0] >> 4)   // this is the opcode
-      {
-        case 0x0:
-            #if (DCC_FAST_CLOCK == 1)
-            switch(rx_message[1])
-              {
-                case 0xF1:
-                    // set clock
-                    for(coil = 2; coil <= (rx_message[0] & 0x0F); coil++ )   // use coil as temp
-                      {
-                        speed = 99;     // use speed as temp
-                        switch(rx_message[coil] & 0xC0)
-                          {
-                            case 0x00:  speed = rx_message[coil] & 0x3F;
-                                        if (speed < 60) fast_clock.minute = speed;
-                                        break;
-                            case 0x80:  speed = rx_message[coil] & 0x3F;
-                                        if (speed < 24) fast_clock.hour = speed;
-                                        break;
-                            case 0x40:  speed = rx_message[coil] & 0x3F;
-                                        if (speed < 7) fast_clock.day_of_week = speed;
-                                        break;
-                            case 0xC0:  speed = rx_message[coil] & 0x3F;
-                                        if (speed < 32) fast_clock.ratio = speed;
-                                        break;
-                          }
-                      }                            
-                    do_fast_clock(&fast_clock);
-
-                    // now send an answer
-                    xp_send_fast_clock(current_slot);
-                    processed = 1;
-                    break;
-                case 0xF2:
-                    // query clock
-                    xp_send_fast_clock(current_slot);
-                    processed = 1;
-                    break;
-              }
-            #endif
-            break;
-        case 0x1:
-            switch(rx_message[1])
-              {
-                case 0x01:
-                    // dcc extended accessory operations request
-                    addr = (unsigned int) (((unsigned char)(rx_message[2] & 0x07)) << 8) + rx_message[3];
-                    do_extended_accessory(addr, (unsigned char)(rx_message[2] >> 3) & 0x1F  );
-                    // no answer
-                    processed = 1;
-                    break;
-              }
-           break;
-        case 0x2:
-            switch(rx_message[1])
-              {
-                case 0x10: 
-                    // Prog.-Ergebnis anfordern 0x21 0x10 0x31
-                    if (opendcc_state >= PROG_OKAY)
-                      {
-                        xpnet_send_prog_result();
-                        processed = 1;
-                      }
-                    // else: Command void -> end of case
-                    break;
-
-                case 0x11: 
-                    // Prog.-Lesen Registermode 0x22 0x11 REG X-Or
-                    // REG contains the Resister (1...8), this Command has no answer
-                    my_XPT_DCCRR (rx_message[2]);   // return code = 2 - if bad parameter
-                    processed = 1;
-                    break;
-                case 0x12: 
-                    // Prog.-Schreiben Register 0x23 0x12 REG DAT X-Or
-                    my_XPT_DCCWR (rx_message[2], rx_message[3]);   
-                    processed = 1;
-                    break;
-                case 0x14:
-                    // Prog-lesen Pagemode Hex : 0x22 0x14 CV X-Or-Byte
-                    if (rx_message[2] == 0) addr = 256;
-                    else addr = rx_message[2];
-                    my_XPT_DCCRP (addr);
-                    processed = 1;
-                    break;
-                case 0x15: 
-                    // Prog.-Lesen CV 0x22 0x15 CV X-Or    // old; according to Lenz we should return CV1024?
-                    if (rx_message[2] == 0) addr = 256;
-                    else addr = rx_message[2];
-                    my_XPT_DCCRD (addr);
-                    processed = 1;
-                    break;
-                case 0x16: 
-                    // Prog.-Schreiben CV 0x23 0x16 CV DAT X-Or
-                    // CV: 1..256
-                    if (rx_message[2] == 0) addr = 256;
-                    else addr = rx_message[2];
-                    my_XPT_DCCWD (addr, rx_message[3]);    // direct mode
-                    processed = 1;
-                    break;
-                case 0x17: 
-                    // Prog.-Schreiben Paging 0x23 0x17 CV DAT X-Or
-                    if (rx_message[2] == 0) addr = 256;
-                    else addr = rx_message[2];
-                    my_XPT_DCCWP (addr, rx_message[3]);
-                    processed = 1;
-                    break;
-                case 0x18:      // Prog.-Lesen CV 0x22 0x18 CV X-Or    // CV 1..255, 1024
-                case 0x19:      // Prog.-Lesen CV 0x22 0x19 CV X-Or    // CV 256 .. 511
-                case 0x1A:      // Prog.-Lesen CV 0x22 0x1A CV X-Or    // CV 512 .. 767
-                case 0x1B:      // Prog.-Lesen CV 0x22 0x1B CV X-Or    // CV 768 .. 1023
-                    addr = ((rx_message[1] & 0x03) * 256) + rx_message[2];
-                    if (addr == 0) addr = 1024;
-                    my_XPT_DCCRD (addr);
-                    processed = 1;
-                    break;
-                case 0x1C:      // Prog.-Schreiben CV 0x23 0x1C CV DAT X-Or; CV: 1..255, 1024
-                case 0x1D:      // Prog.-Schreiben CV 0x23 0x1D CV DAT X-Or; CV: 256 .. 511
-                case 0x1E:      // Prog.-Schreiben CV 0x23 0x1E CV DAT X-Or; CV: 512 ... 767
-                case 0x1F:      // Prog.-Schreiben CV 0x23 0x1F CV DAT X-Or; CV: 768 ... 1024
-                    addr = ((rx_message[1] & 0x03) * 256) + rx_message[2];
-                    if (addr == 0) addr = 1024;
-                    my_XPT_DCCWD (addr, rx_message[3]);  // direct mode
-                    processed = 1;
-                    break;
-                case 0x21:
-                    // Softwareversion anfordern 0x21 0x21 0x00
-                    xp_send_message_to_current_slot(tx_ptr = xpnet_version);
-                    processed = 1;
-                    break;
-                case 0x22:
-                    // Power Up Mode einstellen 0x22 0x22 00000M00
-                    // we don't do this (always manual mode, no automatic power to tracks)
-                    // no answer
-                    break;
-                case 0x24:
-                    // Statusabfrage 0x21 0x24 0x05 "Command station status request"
-                    xp_send_status();
-                    processed = 1; 
-                    break;
-                case 0x28: // SO read (special command opendcc, no test for addr range)
-                    addr = (rx_message[2] * 256) + rx_message[3];
-                    xp_send_special_option(addr);
-                    processed = 1; 
-                    break;
-               case 0x29: // SO write (special command opendcc)
-                    addr = (rx_message[2] * 256) + rx_message[3];
-                    eeprom_write_byte((uint8_t *) addr, rx_message[4]);
-                    xp_send_special_option(addr);
-                    processed = 1; 
-                    break;
-                case 0x80:    
-                   // 0x21 0x80 0xA1 "Stop operations request (emergency off)"
-                   set_opendcc_state(RUN_OFF);
-                   processed = 1;                              // no answer here, but a broadcast will occur
-                   break;
-               case 0x81:
-                   // 0x21 0x81 0xA0 "Resume operations request"
-                   set_opendcc_state(RUN_OKAY);    
-                   processed = 1;                              // no answer here, but a broadcast will occur
-                   break;
-              }
-            break;
-
-#if (XPRESSNET_TUNNEL == 1)
-         case 0x3: // special Command push to PC
-            if (tunnel_2pc_is_full()) 
-                 xp_send_busy();             // we are busy
-            else
-              {
-                put_in_tunnel_2pc((t_tunnel_message*) rx_message);
-              }
-// #warning Tunnel wrong
-//             pc_send_lenz(rx_message);
-
-             processed = 1;
-             break;
-#endif
-
-           
-        case 0x4:
-            // not yet tested: Schaltinformation anfordern 0x42 ADR Nibble X-Or
-            // Hex : 0x42 Adresse 0x80 + N X-Or-Byte
-            // f�r Weichen: Adresse = Adr / 4; N=Nibble
-            // nicht f�r R�ckmelder!
-            // Antwort:
-            // Hex : 0x42 ADR ITTNZZZZ X-Or-Byte
-            // ADR = Adresse mod 4
-            // I: 1=in work; 0=done -> bei uns immer 0
-            // TT = Type: 00=Schaltempf. 01=Schaltempf. mit RM, 10: R�ckmelder, 11 reserved
-            // N: 0=lower Nibble, 1=upper
-            // ZZZZ: Zustand; bei Weichen je 2 Bits: 00=not yet; 01=links, 10=rechts, 11:void
-            // Bei R�ckmeldern: Direkt die 4 Bits des Nibbles
-            // TC interpretiert das alles als direkt �bereinanderliegend;
-            // also hier und in s88.c folgende Notl�sung:
-            //  Adressen 0..63  werden als DCC-Accessory interpretiert, aus dem Turnout-Buffer geladen
-            //                  und mit TT 01 oder 00 quittiert. Das bedeutet 256 m�gliche Weichen
-            //  Adressen 64-127 werden als Feedback interpretiert, das bedeutet 512 m�gliche Melder
-
-		      switch(xpressnet_feedback_mode)
-		      {
-		        default:  
-				    case 0:                             // mixed mode    
-		            if (rx_message[1] < 64)
-		            {
-		                // Nur f�r Schaltinfo:
-		                addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
-		                tx_message[0] = 0x42;
-                    // TODO!! we moeten deze functie herimplementeren zonder S88
-		                //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
-		                xp_send_message_to_current_slot(tx_ptr = tx_message);
-		                processed = 1;
-		            }
-		            else
-		            { // request feedback info, shift addr locally down 
-		                addr = ((rx_message[1] - 64) << 3) + (unsigned char)((rx_message[2] & 0x01) << 2);
-		                tx_message[0] = 0x42;
-                    // TODO!! we moeten deze functie herimplementeren zonder S88
-		                //SDS create_xpressnet_feedback(addr, &tx_message[1]);
-		                xp_send_message_to_current_slot(tx_ptr = tx_message);
-		                processed = 1;
-		            }
-		            break;
-		        case 1:                           	   // only feedback
-		            addr = ((rx_message[1]) << 3) + (unsigned char)((rx_message[2] & 0x01) << 2);
-                tx_message[0] = 0x42;
-                // TODO!! we moeten deze functie herimplementeren zonder S88
-                //SDS create_xpressnet_feedback(addr, &tx_message[1]);
-                xp_send_message_to_current_slot(tx_ptr = tx_message);
-                processed = 1;
-      					break;
-		        case 2:                           	   // only schaltinfo
-		            addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
-                tx_message[0] = 0x42;
-                // TODO!! we moeten deze functie herimplementeren zonder S88
-                //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
-                xp_send_message_to_current_slot(tx_ptr = tx_message);
-                processed = 1;
-    					  break;
-		      }           
-          break;
-
-        case 0x5:
-            // 0x52 Addr DAT [XOR] "Accessory Decoder operation request"
-            // Schaltbefehl 0x52 ADR DAT X-Or
-            // Hex: 0x52 Adresse 0x80 + SBBO; 
-            // Adresse: = Decoder;   S= 1=activate, 0=deactivate,
-            //                       BB=local adr,
-            //                       O=Ausgang 0 (red) / Ausgang 1 (gr�n)
-            // (das w�rde eigentlich schon passend f�r DCC vorliegen, aber lieber sauber �bergeben)
-            addr = (unsigned int) (rx_message[1] << 2) + ((rx_message[2] >> 1) & 0b011);
-            activate = (rx_message[2] & 0b01000) >> 3;
-            coil = rx_message[2] & 0b01;
-            if (invert_accessory & 0b01) coil = coil ^ 1;
-
-            do_accessory(current_slot, addr, coil, activate);
-           
-            tx_message[0] = 0x42;
-             // TODO!! we moeten deze functie herimplementeren zonder S88
-            //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
-
-            // at this point I was not sure how to react:
-            // either answer the request or/and send out a broadcast
-            // we do both
-
-            xp_send_message_to_current_slot(tx_ptr = tx_message);
-            xp_send_message(FUTURE_ID | 0, tx_message);
-       
-	        #if (XPRESSNET_TUNNEL == 1)
-                if (tunnel_2pc_is_full()) 
-                  { // this is in effect an error condition
-    			  }
-                else
-                  {
-                    put_in_tunnel_2pc((t_tunnel_message*) tx_message);	// notify pc
-                  }
-            #endif
-            processed = 1;
-            break;
-        case 0x7:
-            // BiDi Messages
-            switch(rx_message[1])
-              {
-                default: 
-                    break;
-                case 0xE0:          // 0x74 0xE0 AddrH AddrL SPEED [XOR] Speed annoucment
-                    processed = 1;                          // no answer here, but a broadcast will occur
-                    break;
-                case 0xE1:          // 0x78 0xE1 AddrH AddrL CV_H CV_L DAT [XOR] CV Read
-                    // we send a mirror as broadcast
-                    xp_send_message(MESSAGE_ID | 0, rx_message);
-                    
-                    // if possible, remove this pom command from the stack in organizer
-                    
-                    // now forward this to IB-Parser / Lenzparser:
-
-                    #if (PARSER == INTELLIBOX)
-                        notify_pom_to_parser((rx_message[2] << 8) + rx_message[3],       // addr
-                                             (rx_message[4] << 8) + rx_message[5] + 1,   // cv,
-                                              rx_message[6]);
-                    #endif
-                    #if (PARSER == LENZ)
-                        #warning: currently we do not forward bidi results to host in Lenz emulation
-                    #endif
-
-
-                    processed = 1;                          // no answer here, but a broadcast will occur
-                    break;
-                case 0xF0:          // 0x73 0xF0 SID_H SID_L Detector is IDLE
-                /* SDS - geen S88
-                    addr = (rx_message[2] << 8) + rx_message[3];
-                    enter_bit_to_s88(addr, 0);
-                    #if (BIDI_SUPPORT >= 2)
-                        clear_location_locobuffer(addr);
-                    #endif
-                    processed = 1;                          // no answer here, but a broadcast will occur
-                SDS - laat processed = 0, dan krijg je een unknown command als antwoord */    
-                    break;
-                case 0xF1:          // 0x73 0xF1 SID_H SID_L Detector is OCCUPIED
-                /* SDS - geen S88
-                    addr = (rx_message[2] << 8) + rx_message[3];
-                    enter_bit_to_s88(addr, 1);
-                    // die entsprechende DID im Locobuffer suchen und bei der Lok die DID wegnehmen.
-                    #if (BIDI_SUPPORT >= 2)
-                        clear_location_locobuffer(addr);
-                    #endif
-                    processed = 1;                          // no answer here, but a broadcast will occur
-                SDS - laat processed = 0, dan krijg je een unknown command als antwoord */    
-                    break;
-                case 0xF2:          // 0x75 0xF2 SID_H SID_L D+AddrH AddrL Detector has Loco Detected
-                    #if (BIDI_SUPPORT >= 2)
-                        addr = (rx_message[4] << 8) + rx_message[5];
-                        set_location_locobuffer(addr, (rx_message[2] << 8) + rx_message[3]);
-                    #endif
-                    processed = 1;
-                    break;
-                case 0xFE:          // 0x7x 0xFE SID_H SID_L DAT0 [DAT1] [DAT2] ... [DAT7] [XOR] 	"occupancy vector"
-                /* SDS - geen S88
-                    addr = (rx_message[2] << 8) + rx_message[3];
-                    if ((rx_message[3] & 0x7) == 0)  // must be aligned
-                      {
-                        for(coil = 4; coil <= (rx_message[0] & 0x0F); coil++ )   // use coil as temp
-                          {
-                            enter_byte_to_s88(addr, rx_message[coil]);
-                            addr += 8;
-                          }
-                        processed = 1;                          // no answer here, but a broadcast will occur
-                      }
-                SDS - laat processed = 0, dan krijg je een unknown command als antwoord */    
-                    break;                
-                case 0xFF:          // 0x75 0xFF SID1_H SID1_L SID2_H SID2_request rescan
-                    processed = 1;                          // no answer here, but a broadcast will occur
-                    break;
-              }
-/*
-#if (XPRESSNET_TUNNEL == 1)
-            if (tunnel_2pc_is_full())
-              { 
-                xp_send_busy();             // we are busy
-              } 
-            else 
-              {
-                put_in_tunnel_2pc((t_tunnel_message*) rx_message);
-              }
-            processed = 1;
-#endif
-*/
-            break;
-        case 0x8:
-            // Alle Loks anhalten 0x80 0x80
-            if (rx_message[1] == 0x80)
-              {
-                set_opendcc_state(RUN_STOP);                     // from organizer.c 
-                processed = 1;                                   // no answer here, but a broadcast will occur
-              }
-            break;
-        case 0x9:
-            // 0x91 loco_addr [XOR] "Emergency stop a locomotive"
-            // 0x92 AddrH AddrL [XOR] "Emergency stop a locomotive"
-            // 0x9N loco_addr_1 loco_addr_2 etc. loco_addr N [XOR] "Emergency stop selected locomotives"
-            if (rx_message[0] == 0x91)
-              {
-                addr = rx_message[1];           // only short addr
-                do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
-                processed = 1;
-              }
-            else if (rx_message[0] == 0x92)
-              {
-                addr = ((rx_message[1] & 0x3F) * 256) + rx_message[2];
-                do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
-                processed = 1;
-              }
-            // no response is to be sent
-            break;
-        case 0xE:
-            switch(rx_message[1] & 0xf0)      // high nibble von rx_message[1]:
-              {
-                case 0x00:
-                    // 0xE3 0x00 AddrH AddrL [XOR] "Locomotive information request"
-                    // 0xE4 0x01+R MTR AddrH AddrL [XOR] "Address inquiry member of a Multi-unit request"
-                    // 0xE2 0x03+R MTR [XOR] "Address inquiry Multi-unit request"
-                    // 0xE3 0x05+R AddrH AddrL [XOR] "Address inquiry locomotive at command station stack request"
-                    // 0xE3 0x07 AddrH AddrL [XOR] "Function status request"
-                    // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
-                    addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
-                    switch(rx_message[1] & 0x0f)
-                      {
-                        unsigned int result;
-                        case 0x00:
-                            xp_send_lokdaten(addr);
-                            processed = 1;
-                            break;
-                        case 0x05:
-                            result = addr_inquiry_locobuffer(addr, 1); // forward
-                            xp_send_loco_addr(result);
-                            processed = 1;
-                            break;
-                        case 0x06:
-                            result = addr_inquiry_locobuffer(addr, 0); // revers
-                            xp_send_loco_addr(result);
-                            processed = 1;
-                            break;
-                        case 0x07:
-                            xp_send_loco_func_status(addr);
-                            processed = 1;
-                            break;
-                        #if (DCC_F13_F28 == 1)
-                            // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
-                        case 0x08:
-                            xp_send_funct_level_f13_f28(addr);  // !!! Das ist nicht korrekt, wir faken das!!!
-                            processed = 1;
-                            break;
-                            // 0xE3 0x09 AddrH AddrL [XOR] "Function level request F13-F28"
-                        case 0x09:
-                            xp_send_funct_level_f13_f28(addr);
-                            processed = 1;
-                            break;
-                        #endif
-                      }
-                    break;
-
-                case 0x10:           
-                    // Lok Fahrbefehl ab V3 0xE4 Kennung ADR High ADR Low Speed X-Or
-                    addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
-                    format = rx_message[1] & 0x03;   // 0=14, 1=27, 2=28, 3=128 see t_format Definition
-                    switch(format)
-                      {
-                        case DCC14:
-                            speed = (rx_message[4] & 0x80) | (rx_message[4] & 0x0F);
-                            processed = 1;   
-                            break;
-                        case DCC27:
-                        case DCC28:
-                            if ((rx_message[4] & 0x0F) <= 1)               // map 0x?0 to 0 and 0x?1 to 1
-                                 speed = rx_message[4] & 0x81;             // stop or nothalt
-                            else 
-                              {
-                                speed = ((rx_message[4] & 0x0F) << 1) | ((rx_message[4] & 0x10) >> 4);
-                                speed = speed - 2;                  // map 4..31 to 2..29
-                                speed = speed | (rx_message[4] & 0x80);    // direction
-                              }
-                            processed = 1;
-                            break;
-                        case DCC128:
-                            speed = rx_message[4];
-                            processed = 1;
-                            break;
-                      }
-                    
-                    if (organizer_ready())
-                      {
-                        unsigned char myspeed;
-                        myspeed = convert_speed_from_rail(speed, format); // map lenz to internal 0...127                      
-
-                        retval = do_loco_speed_f(current_slot, addr, myspeed, format);
-                        if (retval & (1<<ORGZ_STOLEN) )
-                          {
-                            xp_send_lok_stolen(orgz_old_lok_owner , addr);
-                          }
-                        processed = 1;
-                        // no response is given
-                      }
-                    else
-                      {
-                        xp_send_busy();             // we are busy
-                        processed = 1;
-                      }
-                    break;
-                case 0x20:
-                    addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
-                    switch(rx_message[1] & 0x0F)   // Lok Funktionsbefehl ab V3 0xE4 Kennung ADR High ADR Low Gruppe X-Or
-                      {
-                        case 0:          // Hex : 0xE4 0x20 AH AL Gruppe 1 X-Or-Byte   (Gruppe 1: 000FFFFF) f0, f4...f1
-                            if (organizer_ready())
-                              {
-                                retval = do_loco_func_grp0(current_slot, addr, rx_message[4]>>4); // light, f0
-                                retval |= do_loco_func_grp1(current_slot, addr, rx_message[4]);
-                                if (retval & (1<<ORGZ_STOLEN) )
-                                  {
-                                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                                  } 
-                                processed = 1;              // no response is given
-                              }
-                            else
-                              {
-                                xp_send_busy();             // we are busy
-                                processed = 1;
-                              }
-                            break;
-                        case 1:          // Hex : 0xE4 0x21 AH AL Gruppe 2 X-Or-Byte   (Gruppe 2: 0000FFFF) f8...f5
-                            if (organizer_ready())
-                              {
-                                retval = do_loco_func_grp2(current_slot, addr, rx_message[4]);
-                                if (retval & (1<<ORGZ_STOLEN) )
-                                  {
-                                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                                  } 
-                                processed = 1;                // no response is given
-                              }
-                            else
-                              {
-                                 xp_send_busy();             // we are busy
-                                 processed = 1;
-                              }
-                            break;
-                        case 2:          // Hex : 0xE4 0x22 AH AL Gruppe 3 X-Or-Byte   (Gruppe 3: 0000FFFF) f12...f9
-                            if (organizer_ready())
-                              {
-                                retval = do_loco_func_grp3(current_slot, addr, rx_message[4]);
-                                if (retval & (1<<ORGZ_STOLEN) )
-                                  {
-                                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                                  } 
-                                processed = 1;// no response is given
-                              }
-                            else
-                              {
-                                 xp_send_busy();             // we are busy
-                                 processed = 1;
-                              }
-                            break;
-                        case 3:          // Hex : 0xE4 0x23 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
-                            if (organizer_ready())
-                              {
-                                #if (DCC_F13_F28 == 1)
-                                retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
-                                if (retval & (1<<ORGZ_STOLEN) )
-                                  {
-                                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                                  }
-                                #endif
-                                processed = 1;
-                                // no response is given
-                              }
-                            else
-                              {
-                                 xp_send_busy();             // we are busy
-                                 processed = 1;
-                              }
-                            break;
-                        case 4:
-                        case 5:
-                        case 6:
-                                        //  Funktionsstatus setzen ab V3 0xE4 Kennung ADR High ADR Low Gruppe X-Or
-                                        // Hex : 0xE4 0x24 AH AL Gruppe 1 (000SSSSS)  S=1: Funktion ist tastend
-                                        // Hex : 0xE4 0x25 AH AL Gruppe 2 (0000SSSS)
-                                        // Hex : 0xE4 0x26 AH AL Gruppe 3 (0000SSSS)
-                            break;
-
-                        case 7:          // set function status
-                                         // Hex : 0xE4 0x27 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
-                            break;
-                        case 8:          // Hex : 0xE4 0x28 AH AL Gruppe 5 X-Or-Byte   (Gruppe 5: FFFFFFFF) f28...f21
-                            if (organizer_ready())
-                              {
-                                #if (DCC_F13_F28 == 1)
-                                retval = do_loco_func_grp5(current_slot, addr, rx_message[4]);
-                                if (retval & (1<<ORGZ_STOLEN) )
-                                  {
-                                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                                  }
-                                #endif
-                                processed = 1;
-                                // no response is given
-                              }
-                            else
-                              {
-                                 xp_send_busy();             // we are busy
-                                 processed = 1;
-                              }
-                            break;
-                        case 0xC:          // Hex : 0xE4 0x2C AH AL Gruppe 5 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
-                            break;
-                        case 0xF:       // Hex : 0xE4 0x27 AH AL RF X-Or-Byte
-                                        // (RF=Refreshmode: 0:F0..F4, 1:F0...F8, 3=F0..F12, 7=F0..F12, F=f0..F28)
-                            break;
-                      }
-                    break;
-
-                case 0x30:
-                    // Prog. on Main Byte ab V3   0xE6 0x30 AddrH AddrL 0xEC + C CV DAT X-Or
-                    // Prog. on Main Bit ab V3    0xE6 0x30 AddrH AddrL 0xE8 + C CV DAT X-Or
-                    // Prog. on Main Read ab V3.6 0xE6 0x30 AddrH AddrL 0xEA + C CV DAT [XOR] 
-                    // NOTE: 0xEA seem to be an error, should be 0xE4
-
-                    // Note: Xpressnet does only PoM for Loco, no Accessory!
-                    
-                    // xaddr.as_uint16 = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
-                    xaddr.as_uint8[1] = rx_message[2] & 0x3F;
-                    xaddr.as_uint8[0] = rx_message[3];
-                      {
-                        unsigned int xp_cv;
-                        unsigned char xp_data;
-                        xp_cv = (rx_message[4] & 0x03) * 256 + rx_message[5];    // xp_cv has the range 0..1023!
-                        xp_cv++;                                                 // map to internal range
-                        xp_data = rx_message[6];
-                        if ((rx_message[4] & 0xFC) == 0xEC)
-                          {
-                            do_pom_loco(xaddr.as_uint16, xp_cv, xp_data);        //  program on the main (byte mode)
-                            processed = 1;
-                          }
-                        else if ((rx_message[4] & 0xFC) == 0xE4)  // 02.04.2010
-                          {
-                            do_pom_loco_cvrd(xaddr.as_uint16, xp_cv);           //  pom cvrd the main (byte mode)
-                            processed = 1;
-                          }
-                        else if ((rx_message[4] & 0xFC) == 0xE8)
-                          {
-                            //!!! bit mode unsupported
-                          }
-                        else if ((rx_message[4] & 0xFC) == 0xF0)
-                          {
-                            do_pom_accessory(xaddr.as_uint16, xp_cv, xp_data);
-                            processed = 1;
-                          }
-                        else if ((rx_message[4] & 0xFC) == 0xF4)
-                          {
-                            do_pom_accessory_cvrd(xaddr.as_uint16, xp_cv);
-                            processed = 1;
-                          }
-                        else if ((rx_message[4] & 0xFC) == 0xF8)
-                          {
-                            do_pom_ext_accessory(xaddr.as_uint16, xp_cv, xp_data);
-                            processed = 1;
-                          }
-                        else if ((rx_message[4] & 0xFC) == 0xFC)
-                          {
-                            do_pom_ext_accessory_cvrd(xaddr.as_uint16, xp_cv);
-                            processed = 1;
-                          }
-                      }
-                    break; 
-  
-                case 0x40:   //Lokverwaltung (Double Header)
-                    // !!! Lok zu MTR hinzuf�gen ab V3 0xE4 0x40 + R ADR High ADR Low MTR X-Or
-                    // !!! Lok aus MTR entfernen ab V3 0xE4 0x42 ADR High ADR Low MTR X-Or
-                    // !!! DTR-Befehle ab V3 0xE5 0x43 ADR1 H ADR1 L ADR2 H ADR2 L X-Or
-                    // !!! Lok aus Stack l�schen ab V3 0xE3 0x44 ADR High ADR Low X-Or
-                    addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
-                    switch(rx_message[1] & 0x0f)
-                      {
-                        case 0x04:
-                            delete_from_locobuffer(addr);   // normally we don't need this - we manage it dynamically
-                            processed = 1;
-                            break;
-                      }
-                    break;
-
-                case 0xF0:
-                    switch(rx_message[1] & 0x0F)
-                      {
-                        case 1:          // Hex : 0xE? 0xF1 (Lokdatenbank, Roco)
-                            break;
-                        case 3:          // Hex : 0xE4 0xF3 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
-                                         // (special version for Roco Multimaus)
-                            if (organizer_ready())
-                              {
-                                #if (DCC_F13_F28 == 1)
-                                addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
-                                retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
-                                if (retval & (1<<ORGZ_STOLEN) )
-                                  {
-                                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                                  }
-                                #endif
-                                processed = 1;
-                                // no response is given
-                              }
-                            else
-                              {
-                                 xp_send_busy();             // we are busy
-                                 processed = 1;
-                              }
-                            break;
-                      }
-                    break;
+{
+  unsigned int addr;
+  t_data16 xaddr;
+  unsigned char speed = 0;
+  unsigned char activate, coil;
+  t_format format;
+  unsigned char processed = 0;
+  unsigned char retval;
+      
+  switch(rx_message[0] >> 4) {   // this is the opcode
+    case 0x0:
+      #if (DCC_FAST_CLOCK == 1)
+      switch(rx_message[1]) {
+        case 0xF1:
+          // set clock
+          for(coil = 2; coil <= (rx_message[0] & 0x0F); coil++ ) {   // use coil as temp
+            speed = 99;     // use speed as temp
+            switch(rx_message[coil] & 0xC0) {
+              case 0x00:  
+                speed = rx_message[coil] & 0x3F;
+                if (speed < 60) fast_clock.minute = speed;
+                break;
+              case 0x80:  
+                speed = rx_message[coil] & 0x3F;
+                if (speed < 24) fast_clock.hour = speed;
+                break;
+              case 0x40:  
+                speed = rx_message[coil] & 0x3F;
+                if (speed < 7) fast_clock.day_of_week = speed;
+                break;
+              case 0xC0:  
+                speed = rx_message[coil] & 0x3F;
+                if (speed < 32) fast_clock.ratio = speed;
+                break;
             }
+          }                            
+          do_fast_clock(&fast_clock); // dcc msg
+          xp_send_fast_clock(current_slot); // xpnet msg
+          processed = 1;
+          break;
+        case 0xF2:
+          // query clock
+          xp_send_fast_clock(current_slot);
+          processed = 1;
+          break;
       }
-    if (!processed) 
-      {
-        xp_send_message_to_current_slot(tx_ptr = xp_unknown);            // unknown command
+      #endif
+      break;
+    case 0x1:
+      switch(rx_message[1]) {
+        case 0x01:
+          // dcc extended accessory operations request
+          addr = (unsigned int) (((unsigned char)(rx_message[2] & 0x07)) << 8) + rx_message[3];
+          do_extended_accessory(addr, (unsigned char)(rx_message[2] >> 3) & 0x1F);
+          // no answer
+          processed = 1;
+          break;
+      }
+      break;
+    case 0x2:
+      switch(rx_message[1]) {
+        case 0x10: 
+          // Prog.-Ergebnis anfordern 0x21 0x10 0x31
+          if (opendcc_state >= PROG_OKAY) {
+            xpnet_send_prog_result();
+            processed = 1;
+          }
+          // else: Command void -> end of case
+          break;
+        case 0x11: 
+          // Prog.-Lesen Registermode 0x22 0x11 REG X-Or
+          // REG contains the Resister (1...8), this Command has no answer
+          my_XPT_DCCRR (rx_message[2]);   // return code = 2 - if bad parameter
+          processed = 1;
+          break;
+        case 0x12: 
+          // Prog.-Schreiben Register 0x23 0x12 REG DAT X-Or
+          my_XPT_DCCWR (rx_message[2], rx_message[3]);   
+          processed = 1;
+          break;
+        case 0x14:
+          // Prog-lesen Pagemode Hex : 0x22 0x14 CV X-Or-Byte
+          if (rx_message[2] == 0) addr = 256;
+          else addr = rx_message[2];
+          my_XPT_DCCRP (addr);
+          processed = 1;
+          break;
+        case 0x15: 
+          // Prog.-Lesen CV 0x22 0x15 CV X-Or    // old; according to Lenz we should return CV1024?
+          if (rx_message[2] == 0) addr = 256;
+          else addr = rx_message[2];
+          my_XPT_DCCRD (addr);
+          processed = 1;
+          break;
+        case 0x16: 
+          // Prog.-Schreiben CV 0x23 0x16 CV DAT X-Or
+          // CV: 1..256
+          if (rx_message[2] == 0) addr = 256;
+          else addr = rx_message[2];
+          my_XPT_DCCWD (addr, rx_message[3]);    // direct mode
+          processed = 1;
+          break;
+        case 0x17: 
+          // Prog.-Schreiben Paging 0x23 0x17 CV DAT X-Or
+          if (rx_message[2] == 0) addr = 256;
+          else addr = rx_message[2];
+          my_XPT_DCCWP (addr, rx_message[3]);
+          processed = 1;
+          break;
+        case 0x18:      // Prog.-Lesen CV 0x22 0x18 CV X-Or    // CV 1..255, 1024
+        case 0x19:      // Prog.-Lesen CV 0x22 0x19 CV X-Or    // CV 256 .. 511
+        case 0x1A:      // Prog.-Lesen CV 0x22 0x1A CV X-Or    // CV 512 .. 767
+        case 0x1B:      // Prog.-Lesen CV 0x22 0x1B CV X-Or    // CV 768 .. 1023
+          addr = ((rx_message[1] & 0x03) * 256) + rx_message[2];
+          if (addr == 0) addr = 1024;
+          my_XPT_DCCRD (addr);
+          processed = 1;
+          break;
+        case 0x1C:      // Prog.-Schreiben CV 0x23 0x1C CV DAT X-Or; CV: 1..255, 1024
+        case 0x1D:      // Prog.-Schreiben CV 0x23 0x1D CV DAT X-Or; CV: 256 .. 511
+        case 0x1E:      // Prog.-Schreiben CV 0x23 0x1E CV DAT X-Or; CV: 512 ... 767
+        case 0x1F:      // Prog.-Schreiben CV 0x23 0x1F CV DAT X-Or; CV: 768 ... 1024
+          addr = ((rx_message[1] & 0x03) * 256) + rx_message[2];
+          if (addr == 0) addr = 1024;
+          my_XPT_DCCWD (addr, rx_message[3]);  // direct mode
+          processed = 1;
+          break;
+        case 0x21:
+          // Softwareversion anfordern 0x21 0x21 0x00
+          xp_send_message_to_current_slot(tx_ptr = xpnet_version);
+          processed = 1;
+          break;
+        case 0x22:
+          // Power Up Mode einstellen 0x22 0x22 00000M00
+          // we don't do this (always manual mode, no automatic power to tracks)
+          // no answer
+          break;
+        case 0x24:
+          // Statusabfrage 0x21 0x24 0x05 "Command station status request"
+          xp_send_status();
+          processed = 1; 
+          break;
+        case 0x80:    
+          // 0x21 0x80 0xA1 "Stop operations request (emergency off)"
+          set_opendcc_state(RUN_OFF);
+          processed = 1;                              // no answer here, but a broadcast will occur
+          break;
+        case 0x81:
+          // 0x21 0x81 0xA0 "Resume operations request"
+          set_opendcc_state(RUN_OKAY);    
+          processed = 1;                              // no answer here, but a broadcast will occur
+          break;
+      }
+      break;
+
+    case 0x4:
+      // not yet tested: Schaltinformation anfordern 0x42 ADR Nibble X-Or
+      // Hex : 0x42 Adresse 0x80 + N X-Or-Byte
+      // f�r Weichen: Adresse = Adr / 4; N=Nibble
+      // nicht f�r R�ckmelder!
+      // Antwort:
+      // Hex : 0x42 ADR ITTNZZZZ X-Or-Byte
+      // ADR = Adresse mod 4
+      // I: 1=in work; 0=done -> bei uns immer 0
+      // TT = Type: 00=Schaltempf. 01=Schaltempf. mit RM, 10: R�ckmelder, 11 reserved
+      // N: 0=lower Nibble, 1=upper
+      // ZZZZ: Zustand; bei Weichen je 2 Bits: 00=not yet; 01=links, 10=rechts, 11:void
+      // Bei R�ckmeldern: Direkt die 4 Bits des Nibbles
+      // TC interpretiert das alles als direkt �bereinanderliegend;
+      // also hier und in s88.c folgende Notl�sung:
+      //  Adressen 0..63  werden als DCC-Accessory interpretiert, aus dem Turnout-Buffer geladen
+      //                  und mit TT 01 oder 00 quittiert. Das bedeutet 256 m�gliche Weichen
+      //  Adressen 64-127 werden als Feedback interpretiert, das bedeutet 512 m�gliche Melder
+
+    switch(xpressnet_feedback_mode) {
+      default:
+      case 0:                             // mixed mode    
+        if (rx_message[1] < 64)  {
+          // Nur f�r Schaltinfo:
+          addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
+          tx_message[0] = 0x42;
+          // TODO!! we moeten deze functie herimplementeren zonder S88
+          //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
+          xp_send_message_to_current_slot(tx_ptr = tx_message);
+          processed = 1;
+        }
+        else { // request feedback info, shift addr locally down 
+          addr = ((rx_message[1] - 64) << 3) + (unsigned char)((rx_message[2] & 0x01) << 2);
+          tx_message[0] = 0x42;
+          // TODO!! we moeten deze functie herimplementeren zonder S88
+          //SDS create_xpressnet_feedback(addr, &tx_message[1]);
+          xp_send_message_to_current_slot(tx_ptr = tx_message);
+          processed = 1;
+        }
+        break;
+      case 1:                           	   // only feedback
+        addr = ((rx_message[1]) << 3) + (unsigned char)((rx_message[2] & 0x01) << 2);
+        tx_message[0] = 0x42;
+        // TODO!! we moeten deze functie herimplementeren zonder S88
+        //SDS create_xpressnet_feedback(addr, &tx_message[1]);
+        xp_send_message_to_current_slot(tx_ptr = tx_message);
+        processed = 1;
+        break;
+      case 2:                           	   // only schaltinfo
+        addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
+        tx_message[0] = 0x42;
+        // TODO!! we moeten deze functie herimplementeren zonder S88
+        //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
+        xp_send_message_to_current_slot(tx_ptr = tx_message);
+        processed = 1;
+        break;
+    }           
+    break;
+
+    case 0x5:
+      // 0x52 Addr DAT [XOR] "Accessory Decoder operation request"
+      // Schaltbefehl 0x52 ADR DAT X-Or
+      // Hex: 0x52 Adresse 0x80 + SBBO; 
+      // Adresse: = Decoder;   S= 1=activate, 0=deactivate,
+      //                       BB=local adr,
+      //                       O=Ausgang 0 (red) / Ausgang 1 (gr�n)
+      // (das w�rde eigentlich schon passend f�r DCC vorliegen, aber lieber sauber �bergeben)
+      addr = (unsigned int) (rx_message[1] << 2) + ((rx_message[2] >> 1) & 0b011);
+      activate = (rx_message[2] & 0b01000) >> 3;
+      coil = rx_message[2] & 0b01;
+      if (invert_accessory & 0b01) coil = coil ^ 1;
+
+      do_accessory(current_slot, addr, coil, activate);
+      tx_message[0] = 0x42;
+        // TODO!! we moeten deze functie herimplementeren zonder S88
+      //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
+
+      // at this point I was not sure how to react:
+      // either answer the request or/and send out a broadcast
+      // we do both
+      xp_send_message_to_current_slot(tx_ptr = tx_message);
+      xp_send_message(FUTURE_ID | 0, tx_message);
+      processed = 1;
+      break;
+    case 0x8:
+      // Alle Loks anhalten 0x80 0x80
+      if (rx_message[1] == 0x80) {
+        set_opendcc_state(RUN_STOP);                     // from organizer.c 
+        processed = 1;                                   // no answer here, but a broadcast will occur
+      }
+      break;
+    case 0x9:
+      // 0x91 loco_addr [XOR] "Emergency stop a locomotive"
+      // 0x92 AddrH AddrL [XOR] "Emergency stop a locomotive"
+      // 0x9N loco_addr_1 loco_addr_2 etc. loco_addr N [XOR] "Emergency stop selected locomotives"
+      if (rx_message[0] == 0x91) {
+        addr = rx_message[1];           // only short addr
+        do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
+        processed = 1;
+      }
+      else if (rx_message[0] == 0x92) {
+        addr = ((rx_message[1] & 0x3F) * 256) + rx_message[2];
+        do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
+        processed = 1;
+      }
+      // no response is to be sent
+      break;
+    case 0xE:
+      switch(rx_message[1] & 0xf0) { // high nibble von rx_message[1]:
+        case 0x00:
+          // 0xE3 0x00 AddrH AddrL [XOR] "Locomotive information request"
+          // 0xE4 0x01+R MTR AddrH AddrL [XOR] "Address inquiry member of a Multi-unit request"
+          // 0xE2 0x03+R MTR [XOR] "Address inquiry Multi-unit request"
+          // 0xE3 0x05+R AddrH AddrL [XOR] "Address inquiry locomotive at command station stack request"
+          // 0xE3 0x07 AddrH AddrL [XOR] "Function status request"
+          // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
+          addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
+          switch(rx_message[1] & 0x0f) {
+            unsigned int result;
+            case 0x00:
+              xp_send_lokdaten(addr);
+              processed = 1;
+              break;
+            case 0x05:
+              result = addr_inquiry_locobuffer(addr, 1); // forward
+              xp_send_loco_addr(result);
+              processed = 1;
+              break;
+            case 0x06:
+              result = addr_inquiry_locobuffer(addr, 0); // revers
+              xp_send_loco_addr(result);
+              processed = 1;
+              break;
+            case 0x07:
+              xp_send_loco_func_status(addr);
+              processed = 1;
+              break;
+            #if (DCC_F13_F28 == 1)
+              // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
+            case 0x08:
+              xp_send_funct_level_f13_f28(addr);  // !!! Das ist nicht korrekt, wir faken das!!!
+              processed = 1;
+              break;
+              // 0xE3 0x09 AddrH AddrL [XOR] "Function level request F13-F28"
+            case 0x09:
+              xp_send_funct_level_f13_f28(addr);
+              processed = 1;
+              break;
+            #endif
+          }
+          break;
+        case 0x10:           
+          // Lok Fahrbefehl ab V3 0xE4 Kennung ADR High ADR Low Speed X-Or
+          addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
+          format = rx_message[1] & 0x03;   // 0=14, 1=27, 2=28, 3=128 see t_format Definition
+          switch(format) {
+            case DCC14:
+              speed = (rx_message[4] & 0x80) | (rx_message[4] & 0x0F);
+              processed = 1;   
+              break;
+            case DCC27:
+            case DCC28:
+              if ((rx_message[4] & 0x0F) <= 1)               // map 0x?0 to 0 and 0x?1 to 1
+                    speed = rx_message[4] & 0x81;             // stop or nothalt
+              else {
+                speed = ((rx_message[4] & 0x0F) << 1) | ((rx_message[4] & 0x10) >> 4);
+                speed = speed - 2;                  // map 4..31 to 2..29
+                speed = speed | (rx_message[4] & 0x80);    // direction
+              }
+              processed = 1;
+              break;
+            case DCC128:
+              speed = rx_message[4];
+              processed = 1;
+              break;
+          }
+          
+          if (organizer_ready()) {
+            unsigned char myspeed;
+            myspeed = convert_speed_from_rail(speed, format); // map lenz to internal 0...127                      
+
+            retval = do_loco_speed_f(current_slot, addr, myspeed, format);
+            if (retval & (1<<ORGZ_STOLEN) ) {
+              xp_send_lok_stolen(orgz_old_lok_owner , addr);
+            }
+            processed = 1;
+            // no response is given
+          }
+          else {
+            xp_send_busy();             // we are busy
+            processed = 1;
+          }
+          break;
+        case 0x20:
+          addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
+          switch(rx_message[1] & 0x0F) {  // Lok Funktionsbefehl ab V3 0xE4 Kennung ADR High ADR Low Gruppe X-Or
+            case 0:          // Hex : 0xE4 0x20 AH AL Gruppe 1 X-Or-Byte   (Gruppe 1: 000FFFFF) f0, f4...f1
+              if (organizer_ready()) {
+                retval = do_loco_func_grp0(current_slot, addr, rx_message[4]>>4); // light, f0
+                retval |= do_loco_func_grp1(current_slot, addr, rx_message[4]);
+                if (retval & (1<<ORGZ_STOLEN)) {
+                  xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                } 
+                processed = 1;              // no response is given
+              }
+              else {
+                xp_send_busy();             // we are busy
+                processed = 1;
+              }
+              break;
+            case 1:          // Hex : 0xE4 0x21 AH AL Gruppe 2 X-Or-Byte   (Gruppe 2: 0000FFFF) f8...f5
+              if (organizer_ready()) {
+                retval = do_loco_func_grp2(current_slot, addr, rx_message[4]);
+                if (retval & (1<<ORGZ_STOLEN) )
+                  {
+                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                  } 
+                processed = 1;                // no response is given
+              }
+              else {
+                xp_send_busy();             // we are busy
+                processed = 1;
+              }
+              break;
+            case 2:          // Hex : 0xE4 0x22 AH AL Gruppe 3 X-Or-Byte   (Gruppe 3: 0000FFFF) f12...f9
+              if (organizer_ready()) {
+                retval = do_loco_func_grp3(current_slot, addr, rx_message[4]);
+                if (retval & (1<<ORGZ_STOLEN) )
+                  {
+                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                  } 
+                processed = 1;// no response is given
+              }
+              else  {
+                  xp_send_busy();             // we are busy
+                  processed = 1;
+              }
+              break;
+            case 3:          // Hex : 0xE4 0x23 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
+              if (organizer_ready()) {
+                #if (DCC_F13_F28 == 1)
+                retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
+                if (retval & (1<<ORGZ_STOLEN)) {
+                  xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                }
+                #endif
+                processed = 1;
+                // no response is given
+              }
+              else {
+                xp_send_busy();             // we are busy
+                processed = 1;
+              }
+              break;
+            case 4:
+            case 5:
+            case 6:
+              //  Funktionsstatus setzen ab V3 0xE4 Kennung ADR High ADR Low Gruppe X-Or
+              // Hex : 0xE4 0x24 AH AL Gruppe 1 (000SSSSS)  S=1: Funktion ist tastend
+              // Hex : 0xE4 0x25 AH AL Gruppe 2 (0000SSSS)
+              // Hex : 0xE4 0x26 AH AL Gruppe 3 (0000SSSS)
+              break;
+
+            case 7:  // set function status
+              // Hex : 0xE4 0x27 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
+              break;
+            case 8: // Hex : 0xE4 0x28 AH AL Gruppe 5 X-Or-Byte   (Gruppe 5: FFFFFFFF) f28...f21
+              if (organizer_ready()) {
+                #if (DCC_F13_F28 == 1)
+                retval = do_loco_func_grp5(current_slot, addr, rx_message[4]);
+                if (retval & (1<<ORGZ_STOLEN) )
+                  {
+                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                  }
+                #endif
+                processed = 1;
+                // no response is given
+              }
+              else {
+                xp_send_busy();             // we are busy
+                processed = 1;
+              }
+              break;
+            case 0xC: // Hex : 0xE4 0x2C AH AL Gruppe 5 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
+              break;
+            case 0xF: // Hex : 0xE4 0x27 AH AL RF X-Or-Byte
+              // (RF=Refreshmode: 0:F0..F4, 1:F0...F8, 3=F0..F12, 7=F0..F12, F=f0..F28)
+              break;
+            }
+          break;
+        case 0x30:
+          // Prog. on Main Byte ab V3   0xE6 0x30 AddrH AddrL 0xEC + C CV DAT X-Or
+          // Prog. on Main Bit ab V3    0xE6 0x30 AddrH AddrL 0xE8 + C CV DAT X-Or
+          // Prog. on Main Read ab V3.6 0xE6 0x30 AddrH AddrL 0xEA + C CV DAT [XOR] 
+          // NOTE: 0xEA seem to be an error, should be 0xE4
+          // Note: Xpressnet does only PoM for Loco, no Accessory!
+          // xaddr.as_uint16 = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
+          xaddr.as_uint8[1] = rx_message[2] & 0x3F;
+          xaddr.as_uint8[0] = rx_message[3];
+          unsigned int xp_cv;
+          unsigned char xp_data;
+          xp_cv = (rx_message[4] & 0x03) * 256 + rx_message[5];    // xp_cv has the range 0..1023!
+          xp_cv++;                                                 // map to internal range
+          xp_data = rx_message[6];
+          if ((rx_message[4] & 0xFC) == 0xEC) {
+            do_pom_loco(xaddr.as_uint16, xp_cv, xp_data);        //  program on the main (byte mode)
+            processed = 1;
+          }
+          else if ((rx_message[4] & 0xFC) == 0xE4) {  // 02.04.2010
+            do_pom_loco_cvrd(xaddr.as_uint16, xp_cv);           //  pom cvrd the main (byte mode)
+            processed = 1;
+          }
+          else if ((rx_message[4] & 0xFC) == 0xE8) {
+            //!!! bit mode unsupported
+          }
+          else if ((rx_message[4] & 0xFC) == 0xF0) {
+            do_pom_accessory(xaddr.as_uint16, xp_cv, xp_data);
+            processed = 1;
+          }
+          else if ((rx_message[4] & 0xFC) == 0xF4) {
+            do_pom_accessory_cvrd(xaddr.as_uint16, xp_cv);
+            processed = 1;
+          }
+          else if ((rx_message[4] & 0xFC) == 0xF8) {
+            do_pom_ext_accessory(xaddr.as_uint16, xp_cv, xp_data);
+            processed = 1;
+          }
+          else if ((rx_message[4] & 0xFC) == 0xFC) {
+            do_pom_ext_accessory_cvrd(xaddr.as_uint16, xp_cv);
+            processed = 1;
+          }
+          break; 
+        case 0x40:   //Lokverwaltung (Double Header)
+          // !!! Lok zu MTR hinzuf�gen ab V3 0xE4 0x40 + R ADR High ADR Low MTR X-Or
+          // !!! Lok aus MTR entfernen ab V3 0xE4 0x42 ADR High ADR Low MTR X-Or
+          // !!! DTR-Befehle ab V3 0xE5 0x43 ADR1 H ADR1 L ADR2 H ADR2 L X-Or
+          // !!! Lok aus Stack l�schen ab V3 0xE3 0x44 ADR High ADR Low X-Or
+          addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
+          switch(rx_message[1] & 0x0f) {
+            case 0x04:
+                delete_from_locobuffer(addr);   // normally we don't need this - we manage it dynamically
+                processed = 1;
+                break;
+          }
+          break;
+        case 0xF0:
+          switch(rx_message[1] & 0x0F) {
+            case 1: // Hex : 0xE? 0xF1 (Lokdatenbank, Roco)
+              break;
+            case 3: // Hex : 0xE4 0xF3 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
+              // (special version for Roco Multimaus)
+              if (organizer_ready()) {
+                #if (DCC_F13_F28 == 1)
+                  addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
+                  retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
+                  if (retval & (1<<ORGZ_STOLEN)) {
+                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                  }
+                #endif
+                processed = 1;
+                // no response is given
+              }
+              else {
+                xp_send_busy();             // we are busy
+                processed = 1;
+              }
+              break;
+          }
+          break;
       }
   }
-
-
+  if (!processed) 
+  {
+    xp_send_message_to_current_slot(tx_ptr = xp_unknown);            // unknown command
+  }
+} // xp_parser
 
 //===============================================================================
 //
@@ -1418,217 +1144,165 @@ void xp_parser(void)
    #warning Error: XP_SLOT_Timeout too large or Timertick too small! 
 #endif
 
-//#define RX_TIMEOUT     10000L
 #define RX_TIMEOUT     10L // sds : in ms zoals millis()
 
 // internal and static
-enum xp_states
-  {                                     // actual state for the Xpressnet Task
-    XP_INIT,
-    XP_INQUIRE_SLOT,                    // schedule
-    XP_WAIT_FOR_TX_COMPLETE,            // complete inquiry sent?
-    XP_WAIT_FOR_REQUEST,                // client request
-    XP_WAIT_FOR_REQUEST_COMPLETE,
-    XP_WAIT_FOR_ANSWER_COMPLETE,        // Our answer complete sent?
-    XP_CHECK_TUNNEL,                    // pending message from tunnel?
-    XP_CHECK_BROADCAST,                 // is there a broadcast event
-    XP_CHECK_FEEDBACK,                  // is there a feedback event
-    XP_CHECK_STOLEN_LOK,
-    XP_CHECK_DATABASE,                  // is there a database transfer
-  } xp_state;
-
+enum xp_states { // actual state for the Xpressnet Task
+  XP_INIT,
+  XP_INQUIRE_SLOT,                    // schedule
+  XP_WAIT_FOR_TX_COMPLETE,            // complete inquiry sent?
+  XP_WAIT_FOR_REQUEST,                // client request
+  XP_WAIT_FOR_REQUEST_COMPLETE,
+  XP_WAIT_FOR_ANSWER_COMPLETE,        // Our answer complete sent?
+  XP_CHECK_BROADCAST,                 // is there a broadcast event
+  XP_CHECK_FEEDBACK,                  // is there a feedback event
+  XP_CHECK_STOLEN_LOK,
+  XP_CHECK_DATABASE,                  // is there a database transfer
+} xp_state;
 
 signed char slot_timeout;
 uint32_t rx_timeout; // zelfde eenheid als millis()
 
 void run_xpressnet(void)
-  {
+{
+  switch (xp_state) {
+    case XP_INIT:
+      // we supose this is done: init_timer2(); // running with 4us per tick
+      xp_state = XP_INQUIRE_SLOT;
+      break;
 
-    switch (xp_state)
-      {
-        case XP_INIT:
-            // we supose this is done: init_timer2(); // running with 4us per tick
-            xp_state = XP_INQUIRE_SLOT;
-            break;
+    case XP_INQUIRE_SLOT:
+      current_slot = get_next_slot();
+      XP_send_call_byte (0x40 | current_slot);          // this is a normal inquiry call
+      xp_state = XP_WAIT_FOR_TX_COMPLETE;
+      break;
 
-        case XP_INQUIRE_SLOT:
-            current_slot = get_next_slot();
-            
-            XP_send_call_byte (0x40 | current_slot);          // this is a normal inquiry call
-            xp_state = XP_WAIT_FOR_TX_COMPLETE;
-            break;
-
-        case XP_WAIT_FOR_TX_COMPLETE:
-            if (XP_is_all_sent())
-              {
-                xp_state = XP_WAIT_FOR_REQUEST;
-                slot_timeout = TCNT2 + ((XP_SLOT_TIMEOUT+XP_CALL_DURATION) / XP_TIMER_TICK);
-              }
-            break;
-
-        case XP_WAIT_FOR_REQUEST:
-            if (XP_rx_ready())
-              {
-                // slot is requesting -> process it (a complete message could last up to 3ms)
-                rx_message[0] = XP_rx_read();           // save header
-                rx_size = rx_message[0] & 0x0F;         // length is without xor
-                rx_size++;                              // now including xor
-                rx_index = 1;        
-                rx_timeout = millis();
-                xp_state = XP_WAIT_FOR_REQUEST_COMPLETE;
-              }
-            else if ((signed char)(TCNT2 - slot_timeout) >= 0)
-              {
-                // slot timeout reached, continue
-                #if (XPRESSNET_TUNNEL == 1)
-                 xp_state = XP_CHECK_TUNNEL;
-                #else
-                 xp_state = XP_CHECK_BROADCAST;
-                #endif
-              } 
-            break;
-
-        case XP_WAIT_FOR_REQUEST_COMPLETE:
-            if ((millis() - rx_timeout) >= RX_TIMEOUT)
-              {
-                // message incomplete, timeout reached !
-                set_slot_to_watch(current_slot);
-                xp_send_message_to_current_slot(tx_ptr = xp_datenfehler);
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-              }
-            else
-              {
-                if (XP_rx_ready())
-                  {
-                    rx_message[rx_index] = XP_rx_read();
-                    if (rx_index == rx_size)
-                      {
-                        unsigned char i, my_check = 0;
-                        // all data and xor read, now check xor
-                        for (i=0; i<=rx_size; i++) my_check ^= rx_message[i];   
-            
-                        if (my_check == 0)
-                          {
-                            // packet is received and okay, now parse it
-                            set_slot_used(current_slot);
-                            xp_parser();
-                            xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-                          }
-                        else
-                          {
-                            // XOR is wrong!
-                            xp_send_message_to_current_slot(tx_ptr = xp_datenfehler);
-                            set_slot_to_watch(current_slot);
-                            xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-                          }
-                      }
-                    else
-                      {
-                        rx_index++;
-                        if (rx_index == 17-1) rx_index = 17-1;   // overrun!
-                      }
-                  }
-              }           
-            break;
-
-        case XP_WAIT_FOR_ANSWER_COMPLETE:
-            if (XP_is_all_sent())
-              {
-                #if (XPRESSNET_TUNNEL == 1)
-                xp_state = XP_CHECK_TUNNEL;
-                #else
-                xp_state = XP_CHECK_BROADCAST;
-                #endif
-              }
-            break;
-
-        case XP_CHECK_TUNNEL:
-            #if (XPRESSNET_TUNNEL == 1)
-                if (tunnel_2xp_not_empty()) // message pending
-                  {
-                    t_tunnel_message my_message;
-                    get_from_tunnel_2xp(&my_message);
-                    xp_send_message(MESSAGE_ID | my_message.content[1], (unsigned char *) &my_message);
-                    xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-                  }
-            #endif // (XPRESSNET_TUNNEL == 1)
-            // no break;
-        case XP_CHECK_BROADCAST:
-            if (status_event.changed_xp) 
-              {
-                xp_send_bc_message();                            // report any Status Change
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-              }
-            #if (DCC_FAST_CLOCK == 1)
-            else if (status_event.clock) 
-              {
-                xp_send_fast_clock(0);    // send as broadcast   // new: 23.06.2009; possibly we need a flag
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-              }
-            #endif
-            else if (status_event.read_occ) 
-              {
-                xp_send_read_occ();                                 // // send broadcast: please resend occupancy data 
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-              }
-            else
-              {
-                xp_state = XP_CHECK_FEEDBACK;
-                // xp_state = XP_CHECK_STOLEN_LOK;  // skip feedback
-              }
-            break;
-
-        case XP_CHECK_FEEDBACK:
-        /* SDS - we gaan dit moeten vervangen door een non-S88 mechanisme!!
-            if ((s88_event.hardware_change_xp) || (s88_event.turnout_change_xp))
-              {
-               make_s88_xpressnet_report();                         // send broadcast: feedback events
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-              }
-         SDS */
-            xp_state = XP_CHECK_STOLEN_LOK;                         // xp_state = XP_INQUIRE_SLOT;
-            break;
-
-        case XP_CHECK_STOLEN_LOK:
-            if (organizer_state.lok_stolen_by_pc) 
-              {
-                xp_send_stolen_loks();                              // report any Status Change on loks
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-              }
-            else
-              {
-                #if (LOCO_DATABASE == NAMED)
-                    if (db_message_ready) xp_state = XP_CHECK_DATABASE;
-                    else xp_state = XP_INQUIRE_SLOT;
-                #else
-                    xp_state = XP_INQUIRE_SLOT;
-                #endif
-              }
-            break;
-
-        case XP_CHECK_DATABASE:
-            #if (LOCO_DATABASE == NAMED)
-                if (db_message_ready == 1)
-                  {
-                    xp_send_message(MESSAGE_ID | 0, db_message);     // send this as MESSAGE (normal download)
-                  }
-                else
-                  {
-                    xp_send_message(CALL_ID | 0, db_message);           // send this as 'CALL',
-                  }                                                  // it looks like coming from a client
-                                                                    // (Roco has done this hack!)
-                db_message_ready = 0;
-                xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-            #endif
-            break;
+    case XP_WAIT_FOR_TX_COMPLETE:
+      if (XP_is_all_sent()) {
+        xp_state = XP_WAIT_FOR_REQUEST;
+        slot_timeout = TCNT2 + ((XP_SLOT_TIMEOUT+XP_CALL_DURATION) / XP_TIMER_TICK);
       }
+      break;
+
+    case XP_WAIT_FOR_REQUEST:
+      if (XP_rx_ready()) {
+        // slot is requesting -> process it (a complete message could last up to 3ms)
+        rx_message[0] = XP_rx_read();           // save header
+        rx_size = rx_message[0] & 0x0F;         // length is without xor
+        rx_size++;                              // now including xor
+        rx_index = 1;        
+        rx_timeout = millis();
+        xp_state = XP_WAIT_FOR_REQUEST_COMPLETE;
+      }
+      else if ((signed char)(TCNT2 - slot_timeout) >= 0) {
+        // slot timeout reached, continue
+          xp_state = XP_CHECK_BROADCAST;
+      } 
+      break;
+
+    case XP_WAIT_FOR_REQUEST_COMPLETE:
+      if ((millis() - rx_timeout) >= RX_TIMEOUT) {
+        // message incomplete, timeout reached !
+        set_slot_to_watch(current_slot);
+        xp_send_message_to_current_slot(tx_ptr = xp_datenfehler);
+        xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+      }
+      else {
+        if (XP_rx_ready()) {
+          rx_message[rx_index] = XP_rx_read();
+          if (rx_index == rx_size) {
+            unsigned char i, my_check = 0;
+            // all data and xor read, now check xor
+            for (i=0; i<=rx_size; i++) my_check ^= rx_message[i];   
+            if (my_check == 0) {
+              // packet is received and okay, now parse it
+              set_slot_used(current_slot);
+              xp_parser();
+              xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+            }
+            else {
+              // XOR is wrong!
+              xp_send_message_to_current_slot(tx_ptr = xp_datenfehler);
+              set_slot_to_watch(current_slot);
+              xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+            }
+          }
+          else {
+            rx_index++;
+            if (rx_index == 17-1) rx_index = 17-1;   // overrun!
+          }
+        }
+      }           
+      break;
+
+    case XP_WAIT_FOR_ANSWER_COMPLETE:
+      if (XP_is_all_sent()) {
+          xp_state = XP_CHECK_BROADCAST;
+      }
+      break;
+    case XP_CHECK_BROADCAST:
+      if (status_event.changed_xp) {
+        xp_send_bc_message();                            // report any Status Change
+        xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+      }
+      #if (DCC_FAST_CLOCK == 1)
+      else if (status_event.clock) {
+        xp_send_fast_clock(0);    // send as broadcast   // new: 23.06.2009; possibly we need a flag
+        xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+      }
+      #endif
+      else {
+        xp_state = XP_CHECK_FEEDBACK;
+      }
+      break;
+
+    case XP_CHECK_FEEDBACK:
+      /* SDS - we gaan dit moeten vervangen door een non-S88 mechanisme!!
+        if ((s88_event.hardware_change_xp) || (s88_event.turnout_change_xp))
+          {
+            make_s88_xpressnet_report();                         // send broadcast: feedback events
+            xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+          }
+      SDS */
+      xp_state = XP_CHECK_STOLEN_LOK;                         // xp_state = XP_INQUIRE_SLOT;
+      break;
+
+    case XP_CHECK_STOLEN_LOK:
+      if (organizer_state.lok_stolen_by_pc) {
+        xp_send_stolen_loks();                              // report any Status Change on loks
+        xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+      }
+      else {
+        #if (LOCO_DATABASE == NAMED)
+          if (db_message_ready) xp_state = XP_CHECK_DATABASE;
+          else xp_state = XP_INQUIRE_SLOT;
+        #else
+          xp_state = XP_INQUIRE_SLOT;
+        #endif
+      }
+      break;
+
+    case XP_CHECK_DATABASE:
+      #if (LOCO_DATABASE == NAMED)
+        if (db_message_ready == 1) {
+          xp_send_message(MESSAGE_ID | 0, db_message);     // send this as MESSAGE (normal download)
+        }
+        else {
+          xp_send_message(CALL_ID | 0, db_message);           // send this as 'CALL',
+        }                                                  // it looks like coming from a client
+                                                            // (Roco has done this hack!)
+        db_message_ready = 0;
+        xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
+      #endif
+      break;
   }
+} // run_xpressnet
 
 
 void init_xpressnet(void)
-  {
-    xp_state = XP_INIT;
-  }
+{
+  xp_state = XP_INIT;
+} // init_xpressnet
 
 
 #else // #if (XPRESSNET_ENABLED == 1)

@@ -29,16 +29,6 @@
 //
 //------------------------------------------------------------------------
 
-
-#include <stdlib.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>         // put var to program memory
-#include <avr/eeprom.h>
-#include <util/parity.h> 
-#include <string.h>
-
 #include "Arduino.h"
 #include "hardware.h"
 #include "rs485.h"

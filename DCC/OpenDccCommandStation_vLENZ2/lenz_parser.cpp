@@ -64,7 +64,6 @@
 //            init_parser(void)         // set up the queue structures
 //            run_parser(void)          // multitask replacement, must be called
 //                                      // every 20ms (approx)
-//            event_send(t_BC_message)
 //
 // interface downstream:
 //            rx_fifo_read()            // to rs232
@@ -76,23 +75,12 @@
 //
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>
-#include <avr/eeprom.h>
-#include <util/delay.h>
-#include <string.h>
-
 #include "config.h"                // general structures and definitions
 #include "dccout.h"
 #include "status.h"                // timeout engine
 #include "organizer.h"
 #include "rs232.h"
 //SDS #include "s88.h"
-#include "tunnel_fifo.h"           // Xpressnet extension 0x3*
 
 #if (PARSER == LENZ)
 
@@ -111,7 +99,6 @@ enum parser_states
   } parser_state;
 
 unsigned char pcc[16];          // pc_message speicher
-
 unsigned char pcc_size, pcc_index;
 
 //------------------------------------------------------------------------------
@@ -120,13 +107,11 @@ unsigned char pcc_size, pcc_index;
 unsigned char *pars_pcm;
 
 //-- communication
-
 unsigned char pcm_timeout[] = {0x01, 0x01};                 // Timeout
 unsigned char pcm_overrun[] = {0x01, 0x06};                 // too many commands
 unsigned char pcm_ack[] = {0x01, 0x04};                     // ack
 
 // generell fixed messages
-
 unsigned char pcm_datenfehler[] = {0x61, 0x80};             // xor wrong
 unsigned char pcm_busy[] = {0x61, 0x81};                    // busy
 unsigned char pcm_unknown[] = {0x61, 0x82};                 // unknown command
@@ -139,11 +124,8 @@ unsigned char pcm_version[] = {0x63, 0x21, 0x36, 0x00};     // LZ100 Zentrale in
 unsigned char pcm_liversion[] = {0x02, 0x10, 0x01};         // LI101F Version 1.0 Code 01
                              // {0x02, 0x30, 0x01};         // LIUSB 3.0
 
-
 // variable messages
-
 unsigned char pcm_status[] = {0x62, 0x22, 0x45};                  //wird von pc_send_status gebaut.
-
 unsigned char pcm_build[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};  // max 6 bytes
 
 //-------------------------------------------------------------------------------
@@ -156,123 +138,119 @@ unsigned char pcm_build[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};  // max 
 /// pc_send_lenz_P: generell purpose send answer stored in program memory to pc
 
 void pc_send_lenz(unsigned char *str)      // vorlï¿½ufig kein Timeout
+{
+  unsigned char n, total, my_xor;
+
+  n = 0;
+  my_xor = str[0];
+  total = str[0] & 0x0F;
+  while (!tx_fifo_ready()) ;             // busy waiting!
+
+  tx_fifo_write(str[0]);                   // send header
+  while (n != total)
   {
-    unsigned char n, total, my_xor;
- 
-    n = 0;
-    my_xor = str[0];
-    total = str[0] & 0x0F;
-
-    while (!tx_fifo_ready()) ;             // busy waiting!
-
-    tx_fifo_write(str[0]);                   // send header
-
-    while (n != total)
-      {
-         n++;
-         my_xor ^= str[n];
-         tx_fifo_write(str[n]);              // send data
-      }    
-
-    tx_fifo_write(my_xor);                   // send xor
-
-  }
-
+    n++;
+    my_xor ^= str[n];
+    tx_fifo_write(str[n]);              // send data
+  }    
+  tx_fifo_write(my_xor);                   // send xor
+} // pc_send_lenz
 
 //-----------------------------------------------------------------------------------
-// Interface fï¿½r events, die in der Zentrale passieren und an den PC gemeldet werden.
+// Interface for events, die in der Zentrale passieren und an den PC gemeldet werden.
 // Dies besteht aus 2 Typen:
-// a) Zustandsï¿½nderungen
-// b) Rï¿½ckmeldungen
+// a) Zustandsanderungen
+// b) Ruckmeldungen
 //
-// a) Zustandsï¿½nderungen
+// a) Zustandsanderungen
 
-void event_send(void)
+static void event_send(void)
+{
+  switch(opendcc_state)
   {
-    switch(opendcc_state)
-      {
-        case RUN_OKAY:             // DCC running
-            pc_send_lenz(pars_pcm = pcm_BC_alles_an);
-            pc_send_lenz(pars_pcm = pcm_BC_alles_an);
-            break;
-        case RUN_STOP:             // DCC Running, all Engines Emergency Stop
-            pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
-            pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
-            break;
-        case RUN_OFF:              // Output disabled (2*Taste, PC)
-            pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
-            pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
-            break;
-        case RUN_SHORT:            // Kurzschluss
-            pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
-            pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
-            break;
-        case RUN_PAUSE:            // DCC Running, all Engines Speed 0
-            pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
-            pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
-            break;
+    case RUN_OKAY:             // DCC running
+      pc_send_lenz(pars_pcm = pcm_BC_alles_an);
+      pc_send_lenz(pars_pcm = pcm_BC_alles_an);
+      break;
+    case RUN_STOP:             // DCC Running, all Engines Emergency Stop
+      pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
+      pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
+      break;
+    case RUN_OFF:              // Output disabled (2*Taste, PC)
+      pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
+      pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
+      break;
+    case RUN_SHORT:            // Kurzschluss
+      pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
+      pc_send_lenz(pars_pcm = pcm_BC_alles_aus);  
+      break;
+    case RUN_PAUSE:            // DCC Running, all Engines Speed 0
+      pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
+      pc_send_lenz(pars_pcm = pcm_BC_locos_aus);  
+      break;
 
-        case PROG_OKAY:
-            pc_send_lenz(pars_pcm = pcm_BC_progmode);  
-            pc_send_lenz(pars_pcm = pcm_BC_progmode);    // 19.07.2010 
-            break;
-        case PROG_SHORT:           //
-            break;
-        case PROG_OFF:
-            break;
-        case PROG_ERROR:
-            break;
-      }
-    status_event.changed = 0;            // broad cast done
+    case PROG_OKAY:
+      pc_send_lenz(pars_pcm = pcm_BC_progmode);  
+      pc_send_lenz(pars_pcm = pcm_BC_progmode);    // 19.07.2010 
+      break;
+    case PROG_SHORT:           //
+      break;
+    case PROG_OFF:
+      break;
+    case PROG_ERROR:
+      break;
   }
+  status_event.changed = 0;            // broadcast done
+} // event_send
 
 void pc_send_status(void)
-  {
-    // Format: Headerbyte Daten 1 Daten 2 X-Or-Byte
-    // Hex : 0x62 0x22 S X-Or-Byte
-    // S:
-    // Bit 0: wenn 1, Anlage in Notaus
-    // Bit 1: wenn 1, Anlage in Nothalt
-    // Bit 2: Zentralen-Startmode (0 = manueller Start, 1 = automatischer Start)
-    // Bit 3: wenn 1, dann Programmiermode aktiv
-    // Bit 4: reserviert
-    // Bit 5: reserviert
-    // Bit 6: wenn 1, dann Kaltstart in der Zentrale
-    // Bit 7: wenn 1, dann RAM-Check-Fehler in der Zentrale
-    // Besonderheiten: siehe bei Lenz
-    unsigned char my_status = 0;
-    //SDS bits 0 & 1 omwisselen (xpnet spec)
-    // RUN_STOP = emergency stop, alle locs een noodstop
-    // RUN_OFF = track power off (booster disabled)
-    //SDS if (opendcc_state == RUN_STOP) my_status |= 0x01;
-    //SDS if (opendcc_state == RUN_OFF) my_status |= 0x02;
-    if (opendcc_state == RUN_STOP) my_status |= 0x02;
-    if (opendcc_state == RUN_OFF) my_status |= 0x01;
-    // my_status &= ~0x04;  // manueller Start
-    if ( (opendcc_state == PROG_OKAY)
-       | (opendcc_state == PROG_SHORT)
-       | (opendcc_state == PROG_OFF)
-       | (opendcc_state == PROG_ERROR) ) my_status |= 0x08;          // Programmiermode
-    //SDS niet nodig, want je bent hier al running my_status |= 0x40;  // wir behaupten mal "Kaltstart"
-    pcm_status[2] = my_status;
-    pc_send_lenz(pars_pcm = pcm_status);
-  }
+{
+  // Format: Headerbyte Daten 1 Daten 2 X-Or-Byte
+  // Hex : 0x62 0x22 S X-Or-Byte
+  // S:
+  // Bit 0: wenn 1, Anlage in Notaus
+  // Bit 1: wenn 1, Anlage in Nothalt
+  // Bit 2: Zentralen-Startmode (0 = manueller Start, 1 = automatischer Start)
+  // Bit 3: wenn 1, dann Programmiermode aktiv
+  // Bit 4: reserviert
+  // Bit 5: reserviert
+  // Bit 6: wenn 1, dann Kaltstart in der Zentrale
+  // Bit 7: wenn 1, dann RAM-Check-Fehler in der Zentrale
+  // Besonderheiten: siehe bei Lenz
+  unsigned char my_status = 0;
+  //SDS bits 0 & 1 omwisselen (xpnet spec)
+  // RUN_STOP = emergency stop, alle locs een noodstop
+  // RUN_OFF = track power off (booster disabled)
+  //SDS if (opendcc_state == RUN_STOP) my_status |= 0x01;
+  //SDS if (opendcc_state == RUN_OFF) my_status |= 0x02;
+  if (opendcc_state == RUN_STOP) my_status |= 0x02;
+  if (opendcc_state == RUN_OFF) my_status |= 0x01;
+  // my_status &= ~0x04;  // manueller Start
+  if ( (opendcc_state == PROG_OKAY)
+      | (opendcc_state == PROG_SHORT)
+      | (opendcc_state == PROG_OFF)
+      | (opendcc_state == PROG_ERROR) ) my_status |= 0x08;          // Programmiermode
+  //SDS niet nodig, want je bent hier al running 
+  // my_status |= 0x40;  // wir behaupten mal "Kaltstart"
+  pcm_status[2] = my_status;
+  pc_send_lenz(pars_pcm = pcm_status);
+} // pc_send_status
 
 //SDS added - quasi identiek aan xp_send_loco_addr uit xpnet.c
 void pc_send_loco_addr(unsigned int addr)     
-  {
-        pcm_build[0] = 0xE3;
-        pcm_build[1] = 0x30;                   // 0x30 + KKKK; here KKKK=0, normal loco addr
-        if (addr == 0) pcm_build[1] |= 0x04;   // KKKK=4 -> no result found
-        if (addr > XP_SHORT_ADDR_LIMIT)
-          {
-            pcm_build[2] = addr / 256;
-            pcm_build[2] |= 0xC0;
-          }
-        else pcm_build[2] = 0;
-        pcm_build[3] = (unsigned char)addr;
-        pc_send_lenz(pars_pcm = pcm_build);
+{
+  pcm_build[0] = 0xE3;
+  pcm_build[1] = 0x30;                   // 0x30 + KKKK; here KKKK=0, normal loco addr
+  if (addr == 0) pcm_build[1] |= 0x04;   // KKKK=4 -> no result found
+  if (addr > XP_SHORT_ADDR_LIMIT) {
+    pcm_build[2] = addr / 256;
+    pcm_build[2] |= 0xC0;
   }
+  else pcm_build[2] = 0;
+  pcm_build[3] = (unsigned char)addr;
+  pc_send_lenz(pars_pcm = pcm_build);
+} // pc_send_loco_addr
+
 /* sds : moved to organizer.cpp */
 /*
 static unsigned char scan_locobuffer(unsigned int addr)       // Hilfsroutine: locobuffer durchsuchen
@@ -669,13 +647,9 @@ void parse_command(void)
                                         break;
                           }
                       }                            
-                    do_fast_clock(&fast_clock);
-
-                    // send clock_event to Xpressnet
-                    status_event.clock = 1;
-
-                    // now send an answer
-                    pc_send_fast_clock();
+                    do_fast_clock(&fast_clock); // fast clock dcc message
+                    status_event.clock = 1; // send clock_event to Xpressnet
+                    pc_send_fast_clock(); // fast clock msg back to pc
                     return;
                 case 0xF2:
                     // query clock
@@ -894,19 +868,6 @@ void parse_command(void)
              }
            break;
 
-#if ((XPRESSNET_ENABLED == 1) && (XPRESSNET_TUNNEL == 1))
-        case 0x3: // special Command push to XpressNet
-            if (tunnel_2xp_is_full()) 
-                 pc_send_lenz(pars_pcm = pcm_busy);     // we are busy
-            else
-              {
-                put_in_tunnel_2xp((t_tunnel_message*) pcc);
-                pc_send_lenz(pars_pcm = pcm_ack);
-              }
-
-            return;
-            break;
-#endif
         case 0x4:
             // not yet tested: Schaltinformation anfordern 0x42 ADR Nibble X-Or
             // Hex : 0x42 Adresse 0x80 + N X-Or-Byte
@@ -943,6 +904,7 @@ void parse_command(void)
     		            }
     		            else
     		            { // request feedback info, shift addr locally down (sub 64)
+                      // TODO SDS : waarom hier -64 ???
   		                addr = ((pcc[1] - 64) << 3) + (unsigned char)((pcc[2] & 0x01) << 2);
   		                pcm_build[0] = 0x42;
 //SDS added #if - deze functie is enkel gedefinieerd met XPRESSNET_ENABLED = 1
@@ -1001,8 +963,6 @@ void parse_command(void)
               }
             return;
             break;
-        case 0x7:
-            break;
 
         case 0x8:
             // Alle Loks anhalten 0x80 0x80
@@ -1036,7 +996,6 @@ void parse_command(void)
         case 0xE:
             switch(pcc[1] & 0xf0)      // high nibble von pcc[1]:
               {
-                //sds : klopt dat hier : default helemaal in 't begin?? gaat die niet alle cases overrulen? NEE
                 default:
                     break;
                 //case 0x00 gecopieerd uit xpnet.c, want juist geimplementeerd
@@ -1053,32 +1012,26 @@ void parse_command(void)
                         unsigned int result;
                         case 0x00:
                             pc_send_lokdaten(addr);
-                            //SDS processed = 1;
                             break;
                         case 0x05:
                             result = addr_inquiry_locobuffer(addr, 1); // forward
                             pc_send_loco_addr(result);
-                            //SDS processed = 1;
                             break;
                         case 0x06:
                             result = addr_inquiry_locobuffer(addr, 0); // revers
                             pc_send_loco_addr(result);
-                            //SDS processed = 1;
                             break;
                         case 0x07:
                             pc_send_loco_func_status(addr);
-                            //SDS processed = 1;
                             break;
                         #if (DCC_F13_F28 == 1)
                             // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
                         case 0x08:
                             pc_send_funct_status_f13_f28(addr);  // !!! Das ist nicht korrekt, wir faken das!!!
-                            //SDS processed = 1;
                             break;
                             // 0xE3 0x09 AddrH AddrL [XOR] "Function level request F13-F28"
                         case 0x09:
                             pc_send_funct_level_f13_f28(addr);
-                            //SDS processed = 1;
                             break;
                         #endif
                       }
@@ -1310,7 +1263,7 @@ void parse_command(void)
 
 static bool input_ready(void)
   {
-    if(rs232_break_detected == 1)
+    if(rs232_parser_reset_needed)  // rs232_parser_reset_needed
       {
         init_parser();
         init_rs232(BAUD_19200);  // reinit rs232 and get rid of old connection
@@ -1334,20 +1287,6 @@ void run_parser(void)
       {
         event_send();                                   // report any Status Change
       }
-
-#if ((XPRESSNET_ENABLED == 1) && (XPRESSNET_TUNNEL == 1))
-    if (tunnel_2pc_not_empty())
-      {
-        // message pending
-        if (tx_fifo_ready())
-          {
-            t_tunnel_message my_message;
-            get_from_tunnel_2pc(&my_message);
-            pc_send_lenz((unsigned char *) &my_message);
-          }
-      }
-#endif // (XPRESSNET_TUNNEL == 1)
-
 
     switch (parser_state)
       {
@@ -1442,4 +1381,3 @@ void init_parser(void)
   }
 
 #endif // (PARSER == LENZ)
-

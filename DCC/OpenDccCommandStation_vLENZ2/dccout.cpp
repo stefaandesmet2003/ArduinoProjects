@@ -35,15 +35,6 @@
 //
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>           // put var to program memory
-#include <avr/eeprom.h>
-#include <string.h>
-
 #include "config.h"                 // general structures and definitions
 #include "dccout.h"                 // import own header
 
@@ -426,6 +417,8 @@ ISR(TIMER1_COMPA_vect)
         if ((MY_STATE_REG & DOI_CNTMASK) == 0)
           {
             MY_STATE_REG = DOI_BSTART;          // doi.state = dos_send_bstart;
+            // TODO : magweg, want dit is specifiek opendcc, en we gaan dit niet doen, of niet zo.
+            // EXT_STOP -> kloptnie
             #if (TURNOUT_FEEDBACK_ENABLED == 1)
             if (feedback_required)
               {
@@ -1265,4 +1258,3 @@ void init_mmout(void)
 
 
 #endif // MAERKLIN_ENABLED
-

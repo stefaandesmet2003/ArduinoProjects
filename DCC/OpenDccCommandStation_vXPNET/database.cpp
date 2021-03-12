@@ -31,15 +31,6 @@
 //            
 //--------------------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>         // put var to program memory
-#include <avr/eeprom.h>
-#include <string.h>
-
 #include "config.h"                // general structures and definitions
 //sds #include "status.h"                // timerval, CHECK! hebben we deze include nu nog nodig??
 #include "database.h"

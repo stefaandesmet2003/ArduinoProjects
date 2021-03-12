@@ -53,7 +53,6 @@
 //            2010-02-16       Redirect switch for transfer Loco data base command
 //                             (virtual decoder is used for that)
 //            2010-03-01       Bugfix PoM on Xpressnet
-//            2010-11-26       Erweiterung fï¿½r BiDi-Adresszuordnung (BIDI_SUPPORT)
 //
 //-------------------------------------------------------------------------------
 //
@@ -85,15 +84,6 @@
 #define BUILD_YEAR          12
 #define BUILD_MONTH         01
 #define BUILD_DAY           27
- 
-
-#define DEBUG  0            // Debugswitches:  0: no debugging, interrupts running -> alive!
-                            //                 1: no ints, some lowlevel test
-                            //                 2: command_organizer tests
-                            //                 3: IB or Lenz parser tests, see main.c
-
-
-
 
 #define EEPROM_FIXED_ADDR 0         // if 1: use indivual EEPROM section for Config
                                     // Locos and DMX
@@ -104,41 +94,11 @@
 #include "hardware.h"               // right now, this includes the definition
                                     // for the hardware on www.opendcc.de
 
-
 //------------------------------------------------------------------------
 // Timing Definitions (all values in us)
 //------------------------------------------------------------------------
-//
-// same macro as in util/delay.h, but use up to some ms.
-// The maximal possible delay is 262.14 ms / F_CPU in MHz.
-// This is 16ms for 16MHz; longest used delay: 1000us
-
-#ifndef _UTIL_DELAY_H_
-  #include <util/delay.h>
-#endif
-
-static inline void _mydelay_us(double __us) __attribute__((always_inline));
-void
-_mydelay_us(double __us)
-{
-    uint16_t __ticks;
-    double __tmp = ((F_CPU) / 4e6) * __us;
-    if (__tmp < 1.0)
-        __ticks = 1;
-    else if (__tmp > 65535)
-        __ticks = 0;    /* i.e. 65536 */
-    else
-        __ticks = (uint16_t)__tmp;
-    _delay_loop_2(__ticks);
-}
 
 /// This is the timer tick for timeouts, LEDs, key-debounce ...
-
-//#define TICK_PERIOD                 5000L   // 5ms = 5000us (valid range: 2000-8000)
-                                            // if changed: see all .c files and
-                                            // check possible range overflows in definitions!
-
-
 #define TIMER2_TICK_PERIOD          4L      // 4us
 
 #define MAIN_SHORT_DEAD_TIME        8L      // wait 15ms before turning off power after
@@ -160,8 +120,8 @@ _mydelay_us(double __us)
 //------------------------------------------------------------------------------------------
 
 #define LENZ                1
-#define INTELLIBOX          2
-#define SDS_BOX             3 //sds, serial.print versie
+//#define INTELLIBOX          2
+#define NONE                3
 
 #define NAMED               1
 #define UNNAMED             2
@@ -169,18 +129,6 @@ _mydelay_us(double __us)
 
 
 #define PARSER                  LENZ // INTELLIBOX  // LENZ: behave like a LI101
-                                            // INTELLIBOX: behave like a IBOX
-                                            // note: not all commands are supported
-                                            //       see ibox_parser.c for a detailed
-                                            //       list.
-
-//SDS #define BIDI_SUPPORT            2           // 0: no special BIDI-support
-#define BIDI_SUPPORT            0           // 0: no special BIDI-support
-                                            // 2: add parameter in locobuffer for location, speed, and bidi status
-
-#define BIDI_TEST               0           // 0: standard command station
-                                            // 1: special test commands (not for production)
-                                            //    bei DCC-Schalten auf Adresse 1000 wird eine CS-Unique-ID Nachricht rausgesendet 
 
 #define RAILCOMPLUS_SUPPORT     0           // 0: no special code
                                             // 1: add test code
@@ -203,22 +151,12 @@ _mydelay_us(double __us)
 //SDS #define S88_ENABLED             1           // 1: if enabled, add code for s88-control
 #define S88_ENABLED             0         // 1: if enabled, add code for s88-control
 
-//SDS : voorlopig zonder xpressnet, want we hebben geen 2de uart
-//SDS #define XPRESSNET_ENABLED       1           // 0: classical OpenDCC
+//SDS : ofwel LENZ ofwel xpnet op atmega328
 #define XPRESSNET_ENABLED       0           // 0: classical OpenDCC
-
                                             // 1: if enabled, add code for Xpressnet (Requires Atmega644P)
-                                            //    see xpnet.c for a detailed list of supported commands.
-
-#define XPRESSNET_TUNNEL        0           // 1: special 0x3* command are tunnelled through the command station
 
 #if (PARSER == LENZ)
   #define DEFAULT_BAUD      BAUD_19200      // supported: 2400, 4800, 9600, 19200, 38400, 57600, 115200         
-#endif
-
-#if (PARSER == INTELLIBOX)
-  #define DEFAULT_BAUD      BAUD_19200      // org IBox: BAUD_2400; okay, we are a little bit faster 
-                                            // Tams EC: BAUD_57600   
 #endif
 
 #define STORE_TURNOUT_POSITIONS     1       // if enabled, add code and sram memory for
@@ -233,12 +171,11 @@ _mydelay_us(double __us)
 #define DCC_FAST_CLOCK              1       // 0: standard DCC
                                             // 1: add commands for DCC fast clock
 
-#define DCC_XLIMIT                  1       // 0: standard
+#define DCC_XLIMIT                  0       // 0: standard -> sds : xpnet ondersteunt dit toch niet
                                             // 1: add Xlimit command (see ibox_parser)
 
 #define DCC_BIN_STATES              0       // 0: normal
                                             // 1. add XbinSt (DCC binary States)
-
 
 //=========================================================================================
 // 4. DCC Definitions
@@ -278,66 +215,40 @@ _mydelay_us(double __us)
 // note: in addition, there is the locobuffer, where all commands are refreshed
 //       this locobuffer does not apply to accessory commands nor pom-commands
 
-//-----------------------------------------------------------------------
-// Sizes of Queues and Buffers -> see section 5, memory usage
-//
-//------------------------------------------------------------------------
-// 4.b) variable defines for the state engine
-//------------------------------------------------------------------------
-
-typedef enum {DISCONNECTED, CONNECTED, RUNNING, STOPPED} t_rs232_led_state;
-
-typedef enum {INIT,
-              RUN_OKAY,     // DCC Running
-              RUN_STOP,     // DCC Running, all Engines Emergency Stop
-              RUN_OFF,      // Output disabled (2*Taste, PC)
-              RUN_SHORT,    // Kurzschluss;
-              RUN_PAUSE,    // DCC Running, all Engines Speed 0
-              PROG_OKAY,    // Prog-Mode running 
-              PROG_SHORT,   // Prog-Mode + Kurzschluss
-              PROG_OFF,     // Prog-Mode, abgeschaltet
-              PROG_ERROR    // Prog-Mode, Fehler beim Programmieren
-              } t_opendcc_state;
-
-//------------------------------------------------------------------------
-// define a structure for DCC messages inside OpenDCC
-//------------------------------------------------------------------------
-
-#if ((BIDI_TEST > 0) || (RAILCOMPLUS_SUPPORT > 0))
+#if (RAILCOMPLUS_SUPPORT > 0)
   #define   MAX_DCC_SIZE  10
 #else
   #define   MAX_DCC_SIZE  6
 #endif
 
 // This enum defines the type of message put to the tracks.
-
-typedef enum {is_void,      // message with no special handling (like functions)
-              is_stop,      // broadcast
-              is_loco,      // standard dcc speed command
-              is_acc,       // accessory command
-              is_feedback,  // accessory command with feedback
-              is_prog,      // service mode - longer preambles
-              is_prog_ack}  t_msg_type;
-
+// SDS TODO 2021 : is_feedback -> opkuisen!
+typedef enum {
+  is_void,      // message with no special handling (like functions)
+  is_stop,      // broadcast
+  is_loco,      // standard dcc speed command
+  is_acc,       // accessory command
+  is_feedback,  // accessory command with feedback
+  is_prog,      // service mode - longer preambles
+  is_prog_ack
+}  t_msg_type;
 
 typedef struct
-  {
-    unsigned char repeat;             // counter for repeat or refresh (depending)
-    union
-     {
-       struct
-        {
-         unsigned char size: 4;            // 2 .. 5
-         t_msg_type    type: 4;            // enum: isvoid, isloco, accessory, ...
-        } ;
-       unsigned char qualifier;
-     } ;
-    unsigned char dcc[MAX_DCC_SIZE];  // the dcc content
-  } t_message;
+{
+  unsigned char repeat;             // counter for repeat or refresh (depending)
+  union
+    {
+      struct
+      {
+        unsigned char size: 4;            // 2 .. 5
+        t_msg_type    type: 4;            // enum: isvoid, isloco, accessory, ...
+      } ;
+      unsigned char qualifier;
+    } ;
+  unsigned char dcc[MAX_DCC_SIZE];  // the dcc content
+} t_message;
 
-
-
-// define a structure for the loco memeory (6 bytes)
+// define a structure for the loco memory (6 bytes)
 
 //SDS sick of compiler complaints
 //SDS typedef enum {DCC14 = 0, DCC27 = 1, DCC28 = 2, DCC128 = 3} t_format;
@@ -348,51 +259,42 @@ typedef struct
 
 typedef unsigned char t_format;
 
-struct locomem
-  {
-    unsigned int address;               // address (either 7 or 14 bits)
-    unsigned char speed;                // this is in effect a bitfield:
-                                        // msb = direction (1 = forward, 0=revers)
-                                        // else used as integer, speed 1 ist NOTHALT
-                                        // this is i.e. for 28 speed steps:
-                                        //       0: stop
-                                        //       1: emergency stop
-                                        //  2..127: speed steps 1..126
-                                        // speed is always stored as 128 speed steps
-                                        // and only converted to the according format
-                                        // when put on the rails or to xpressnet
-    #if (XPRESSNET_ENABLED == 1)
-     #define SIZE_LOCOBUFFER_ENTRY_X 1
-     unsigned char slot: 5;             // Bit 4..0: controlled by this xpressnet device (1..31: throttles, 0=PC)
-     unsigned char owned_by_pc: 1;      // Bit 5:    controlled by PC      
-     unsigned char owner_changed: 1;    // Bit 6:    owner changed
-     unsigned char manual_operated: 1;  // Bit 7:    manual operated (from Xpressnet)
-    #endif  
-    t_format format: 2;                 // 00 = 14, 01=27, 10=28, 11=128 speed steps.
-                                        // DCC27 is not supported
-    unsigned char active: 1;            // 1: lok is in refresh, 0: lok is not refreshed
-    unsigned char fl: 1;                // function light
-    unsigned char f4_f1: 4;             // function 4 downto 1
-    unsigned char f8_f5: 4;             // function 8 downto 5
-    unsigned char f12_f9: 4;            // function 12 downto 9
-    #if (DCC_F13_F28)
-    #define SIZE_LOCOBUFFER_ENTRY_D 1
-    unsigned char f20_f13: 8;           // function 20 downto 13
-    unsigned char f28_f21: 8;           // function 28 downto 21
-    #endif
-    unsigned char refresh;              // refresh is used as level: 0 -> refreshed often
-    #if (BIDI_SUPPORT >= 2)
-    #define SIZE_LOCOBUFFER_ENTRY_B 4
-    unsigned char bidi_new : 1;         // 1: not yet reported to pc
-    unsigned char bidi_dir : 1;         // 1: dir, as given by the detektor
-    unsigned char bidi_valid : 1;       // 1: did is okay
-    unsigned char res2: 5;
-    unsigned int did;
-    unsigned char istspeed;
-    #endif
-  };
+typedef struct 
+{
+  unsigned int address;               // address (either 7 or 14 bits)
+  unsigned char speed;                // this is in effect a bitfield:
+                                      // msb = direction (1 = forward, 0=revers)
+                                      // else used as integer, speed 1 ist NOTHALT
+                                      // this is i.e. for 28 speed steps:
+                                      //       0: stop
+                                      //       1: emergency stop
+                                      //  2..127: speed steps 1..126
+                                      // speed is always stored as 128 speed steps
+                                      // and only converted to the according format
+                                      // when put on the rails or to xpressnet
+  #if (XPRESSNET_ENABLED == 1)
+    #define SIZE_LOCOBUFFER_ENTRY_X 1
+    unsigned char slot: 5;             // Bit 4..0: controlled by this xpressnet device (1..31: throttles, 0=PC)
+    unsigned char owned_by_pc: 1;      // Bit 5:    controlled by PC      
+    unsigned char owner_changed: 1;    // Bit 6:    owner changed
+    unsigned char manual_operated: 1;  // Bit 7:    manual operated (from Xpressnet)
+  #endif  
+  t_format format: 2;                 // 00 = 14, 01=27, 10=28, 11=128 speed steps.
+                                      // DCC27 is not supported
+  unsigned char active: 1;            // 1: lok is in refresh, 0: lok is not refreshed
+  unsigned char fl: 1;                // function light
+  unsigned char f4_f1: 4;             // function 4 downto 1
+  unsigned char f8_f5: 4;             // function 8 downto 5
+  unsigned char f12_f9: 4;            // function 12 downto 9
+  #if (DCC_F13_F28)
+  #define SIZE_LOCOBUFFER_ENTRY_D 1
+  unsigned char f20_f13: 8;           // function 20 downto 13
+  unsigned char f28_f21: 8;           // function 28 downto 21
+  #endif
+  unsigned char refresh;              // refresh is used as level: 0 -> refreshed often
+} locomem;
 
-#define SIZE_LOCOBUFFER_ENTRY (6 + SIZE_LOCOBUFFER_ENTRY_B+SIZE_LOCOBUFFER_ENTRY_D+SIZE_LOCOBUFFER_ENTRY_X)
+#define SIZE_LOCOBUFFER_ENTRY (6+SIZE_LOCOBUFFER_ENTRY_D+SIZE_LOCOBUFFER_ENTRY_X)
 
 // Note on speed coding (downstream):
 //
@@ -405,66 +307,32 @@ struct locomem
 
 // define a structure for programming results
 
-typedef enum 
-  {
-    PR_VOID     = 0x00, 
-    PR_READY    = 0x01,     // 0x11, command station is ready
-    PR_BUSY     = 0x02,     // 0x1f, busy
-    PR_REGMODE  = 0x03,     // 0x10, register + values
-    PR_CVMODE   = 0x04,     // 0x14, Last command was CV + data
-    PR_SHORT    = 0x05,     // 0x12, short detected
-    PR_NOTFOUND = 0x06,     // 0x13, no found
-  } t_prog_summary;
+typedef enum {
+  PR_VOID     = 0x00, 
+  PR_READY    = 0x01,     // 0x11, command station is ready
+  PR_BUSY     = 0x02,     // 0x1f, busy
+  PR_REGMODE  = 0x03,     // 0x10, register + values
+  PR_CVMODE   = 0x04,     // 0x14, Last command was CV + data
+  PR_SHORT    = 0x05,     // 0x12, short detected
+  PR_NOTFOUND = 0x06,     // 0x13, no found
+} t_prog_summary;
 
 // old: typedef enum {PR_VOID, PR_READY, PR_BUSY, PR_REGMODE, PR_CVMODE, PR_SHORT} t_lenz_result;
 
-typedef struct
-  {
-    unsigned char minute; 
-    unsigned char hour;
-    unsigned char day_of_week;
-    unsigned char ratio;
-  } t_fast_clock;
-
+typedef struct {
+  unsigned char minute; 
+  unsigned char hour;
+  unsigned char day_of_week;
+  unsigned char ratio;
+} t_fast_clock;
 
 //========================================================================
 // 5. Usage of Memory, EEROM and Registers
 //========================================================================
 // Globals
-//
 extern const unsigned char opendcc_version PROGMEM;
 extern unsigned char invert_accessory;
-extern unsigned char bidi_messages_enabled; 
 extern unsigned char xpressnet_feedback_mode;   // filled from CV29
-
-// 5.1. Registers
-//------------------------------------------------------------------------
-// unused IO-Regs, which may be used as speedup for Global Vars
-//
-// TWDR, TWAR, TWBR, SPDR, ADMUX
-//
-
-// #define DCCOUT_STATE_REG    TWBR      // if nothing defined, dccout will use a global var. in sram
-
-
-//------------------------------------------------------------------------
-// 5.2. Interrupts
-//------------------------------------------------------------------------
-// Interrupt:     Prio  GIE   Module
-// TIMER1_COMPA:  high  no    DCC-Signal Generator
-// SIG_UART_RECV: ..    yes   Receive from Host
-// SIG_UART_DATA: low   yes   Send to Host
-//
-
-//------------------------------------------------------------------------
-// 5.3. Memory Usage - RAM
-//------------------------------------------------------------------------
-//
-// RAM:   Size:     Usage
-//         170      General
-//          64      RS232 Rx
-//          64      RS232 Tx
-//         600      Locobuffer (Size * 6)
 
 #define SIZE_QUEUE_PROG       6       // programming queue (7 bytes each entry)
 #define SIZE_QUEUE_LP        16       // low priority queue (7 bytes each entry)
@@ -473,7 +341,7 @@ extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 //SDS#define SIZE_LOCOBUFFER      64       // no of simult. active locos (6 bytes each entry)
 #define SIZE_LOCOBUFFER      5 //SDS, meer dan genoeg nu!! (gebruik ram voor een display)
 #if (STORE_TURNOUT_POSITIONS == 1)    
-#define SIZE_TURNOUTBUFFER  128       // no of Turnouts / 8 (64 = 512 Turnouts)
+#define SIZE_TURNOUTBUFFER  64       // no of Turnouts / 8 (64 = 512 Turnouts), waarom stond dit op 128?? in lenz_parser zijn toch maar 256 wissels ondersteund??
 #endif
 #ifndef SIZE_TURNOUTBUFFER
 #define SIZE_TURNOUTBUFFER    0       // not stored
@@ -482,7 +350,6 @@ extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 //------------------------------------------------------------------------
 // defines for handling S88
 //------------------------------------------------------------------------
-
 #define SIZE_S88_MAX      128       // This is the number of 8-bit s88 modules
                                     // (valid range: 6...128)
                                     // max. at lenz V3.0 interface is 1024 feedbacks
@@ -563,17 +430,11 @@ extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 #define   eadr_reserved038              0x026  
 #define   eadr_serial_id                0x027  //    / CV39: serial number, must be > 1
 
- 
-
-
-
-// note SO33 (should return as 0 - reserved by IB)
+ // note SO33 (should return as 0 - reserved by IB)
 // XSOGet 0006)  -> is CTS a indicator for Power Off
 // 008 Number of groups of 8 sensor-bits (half S88) to be read automatically.
 // 014 Maximum time in units of 50 ms that a turnout must be left powered on, when no other turnout command arrives.
-
 extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
-
 // Note:
 // the new sections are defined by:
 //
@@ -592,7 +453,6 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
 #define EADR_LOCO_FORMAT     0x810080L  // base addr in mem
 #define ESIZE_LOCO_FORMAT    64         // no of locos with different format (max. 250)
                                         // each entry requires 2 bytes
-
 
 //------------------------------------------------------------------------
 // 5.4 Security Checks against wrong definitions
@@ -615,7 +475,6 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
 #if USED_RAM > (SRAM_SIZE - 400)
 #warning Buffers too large for current processor (see hardware.h)
 #endif
-
 
 #define USED_EEPROM  (20 + \
                       ESIZE_LOCO_FORMAT * 2 )   // 20 = config of OpenDCC
@@ -654,7 +513,6 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
  #endif
 #endif
 
-
 // This union allows to access 16 bits as word or as two bytes.
 // This approach is (probably) more efficient than shifting.
 typedef union
@@ -663,27 +521,26 @@ typedef union
     uint8_t  as_uint8[2];
 } t_data16;
 
-
+// SDS : TODO 2021 : nog nodig?
 typedef struct
-  {
-    unsigned char  vendor;
-    union
-      {
-        struct
-          {
-            unsigned char  byte0;
-            unsigned char  byte1;
-            unsigned char  byte2;
-            unsigned char  byte3;
-          };
-        struct
-          {
-            unsigned int   product_id;
-            unsigned int   product_serial;
-          };
-        unsigned long vendor32;
-      };
-  } t_unique_id;
+{
+  unsigned char  vendor;
+  union
+    {
+      struct
+        {
+          unsigned char  byte0;
+          unsigned char  byte1;
+          unsigned char  byte2;
+          unsigned char  byte3;
+        };
+      struct
+        {
+          unsigned int   product_id;
+          unsigned int   product_serial;
+        };
+      unsigned long vendor32;
+    };
+} t_unique_id;
 
 #endif   // config.h
-

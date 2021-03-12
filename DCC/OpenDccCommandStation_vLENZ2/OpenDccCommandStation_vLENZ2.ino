@@ -36,35 +36,23 @@
 //
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>
-#include <avr/eeprom.h>
-#include <string.h>
-
 #include "config.h"                // general structures and definitions - make your changes here
-
 #include "database.h"              // format and names
 #include "status.h"                // led, key, state
 #include "dccout.h"                // make dcc
 #include "organizer.h"             // manage commands
 #include "programmer.h"            // DCC service mode
-//SDS : xpnet zit op een 2de uart die we op atmega328 niet hebben!
-//SDS #include "rs485.h"                 // interface to xpressnet
-//SDS #include "xpnet.h"                 // xpressnet parser
+
+// op atmega328 is het of LENZ of XPNET
+#if (XPRESSNET_ENABLED ==1)
+#include "rs485.h"                 // interface to xpressnet
+#include "xpnet.h"                 // xpressnet parser
+#endif
 
 #if (PARSER == LENZ)
     #include "rs232.h"                 // interface to pc
     #include "lenz_parser.h"         // talk to pc (same as ibox_parser.h)
     #warning Parseremulation = LENZ
-#endif
-#if (PARSER == INTELLIBOX)
-    #include "rs232.h"                 // interface to pc
-    #include "ibox_parser.h"         
-    #warning Parseremulation = INTELLIBOX
 #endif
 //SDS #include "s88.h"                   // s88-bus
 
@@ -192,12 +180,15 @@ void init_main(void)
     pinMode (ROTENC_SW,INPUT_PULLUP);
     pinMode (ACK_DETECTED,INPUT); // pullup is extern 10K
     pinMode (RS485_DERE,OUTPUT);
-    digitalWrite(RS485_DERE,RS485Receive);
 
-    // Timer/Counter 0 initialization: done in Status.c
-    
+    // with xpnet the TX/RX direction will be switched by the rs485 driver
+    // since CS is xpnet-master, TX-direction as init is the right choice
+    // with lenz pc interface, the direction will never change.
+    // but since the RS485 chip is connected to the uart, setting RS485Transmit disables the RS485 bus for receiving, 
+    // so we can receive properly over usb-uart
+    digitalWrite(RS485_DERE,RS485Transmit); 
+
     // Timer1: done in init_dccout();
-
     init_timer2();
 
     // Analog Comparator initialization
@@ -334,12 +325,6 @@ void setup() {
     #if (PARSER == LENZ)
         init_rs232(BAUD_19200); 
     #endif
-    #if (PARSER == INTELLIBOX)
-        init_rs232(BAUD_19200); 
-    #endif
-    #if (PARSER == SDS_BOX)
-        Serial.begin(115200);
-    #endif
 
     #if (XPRESSNET_ENABLED == 1)
       init_rs485();
@@ -350,10 +335,6 @@ void setup() {
     #if (PARSER == LENZ) 
         init_parser(); // command parser
     #endif        
-    #if (PARSER == INTELLIBOX) 
-        init_parser(); // command parser
-    #endif        
-    
 
     init_organizer();                   // engine for command repetition, 
                                         // memory of loco speeds and types
@@ -389,9 +370,6 @@ void loop()
         run_database();                  // check transfer of loco database 
     #endif
     #if (PARSER == LENZ) //sds 
-        run_parser();                    // check commands from pc
-    #endif
-    #if (PARSER == INTELLIBOX) //sds 
         run_parser();                    // check commands from pc
     #endif
 

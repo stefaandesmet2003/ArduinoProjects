@@ -140,14 +140,7 @@
 // SDS, A7 is voorlopig vrij
 
 #define RS485Transmit    HIGH
-//#define RS485Receive     LOW // dit is correct voor rs485
-#define RS485Receive     HIGH // sds temp!
-//SDS #define MY_CTS_HIGH      PORTB |= (1<<MY_CTS)
-//SDS #define MY_CTS_LOW       PORTB &= ~(1<<MY_CTS)
-//SDS #define MY_CTS_STATE     (PORTB & (1<<MY_CTS))
-#define MY_CTS_HIGH //SDS, nog opkuisen in rs232.cpp
-#define MY_CTS_LOW //SDS, nog opkuisen in rs232.cpp
-#define MY_CTS_STATE 0 //SDS, nog opkuisen in rs232.cpp
+#define RS485Receive     LOW
 
 #define MAIN_TRACK_ON    digitalWrite(SW_ENABLE_MAIN,HIGH)
 #define MAIN_TRACK_OFF   digitalWrite(SW_ENABLE_MAIN,LOW)

@@ -39,27 +39,11 @@
 //
 //-----------------------------------------------------------------
 
-
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>         // put var to program memory
-#include <avr/eeprom.h>
-#include <string.h>
-
 #include "config.h"               // general structures and definitions
 #include "hardware.h"
 #include "status.h"
 #include "rs232.h"
 
-#ifndef FALSE 
-  #define FALSE  (1==0)
-  #define TRUE   (1==1)
-#endif
-
-//
 //=====================================================================
 // resolve UART definitions
 #if (__AVR_ATmega32__)
@@ -161,8 +145,6 @@
 //            hardware handshake with RTS and CTS.
 //            display of status with one LED (see status.c)
 //
-// uses:      set_led_rs232
-//            no_timeout.rs232 (see status.c)
 // interface: see rs232.h
 //
 // 2do:       zur Zeit wird RTS nur als connected Erkennung benutzt,
@@ -170,13 +152,11 @@
 //
 //-----------------------------------------------------------------
 
-
 // FIFO-Objekte und Puffer fï¿½r die Ein- und Ausgabe
 // max. Size: 255
 
 #define RxBuffer_Size  64              // mind. 16
 unsigned char RxBuffer[RxBuffer_Size];
-
 
 #define TxBuffer_Size  64              // on sniffer: 128
 unsigned char TxBuffer[TxBuffer_Size];
@@ -188,185 +168,137 @@ unsigned char tx_read_ptr = 0;
 unsigned char tx_write_ptr = 0;
 unsigned char tx_fill = 0;
 
-const unsigned long baudrate[] PROGMEM =    // ordered like in Lenz Interface!
-    {9600L,   //  = 0,
-     19200L,  //  = 1,
-     38400L,  //  = 2,
-     57600L,  //  = 3,
-     115200L, //  = 4,
-     2400L,   //  = 5,  // used for Intellibox 
-	};
-
+const unsigned long baudrate[] PROGMEM = { // ordered like in Lenz Interface!
+  9600L,   //  = 0,
+  19200L,  //  = 1,
+  38400L,  //  = 2,
+  57600L,  //  = 3,
+  115200L, //  = 4,
+};
 t_baud actual_baudrate;                      // index to field above
 
-volatile unsigned char rs232_break_detected = 0;      // flag, that a break was detected
-                                                    // volatile, weil aus ISR bearbeitet wird.
-
-//-------------------------------------------------------------------
-// this goes to usart i
+// sds een overblijfsel van de orig CTS
+volatile bool rs232_parser_reset_needed = 0; // flag, that a break was detected
+                                             // volatile, weil aus ISR bearbeitet wird.
 
 void init_rs232(t_baud new_baud)
-  {
-    uint16_t ubrr;
-    uint8_t sreg = SREG;
-    uint8_t dummy;
-
-    cli();
-
-    my_UCSRB = 0;                  // stop everything
-
-    actual_baudrate = new_baud;
-
-                                // note calculations are done at mult 100
-                                // to avoid integer cast errors +50 is added
-    switch(new_baud)
-	  {
-      //sds info : die ubrr berekeningen werken niet altijd, omdat de precompiler er een soep van maakt!!
-	    default:
-		  case BAUD_2400:
-  		    // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*2400L) - 1);
-          ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*24L) - 100L + 50L) / 100);
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-    			my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
-  		    break;
-  		case BAUD_4800:
-	  	    // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*4800L) - 1);
-          ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*48L) - 100L + 50L) / 100);
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-		    	my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
-		      break;
-		  case BAUD_9600:
-			    // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*9600L) - 1);
-          //SDS ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*96L) - 100L + 50L) / 100);
-          ubrr = 103; // 19200bps @ 16.00MHz
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-  			  my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
-	  	    break;
-		  case BAUD_19200:
-			    // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*19200L) - 1);
-          //SDS ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*192L) - 100L + 50L) / 100);
-          ubrr = 51; // 19200bps @ 16.00MHz
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-			    my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
-		      break;
-		case BAUD_38400:
-			    // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*38400L) - 1);
-          //SDS ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*384L) - 100L + 50L) / 100);
-          ubrr = 25; // 38400bps @ 16.00MHz
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-			    my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
-		      break;
-		case BAUD_57600:
-  		    // ubrr = (uint16_t) ((uint32_t) F_CPU/(8*57600L) - 1);
-          ubrr = (uint16_t) ((uint32_t) (F_CPU/(8*576L) - 100L + 50L) / 100);
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-      		my_UCSRA = (1 << my_RXC) | (1 << my_TXC) | (1 << my_U2X);  // High Speed Mode, nur div 8
-		      break;
-		case BAUD_115200:
-  		    // ubrr = (uint16_t) ((uint32_t) F_CPU/(8*115200L) - 1);
-          ubrr = (uint16_t) ((uint32_t) (F_CPU/(8*1152L) - 100L + 50L) / 100);
-          my_UBRRH = (uint8_t) (ubrr>>8);
-          my_UBRRL = (uint8_t) (ubrr);
-	    		my_UCSRA = (1 << my_RXC) | (1 << my_TXC) | (1 << my_U2X);  // High Speed Mode
-		      break;
-	  }
-   
-    // FIFOs fï¿½r Ein- und Ausgabe initialisieren
-    rx_read_ptr = 0;      
-    rx_write_ptr = 0;
-    rx_fill = 0;      
-    tx_read_ptr = 0;
-    tx_write_ptr = 0;
-    tx_fill = 0;
-
-    #if (__AVR_ATmega32__)
-        my_UCSRC = (1 << my_URSEL)        // must be one - to address this register (also on sniffer)
-                 | (0 << my_UMSEL)        // 0 = asyn mode
-                 | (0 << my_UPM1)         // 00 = parity disabled
-                 | (0 << my_UPM0)         
-                 | (1 << my_USBS)         // 1 = tx with 2 stop bits
-                 | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
-                 | (1 << my_UCSZ0)
-                 | (0 << my_UCPOL);
-    #elif (__AVR_ATmega644__)
-        #warning - check datasheet
-    #elif (__AVR_ATmega644P__)
-        my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
-                 | (0 << my_UMSEL0)
-                 | (0 << my_UPM1)         // 00 = parity disabled
-                 | (0 << my_UPM0)
-                 | (1 << my_USBS)         // 1 = tx with 2 stop bits
-                 | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
-                 | (1 << my_UCSZ0)
-                 | (0 << my_UCPOL);
-    #elif (__AVR_ATmega328P__) //SDS added for atmega328
-        my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
-                 | (0 << my_UMSEL0)
-                 | (0 << my_UPM1)         // 00 = parity disabled
-                 | (0 << my_UPM0)
-                 | (1 << my_USBS)         // 1 = tx with 2 stop bits
-                 | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
-                 | (1 << my_UCSZ0)
-                 | (0 << my_UCPOL);
-    #else 
-    #endif
-
-    // UART Receiver und Transmitter anschalten, Receive-Interrupt aktivieren
-    // Data mode 8N1, asynchron
-    
-    #ifdef RS232_EXTRA_STOP
-        my_UCSRB = (1 << my_RXEN)
-                 | (1 << my_TXEN)
-                 | (1 << my_RXCIE) 
-                 | (1 << my_TXB8)           // set 9th bit to 1
-                 | (1 << my_UCSZ2);         // set frame length to 9bit
-    #else
-        my_UCSRB = (1 << my_RXEN)
-                 | (1 << my_TXEN)
-                 | (1 << my_RXCIE);
-    #endif
-
-    // Flush Receive-Buffer
-    do
-      {
-        dummy = my_UDR;
-      }
-    while (my_UCSRA & (1 << my_RXC));
-
-    // Rï¿½cksetzen von Receive und Transmit Complete-Flags
-    my_UCSRA |= (1 << my_RXC);
-    my_UCSRA |= (1 << my_TXC);
-    
-    dummy = my_UDR; dummy = my_UCSRA;    // again, read registers
-
-    rs232_break_detected = 0;
-    
-    SREG = sreg;
-
-}
-
-// sds : moet nog weg!!
-unsigned char rs232_is_break(void)
 {
-  return (FALSE);
-}
-/*
-unsigned char rs232_is_break(void)
+  uint16_t ubrr;
+  uint8_t sreg = SREG;
+  uint8_t dummy;
+
+  cli();
+  my_UCSRB = 0;                  // stop everything
+
+  actual_baudrate = new_baud;
+
+  // note calculations are done at mult 100
+  // to avoid integer cast errors +50 is added
+  switch(new_baud)
   {
-    if (PORTD & (1 << MY_RXD))
-      {
-        rs232_break_detected = 0;
-        return(FALSE);
-      }
-    else return(TRUE);
+    //sds info : die ubrr berekeningen werken niet altijd, omdat de precompiler er een soep van maakt!!
+    default:
+    case BAUD_9600:
+      // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*9600L) - 1);
+      //SDS ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*96L) - 100L + 50L) / 100);
+      ubrr = 103; // 19200bps @ 16.00MHz
+      my_UBRRH = (uint8_t) (ubrr>>8);
+      my_UBRRL = (uint8_t) (ubrr);
+      my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
+      break;
+    case BAUD_19200:
+      // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*19200L) - 1);
+      //SDS ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*192L) - 100L + 50L) / 100);
+      ubrr = 51; // 19200bps @ 16.00MHz
+      my_UBRRH = (uint8_t) (ubrr>>8);
+      my_UBRRL = (uint8_t) (ubrr);
+      my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
+      break;
+    case BAUD_38400:
+      // ubrr = (uint16_t) ((uint32_t) F_CPU/(16*38400L) - 1);
+      //SDS ubrr = (uint16_t) ((uint32_t) (F_CPU/(16*384L) - 100L + 50L) / 100);
+      ubrr = 25; // 38400bps @ 16.00MHz
+      my_UBRRH = (uint8_t) (ubrr>>8);
+      my_UBRRL = (uint8_t) (ubrr);
+      my_UCSRA = (1 << my_RXC) | (1 << my_TXC);
+      break;
+    case BAUD_57600:
+      // ubrr = (uint16_t) ((uint32_t) F_CPU/(8*57600L) - 1);
+      ubrr = (uint16_t) ((uint32_t) (F_CPU/(8*576L) - 100L + 50L) / 100);
+      my_UBRRH = (uint8_t) (ubrr>>8);
+      my_UBRRL = (uint8_t) (ubrr);
+      my_UCSRA = (1 << my_RXC) | (1 << my_TXC) | (1 << my_U2X);  // High Speed Mode, nur div 8
+      break;
+    case BAUD_115200:
+      // ubrr = (uint16_t) ((uint32_t) F_CPU/(8*115200L) - 1);
+      ubrr = (uint16_t) ((uint32_t) (F_CPU/(8*1152L) - 100L + 50L) / 100);
+      my_UBRRH = (uint8_t) (ubrr>>8);
+      my_UBRRL = (uint8_t) (ubrr);
+      my_UCSRA = (1 << my_RXC) | (1 << my_TXC) | (1 << my_U2X);  // High Speed Mode
+      break;
   }
-  */
+  
+  // FIFOs fï¿½r Ein- und Ausgabe initialisieren
+  rx_read_ptr = 0;      
+  rx_write_ptr = 0;
+  rx_fill = 0;      
+  tx_read_ptr = 0;
+  tx_write_ptr = 0;
+  tx_fill = 0;
+
+  #if (__AVR_ATmega32__)
+      my_UCSRC = (1 << my_URSEL)        // must be one - to address this register (also on sniffer)
+                | (0 << my_UMSEL)        // 0 = asyn mode
+                | (0 << my_UPM1)         // 00 = parity disabled
+                | (0 << my_UPM0)         
+                | (1 << my_USBS)         // 1 = tx with 2 stop bits
+                | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
+                | (1 << my_UCSZ0)
+                | (0 << my_UCPOL);
+  #elif (__AVR_ATmega644__)
+      #warning - check datasheet
+  #elif (__AVR_ATmega644P__)
+      my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
+                | (0 << my_UMSEL0)
+                | (0 << my_UPM1)         // 00 = parity disabled
+                | (0 << my_UPM0)
+                | (1 << my_USBS)         // 1 = tx with 2 stop bits
+                | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
+                | (1 << my_UCSZ0)
+                | (0 << my_UCPOL);
+  #elif (__AVR_ATmega328P__) //SDS added for atmega328
+      my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
+                | (0 << my_UMSEL0)
+                | (0 << my_UPM1)         // 00 = parity disabled
+                | (0 << my_UPM0)
+                | (1 << my_USBS)         // 1 = tx with 2 stop bits
+                | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
+                | (1 << my_UCSZ0)
+                | (0 << my_UCPOL);
+  #else 
+  #endif
+
+  // UART Receiver und Transmitter anschalten, Receive-Interrupt aktivieren
+  // Data mode 8N1, asynchron
+  my_UCSRB = (1 << my_RXEN)
+            | (1 << my_TXEN)
+            | (1 << my_RXCIE);
+
+  // Flush Receive-Buffer
+  do {
+    dummy = my_UDR;
+  }
+  while (my_UCSRA & (1 << my_RXC));
+
+  // Rucksetzen von Receive und Transmit Complete-Flags
+  my_UCSRA |= (1 << my_RXC);
+  my_UCSRA |= (1 << my_TXC);
+  
+  dummy = my_UDR; dummy = my_UCSRA;    // again, read registers
+  rs232_parser_reset_needed = false;
+  SREG = sreg;
+
+} // init_rs232
 
 //---------------------------------------------------------------------------
 // Empfangene Zeichen werden in die Eingabgs-FIFO gespeichert und warten dort
@@ -387,47 +319,35 @@ unsigned char rs232_is_break(void)
     #warning - no or wrong processor defined
 #endif
 {
-    if (my_UCSRA & (1<< my_FE))
-	  { // Frame Error 
-	    rs232_break_detected = 1;      // set flag for parser and discard
-		if (my_UDR == 0)                    // this is a break sent!
-	      {
-		     rs232_break_detected = 1;      // set flag for parser and discard
-		  }
-	  }
-    else
-      {
-        if (my_UCSRA & (1<< my_DOR))
-          { // DATA Overrun -> Fatal
-            // !!! 
-          }
+  if (my_UCSRA & (1<< my_FE)) { // Frame Error 
+    rs232_parser_reset_needed = true; // set flag for parser and discard 
 
-       	RxBuffer[rx_write_ptr] = my_UDR;
-
-        rx_write_ptr++;
-        if (rx_write_ptr == RxBuffer_Size) rx_write_ptr=0;
-        rx_fill++;
-        if (rx_fill > (RxBuffer_Size - 10))
-          {
-            // we are full, stop remote Tx -> set CTS off !!!!
-            // removed here done with polling of CTS in status.c
-    		MY_CTS_HIGH;
-          }
-      }
-}
+    if (my_UDR == 0) { // this is a break sent!
+        rs232_parser_reset_needed = true; // set flag for parser and discard
+    }
+  }
+  else {
+    if (my_UCSRA & (1<< my_DOR)) { // DATA Overrun -> Fatal
+        // !!! 
+        // SDS ????
+    }
+    RxBuffer[rx_write_ptr] = my_UDR;
+    rx_write_ptr++;
+    if (rx_write_ptr == RxBuffer_Size) rx_write_ptr=0;
+    rx_fill++;
+    if (rx_fill > (RxBuffer_Size - 10)) {
+        // we are full, stop remote Tx -> set CTS off !!!!
+        // removed here done with polling of CTS in status.c
+    }
+  }
+} // ISR USART_RX_vect
 
 //----------------------------------------------------------------------------
 // Ein Zeichen aus der Ausgabe-FIFO lesen und ausgeben
 // Ist das Zeichen fertig ausgegeben, wird ein neuer SIG_UART_DATA-IRQ getriggert
 // Ist das FIFO leer, deaktiviert die ISR ihren eigenen IRQ.
 
-// Bei 9 Bit kï¿½nnte noch ein Stopbit erzeugt werden: UCSRB |= (1<<TXB8);
-
-
-
-#if (DEBUG == 3)
-   unsigned  char tx_char;
-#endif
+// Bei 9 Bit konnte noch ein Stopbit erzeugt werden: UCSRB |= (1<<TXB8);
 
 #if (__AVR_ATmega32__)
     ISR(SIG_UART_DATA)              // standard opendcc
@@ -442,26 +362,18 @@ unsigned char rs232_is_break(void)
 #else 
     #warning - no or wrong processor defined
 #endif
-  {
-    if (tx_read_ptr != tx_write_ptr)
-      {
-        my_UCSRA |= (1 << my_TXC);              // writing a one clears any existing tx complete flag
-        my_UDR = TxBuffer[tx_read_ptr];
-        #if (DEBUG == 3)
-            tx_char = TxBuffer[tx_read_ptr];
-        #endif
-        tx_read_ptr++;
-        if (tx_read_ptr == TxBuffer_Size) tx_read_ptr=0;
-        tx_fill--;
-      }
-    else
-    {
-        my_UCSRB &= ~(1 << my_UDRIE);           // disable further TxINT
-        digitalWrite(RS485_DERE,RS485Receive);
-    }
+{
+  if (tx_read_ptr != tx_write_ptr) {
+    my_UCSRA |= (1 << my_TXC);              // writing a one clears any existing tx complete flag
+    my_UDR = TxBuffer[tx_read_ptr];
+    tx_read_ptr++;
+    if (tx_read_ptr == TxBuffer_Size) tx_read_ptr=0;
+    tx_fill--;
   }
-
-
+  else {
+    my_UCSRB &= ~(1 << my_UDRIE);           // disable further TxINT
+  }
+} // ISR USART_UDRE_vect
 
 //=============================================================================
 // Upstream Interface
@@ -469,82 +381,69 @@ unsigned char rs232_is_break(void)
 // TX:
 bool tx_fifo_ready (void)
 {
-    if (tx_fill < (TxBuffer_Size-16))     // keep space for one complete message (16)
-      {
-        return(1);                        // true if enough room
-      }
-    else
-      {
-        return(0);
-      }
-}
-
+  if (tx_fill < (TxBuffer_Size-16)) { // keep space for one complete message (16)
+    return(1);                        // true if enough room
+  }
+  else {
+    return(0);
+  }
+} // tx_fifo_ready
 
 // ret 1 if full
 bool tx_fifo_write (const unsigned char c)
 {
-    TxBuffer[tx_write_ptr] = c;
+  TxBuffer[tx_write_ptr] = c;
 
-    tx_write_ptr++;
-    if (tx_write_ptr == TxBuffer_Size) tx_write_ptr=0;
+  tx_write_ptr++;
+  if (tx_write_ptr == TxBuffer_Size) tx_write_ptr=0;
 
-    unsigned char mysreg = SREG;
-    cli();
-    tx_fill++;
-    SREG = mysreg;
+  unsigned char mysreg = SREG;
+  cli();
+  tx_fill++;
+  SREG = mysreg;
 
-    digitalWrite(RS485_DERE,RS485Transmit);
-    my_UCSRB |= (1 << my_UDRIE);   // enable TxINT
+  my_UCSRB |= (1 << my_UDRIE);   // enable TxINT
 
-
-
-    //if (tx_fill < (TxBuffer_Size-16)) //sds : dit is toch niet juist??? enfin, retval wordt toch niet gebruikt
-    if (tx_fill > (TxBuffer_Size-16))
-      {
-        return(1);
-      }
-
-    return(0);
-}
+  //if (tx_fill < (TxBuffer_Size-16)) //sds : dit is toch niet juist??? enfin, retval wordt toch niet gebruikt
+  if (tx_fill > (TxBuffer_Size-16)) {
+    return(1);
+  }
+  return(0);
+} // tx_fifo_write
 
 // ret 1 if all is sent
 bool tx_all_sent (void)
 {
-    if (tx_fill == 0)
-      {
-        if (!(my_UCSRA & (1 << my_UDRE)))  return(0);    // UDR not empty
-        if (!(my_UCSRA & (1 << my_TXC)))  return(0);    // TX Completed not set
-        return(1);                        
-      }
-    else
-      {
-        return(0);
-      }
-}
+  if (tx_fill == 0) {
+    if (!(my_UCSRA & (1 << my_UDRE)))  return(0);    // UDR not empty
+    if (!(my_UCSRA & (1 << my_TXC)))  return(0);    // TX Completed not set
+    return(1);                        
+  }
+  else {
+    return(0);
+  }
+} // tx_all_sent
 
 void uart_puts (const char *s)
 {
-    do
-      {
-        tx_fifo_write (*s);
-      }
-    while (*s++);
-}
-
+  do
+    {
+      tx_fifo_write (*s);
+    }
+  while (*s++);
+} // uart_puts
 
 //------------------------------------------------------------------------------
 // RX:
 bool rx_fifo_ready (void)
 {
-    if (rx_read_ptr != rx_write_ptr)
-      {
-        return(1);     // there is something
-      }
-    else
-      {
-        return(0);  
-      }
-}
+  if (rx_read_ptr != rx_write_ptr) {
+      return(true);     // there is something
+  }
+  else {
+      return(false);  
+  }
+} // rx_fifo_ready
 
 //-------------------------------------------------------------------
 // rx_fifo_read gets one char from the input fifo
@@ -553,49 +452,20 @@ bool rx_fifo_ready (void)
 // done before calling with a call to rx_fifo_ready();
 
 unsigned char rx_fifo_read (void)
-  {
-    unsigned char retval;
+{
+  unsigned char retval;
 
-    retval = RxBuffer[rx_read_ptr];
-    rx_read_ptr++;
-    if (rx_read_ptr == RxBuffer_Size) rx_read_ptr=0;
+  retval = RxBuffer[rx_read_ptr];
+  rx_read_ptr++;
+  if (rx_read_ptr == RxBuffer_Size) rx_read_ptr=0;
 
-    unsigned char mysreg = SREG;
-    cli();
-    rx_fill--;
-    SREG = mysreg;
+  unsigned char mysreg = SREG;
+  cli();
+  rx_fill--;
+  SREG = mysreg;
 
-    if (rx_fill < (RxBuffer_Size - 14))
-      {
-        if (MY_CTS_STATE)
-          {
-            // CTS is high, but we are no longer full
-            // enable remote Tx -> reset CTS 
-            MY_CTS_LOW;
-          }
-      }
-    return(retval);
+  if (rx_fill < (RxBuffer_Size - 14)) {
+    // hier was code voor CTS -> removed
   }
-
-
-//-----------------------------------------------------------------------------------
-// testroutinen zu Parsertest
-// Ersatzroutine, um ein Zeichen in den Empfangsbuffer abzulegen
-// Sendepuffer kann im Simulator mit einen Databreakpoint auf UDR ï¿½berwacht werden.
-void push_to_rx(unsigned char d)
-  {
-	RxBuffer[rx_write_ptr] = d;
-
-    rx_write_ptr++;
-    if (rx_write_ptr == RxBuffer_Size) rx_write_ptr=0;
-    rx_fill++;
-    if (rx_fill > (RxBuffer_Size-5))
-      {
-        // we are full, stop remote Tx -> set CTS off !!!!
-        MY_CTS_HIGH;
-        // 
-      }
-  }
-
-
-
+  return(retval);
+} // rx_fifo_read

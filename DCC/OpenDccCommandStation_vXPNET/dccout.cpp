@@ -35,15 +35,6 @@
 //
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>           // put var to program memory
-#include <avr/eeprom.h>
-#include <string.h>
-
 #include "config.h"                 // general structures and definitions
 #include "dccout.h"                 // import own header
 

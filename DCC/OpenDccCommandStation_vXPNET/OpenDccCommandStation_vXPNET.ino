@@ -36,38 +36,23 @@
 //
 //-----------------------------------------------------------------
 
-#include <stdlib.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include <avr/pgmspace.h>
-#include <avr/eeprom.h>
-#include <string.h>
-
 #include "config.h"                // general structures and definitions - make your changes here
-
 #include "database.h"              // format and names
 #include "status.h"                // led, key, state
 #include "dccout.h"                // make dcc
 #include "organizer.h"             // manage commands
 #include "programmer.h"            // DCC service mode
 
+// op atmega328 is het of LENZ of XPNET
 #if (XPRESSNET_ENABLED == 1)
 #include "rs485.h"                 // interface to xpressnet
 #include "xpnet.h"                 // xpressnet parser
 #endif
 
-
 #if (PARSER == LENZ)
     #include "rs232.h"                 // interface to pc
     #include "lenz_parser.h"         // talk to pc (same as ibox_parser.h)
     #warning Parseremulation = LENZ
-#endif
-#if (PARSER == INTELLIBOX)
-    #include "rs232.h"                 // interface to pc
-    #include "ibox_parser.h"         
-    #warning Parseremulation = INTELLIBOX
 #endif
 //SDS #include "s88.h"                   // s88-bus
 
@@ -337,12 +322,6 @@ void setup() {
     #if (PARSER == LENZ)
         init_rs232(BAUD_19200); 
     #endif
-    #if (PARSER == INTELLIBOX)
-        init_rs232(BAUD_19200); 
-    #endif
-    #if (PARSER == SDS_BOX)
-        Serial.begin(115200);
-    #endif
 
     #if (XPRESSNET_ENABLED == 1)
       init_rs485();
@@ -353,10 +332,6 @@ void setup() {
     #if (PARSER == LENZ) 
         init_parser(); // command parser
     #endif        
-    #if (PARSER == INTELLIBOX) 
-        init_parser(); // command parser
-    #endif        
-    
 
     init_organizer();                   // engine for command repetition, 
                                         // memory of loco speeds and types
@@ -376,7 +351,8 @@ void setup() {
     set_opendcc_state(RUN_OKAY);         // start up with power enabled
     
     // dcc_startup_messages();          // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
-    setup_lcd();
+    // 2021 : test xpnet op losse nano
+    //setup_lcd();
 
 } // setup
 
@@ -394,9 +370,6 @@ void loop()
     #if (PARSER == LENZ) //sds 
         run_parser();                    // check commands from pc
     #endif
-    #if (PARSER == INTELLIBOX) //sds 
-        run_parser();                    // check commands from pc
-    #endif
 
     #if (S88_ENABLED == 1)
         if (!is_prog_state()) run_s88(); // s88 has busy loops, we block it when programming
@@ -407,8 +380,9 @@ void loop()
         run_xpressnet();
     #endif
 
-    keys_Update();
-    ui_Update();   
+    // 2021 : test xpnet op losse nano
+    //keys_Update();
+    //ui_Update();   
 
 
 } // loop
