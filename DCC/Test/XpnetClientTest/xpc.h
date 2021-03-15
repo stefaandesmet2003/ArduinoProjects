@@ -3,8 +3,13 @@
 
 #include "status.h"
 
-typedef enum { XPEVENT_POWER_OFF, XPEVENT_POWER_ON, XPEVENT_SERVICE_MODE_ON, XPEVENT_MAIN_SHORT, XPEVENT_PROG_SHORT, XPEVENT_LOC_STOLEN, 
-               XPEVENT_CONNECTION_ERROR, XPEVENT_RX_TIMEOUT, XPEVENT_RX_ERROR, XPEVENT_MSG_ERROR, XPEVENT_TX_TIMEOUT, XPEVENT_TX_ERROR, XPEVENT_UNKNOWN_COMMAND, XPEVENT_BUSY } xpcEvent_t;
+typedef enum { 
+  XPEVENT_POWER_OFF, XPEVENT_POWER_ON, XPEVENT_SERVICE_MODE_ON, 
+  XPEVENT_MAIN_SHORT, XPEVENT_PROG_SHORT, 
+  XPEVENT_LOC_STOLEN, 
+  XPEVENT_CONNECTION_ERROR, XPEVENT_RX_TIMEOUT, XPEVENT_RX_ERROR, XPEVENT_MSG_ERROR, XPEVENT_TX_ERROR, 
+  XPEVENT_UNKNOWN_COMMAND, XPEVENT_BUSY 
+} xpcEvent_t;
                
 typedef enum {PROG_READY, PROG_SHORT, PROG_NOACK, PROG_BUSY} progStatus_t;               
 
@@ -14,21 +19,18 @@ typedef enum {PROG_READY, PROG_SHORT, PROG_NOACK, PROG_BUSY} progStatus_t;
 #define COMMANDSTATION_STATUS_POWER_OFF         0x2
 #define COMMANDSTATION_STATUS_SERVICE_MODE_ON   0x8
 
-
 extern uint8_t xpc_MyAddress; // om eventueel on-the-fly je xpnet addres te wijzigen
 
-void init_xpclient(void);
-void run_xpclient(void); // multitask replacement
+void xpc_Init(uint8_t slaveAddress);
+void xpc_Run(void);
 
 // functionele xpnet intf
-bool xpc_IsBusy();
 void xpc_send_PowerOnRequest ();
 void xpc_send_PowerOffRequest ();
 void xpc_send_EmergencyStopRequest ();
 void xpc_send_ServiceModeResultsRequest (); // prog status/results request
 void xpc_send_CommandStationStatusRequest ();
 void xpc_send_CommandStationSwVersionRequest ();
-
 
 // cv : 1..1024, 1024 wordt als 0 getransmit
 void xpc_send_DirectModeCVReadRequest(uint16_t cvAddress);
@@ -52,6 +54,10 @@ void xpc_send_PomCVWriteRequest(uint16_t pomAddress, uint16_t cvAddress, uint8_t
 // de applayer moet de requests organiseren om alle nodige info te bekomen dmv verschillende func calls
 void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble);
 
+// send accessory decoder feedback to the command station
+// decAddr : 0..255
+// data : 8-bits, status of 8 inputs, signal aspect, 8outputs van een wisseldecoder?
+void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data);
 
 // dit commando is enkel voor schakeldecoders!
 // turnoutAddr : 0..1023 (10bits) 
@@ -63,7 +69,6 @@ void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble);
 void xpc_send_SetTurnoutRequest(uint8_t turnoutAddr, uint8_t turnoutPosition);
 void xpc_send_SetSignalAspectRequest(uint16_t signalAddress, uint8_t signalAspect);
 
-
 // locAddr : 0 -> 9999 (xpnet range)
 // de CS antwoordt met speed info, en wie de loc bestuurt
 void xpc_send_LocGetInfoRequest(uint16_t locAddr);
@@ -74,11 +79,9 @@ void xpc_send_LocGetFuncStatus_F13_F28_Request(uint16_t locAddr); // GET voor fu
 void xpc_send_LocGetFuncModeRequest(uint16_t locAddr); // GET voor functies F0 -> F12
 void xpc_send_LocGetFuncMode_F13_F28_Request(uint16_t locAddr); // GET voor functies F13 -> F28
 
-
 // locAddr : 0 -> 9999 (xpnet range)
 // we gaan 128speed steps gebruiken in de client (DCC128)
 void xpc_send_LocSetSpeedRequest(uint16_t locAddr, uint8_t locSpeed);
-
 
 // locAddr : 0 -> 9999 (xpnet range)
 // per func grp, de applayer moet zorgen dat alle bits in een grp correct worden doorgegeven!!
@@ -98,8 +101,8 @@ void xpc_send_GetFastClock ();
 void xpc_send_SetFastClock (t_fast_clock* newFastClock);
 
 /***************************************************************************************************************/
-/***************************************************************************************************************/
 /*** notify intf   *********************************************************************************************/
+/***************************************************************************************************************/
 
 extern void xpc_EventNotify( xpcEvent_t xpcEvent ) __attribute__ ((weak)); // de xpnet broadcasts
 extern void xpc_LocStolenNotify(uint16_t stolenLocAddress) __attribute__ ((weak));
@@ -135,18 +138,10 @@ extern void xpc_ProgResultResponse (uint16_t cvAddress, uint8_t cvData) __attrib
 // schakeldecoder :  bits0..1 : wissel 1, bits2..3 : wissel 2
 // feedbackdecoder : 4 inputs van de feedback decoder
 // de applayer moet de requests organiseren om alle nodige info te bekomen dmv verschillende func calls
-extern void xpc_AccessoryDecoderInfoResponse (uint8_t decAddress, uint8_t nibble, uint8_t decType, uint8_t decBits) __attribute__ ((weak));
-// de data hebben hetzelfde formaat als in [xpc_AccessoryDecoderInfoResponse], maar dan x aantal adressen
-// dus x keer 'nibble,decType,decBits'
-// TODO : betere manier nodig om dit uit te wisselen!
-extern void xpc_AccessoryDecoderInfoBC (uint8_t nbrOfBytes, uint8_t *rawDataAwaitingABetterApproach) __attribute__ ((weak));
+// decBitsValid : a mask with the 4 bits that are valid from the received nibble
+void xpc_AccessoryDecoderInfoResponse (uint8_t decAddress, uint8_t decBits, uint8_t decBitsValid, uint8_t decType) __attribute__ ((weak));
 
 // nextLocAddress : 0..9999 = valid, 10000 = invalid
 extern void xpc_FindNextLocAddressResponse(uint16_t nextLocAddress) __attribute__ ((weak));
-
-// debug only
-extern unsigned char rx_message[17];             // current message from master
-extern unsigned char tx_message[17];             // current message from client
-
 
 #endif // _xpc_h_

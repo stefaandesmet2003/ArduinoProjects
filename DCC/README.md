@@ -46,3 +46,17 @@ voorlopig niet mogelijk om CV's van de command station te lezen/schrijven
 - JMRI 0xE?-0x30 : juist implementeren in lenz_parser  
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert  
 
+# XPNET
+## todo
+- test met RS485
+- PC interface lenz <> xpnet
+
+# accessory decoder
+## todo
+- STM8 version
+- extended accessory (signals)
+- feedback decoder met xpc
+
+# RAILCOM
+- todo!
+
