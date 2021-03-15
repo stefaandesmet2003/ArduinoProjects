@@ -251,25 +251,6 @@ void pc_send_loco_addr(unsigned int addr)
   pc_send_lenz(pars_pcm = pcm_build);
 } // pc_send_loco_addr
 
-/* sds : moved to organizer.cpp */
-/*
-static unsigned char scan_locobuffer(unsigned int addr)       // Hilfsroutine: locobuffer durchsuchen
-  {
-    register unsigned char i;
-    
-    // im locobuffer nach dieser Lok suchen
-    
-    for (i=0; i<SIZE_LOCOBUFFER; i++)
-      {
-        if (locobuffer[i].address == addr)
-          {
-            return(i);
-          }
-      }
-    return (SIZE_LOCOBUFFER);   // max if not found
-  }
-*/
-
 void pc_send_lokdaten(unsigned int addr)
   {
     register unsigned char i, data;
@@ -388,7 +369,6 @@ void pc_send_loco_func_status(unsigned int addr)
     pc_send_lenz(pars_pcm = pcm_build);
   }
   
-
 void send_lok_stolen(unsigned char slot, unsigned int lokaddr)
   {
     pcm_build[0] = 0xE3;                       // Headerbyte = 0xE3
@@ -1157,6 +1137,15 @@ void parse_command(void)
                       }
                     break;
                 case 0x30:
+                  // SDS TODO 2021
+                  // 0xE? 0x30 is eigenlijk voor encapsulation van DCC packets in een XPNET msg
+                  // dus eigenlijk moeten we hier niets parsen, maar gewoon de DCC bytes op de rail zetten
+                  // == naar de organizer.cpp sturen
+                  // dat is de meest generieke implementatie
+                  // want nu hebben we bv. geen ondersteuning voor extended accessory (JMRI stuurt dit voor signal aspect)
+                  // de do_pom_accessory hieronder is allicht verkeerd omdat de addr = ((pcc[2] & 0x3F) * 256) + pcc[3]; enkel juist is voor locdecoders
+                  // en niet voor accessory decoders (daar zitten 3bits in 2-complement in)
+                  // getest?
                     // Prog. on Main Read ab V3.6 0xE6 0x30 AddrH AddrL 0xE4 + C CV DAT [XOR] 
                     // Prog. on Main Bit  ab V3   0xE6 0x30 AddrH AddrL 0xE8 + C CV DAT X-Or
                     // Prog. on Main Byte ab V3   0xE6 0x30 AddrH AddrL 0xEC + C CV DAT X-Or

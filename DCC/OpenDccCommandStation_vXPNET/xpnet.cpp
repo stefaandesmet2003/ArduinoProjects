@@ -19,12 +19,12 @@
 //            2008-08-22       added F13 - F28 support
 //            2008-09-01 V0.04 watch handling by slot_use_counter
 //            2008-11-05 V0.05 tunnel_fifo neu dazu
-//            2008-12-03 V0.06 Adresssplitting bei R�ckmeldern
+//            2008-12-03 V0.06 Adresssplitting bei Rückmeldern
 //                             Feedback mit Call-ID 0x20
 //            2009-02-22 V0.07 Bugfix for Emergency Stop
 //            2009-03-09 V0.08 added special command roco multimaus f13-f20
 //            2009-03-11       data base is sent as message or as call
-//            2009-05-25 V0.09 jens.k�hn: Accessory Decoder also as broad cast
+//            2009-05-25 V0.09 jens.kohn: Accessory Decoder also as broad cast
 //            2009-06-23 V0.10 kw: added status_event.clock to send fast clock 
 //                             added handling of fast clock messages in parser                   
 //            2009-11-09 V0.11 kw: extended accessory 
@@ -65,10 +65,6 @@
 #include "database.h"              // for database broadcast
 #include "rs485.h"                 // rx and tx serial if, made for xpressnet
 
-#if (PARSER == LENZ)
-  #include "lenz_parser.h"         // tell pc about status changes       
-#endif
-
 #include "programmer.h"
 
 //SDS #include "s88.h"
@@ -81,9 +77,9 @@
 unsigned char xp_datenfehler[] = {0x61, 0x80};             // xor wrong
 unsigned char xp_busy[] = {0x61, 0x81};                    // busy
 unsigned char xp_unknown[] = {0x61, 0x82};                 // unknown command
-unsigned char xp_BC_alles_aus[] = {0x61, 0x00};            // Kurzschlu�abschaltung
+unsigned char xp_BC_alles_aus[] = {0x61, 0x00};            // Kurzschlussabschaltung
 unsigned char xp_BC_alles_an[] = {0x61, 0x01};             // DCC wieder einschalten
-unsigned char xp_BC_progmode[] = {0x61, 0x02};             // Progmode (das ausl�sende Ger�t mu� alles an senden)
+unsigned char xp_BC_progmode[] = {0x61, 0x02};             // Progmode (das auslösende Gerät muss alles an senden)
 unsigned char xp_BC_progshort[] = {0x61, 0x12};            // Progmode and short
 unsigned char xp_BC_locos_aus[] = {0x81, 0x00};            // Alle Loks gestoppt
 
@@ -142,8 +138,6 @@ static void set_slot_to_watch(unsigned char slot)
 // Whenever there is a feedback event, we must tell these events to
 // our clients.
 //
-
-
 
 //===============================================================================
 //
@@ -216,7 +210,7 @@ void xp_send_bc_message(void)
       xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
       xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
       break;
-    case RUN_SHORT:            // Kurzschlu�
+    case RUN_SHORT:            // Kurzschluss
       xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
       xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
       break;
@@ -262,7 +256,7 @@ void xpnet_send_prog_result(void)
   // 61 12: short - Kurzschluss
   // 61 13: cant read - Daten nicht gefunden
   // 61 1f: busy
-  // 63 10 EE D: EE=adr, D=Daten; nur f�r Register oder Pagemode, wenn bei cv diese Antwort, dann kein cv!
+  // 63 10 EE D: EE=adr, D=Daten; nur für Register oder Pagemode, wenn bei cv diese Antwort, dann kein cv!
   // 63 14 CV D: CV=cv, D=Daten: nur wenn cv gelesen wurde; 14,15,16,17
 
   if (prog_event.busy) {
@@ -754,27 +748,27 @@ void xp_parser(void)
     case 0x4:
       // not yet tested: Schaltinformation anfordern 0x42 ADR Nibble X-Or
       // Hex : 0x42 Adresse 0x80 + N X-Or-Byte
-      // f�r Weichen: Adresse = Adr / 4; N=Nibble
-      // nicht f�r R�ckmelder!
+      // für Weichen: Adresse = Adr / 4; N=Nibble
+      // nicht für Rückmelder!
       // Antwort:
       // Hex : 0x42 ADR ITTNZZZZ X-Or-Byte
       // ADR = Adresse mod 4
       // I: 1=in work; 0=done -> bei uns immer 0
-      // TT = Type: 00=Schaltempf. 01=Schaltempf. mit RM, 10: R�ckmelder, 11 reserved
+      // TT = Type: 00=Schaltempf. 01=Schaltempf. mit RM, 10: Rückmelder, 11 reserved
       // N: 0=lower Nibble, 1=upper
       // ZZZZ: Zustand; bei Weichen je 2 Bits: 00=not yet; 01=links, 10=rechts, 11:void
-      // Bei R�ckmeldern: Direkt die 4 Bits des Nibbles
-      // TC interpretiert das alles als direkt �bereinanderliegend;
-      // also hier und in s88.c folgende Notl�sung:
+      // Bei Rückmeldern: Direkt die 4 Bits des Nibbles
+      // TC interpretiert das alles als direkt übereinanderliegend;
+      // also hier und in s88.c folgende Notlösung:
       //  Adressen 0..63  werden als DCC-Accessory interpretiert, aus dem Turnout-Buffer geladen
-      //                  und mit TT 01 oder 00 quittiert. Das bedeutet 256 m�gliche Weichen
-      //  Adressen 64-127 werden als Feedback interpretiert, das bedeutet 512 m�gliche Melder
+      //                  und mit TT 01 oder 00 quittiert. Das bedeutet 256 mögliche Weichen
+      //  Adressen 64-127 werden als Feedback interpretiert, das bedeutet 512 mögliche Melder
 
     switch(xpressnet_feedback_mode) {
       default:
       case 0:                             // mixed mode    
         if (rx_message[1] < 64)  {
-          // Nur f�r Schaltinfo:
+          // Nur für Schaltinfo:
           addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
           tx_message[0] = 0x42;
           // TODO!! we moeten deze functie herimplementeren zonder S88
@@ -816,8 +810,8 @@ void xp_parser(void)
       // Hex: 0x52 Adresse 0x80 + SBBO; 
       // Adresse: = Decoder;   S= 1=activate, 0=deactivate,
       //                       BB=local adr,
-      //                       O=Ausgang 0 (red) / Ausgang 1 (gr�n)
-      // (das w�rde eigentlich schon passend f�r DCC vorliegen, aber lieber sauber �bergeben)
+      //                       O=Ausgang 0 (red) / Ausgang 1 (grün)
+      // (das würde eigentlich schon passend für DCC vorliegen, aber lieber sauber übergeben)
       addr = (unsigned int) (rx_message[1] << 2) + ((rx_message[2] >> 1) & 0b011);
       activate = (rx_message[2] & 0b01000) >> 3;
       coil = rx_message[2] & 0b01;
@@ -835,6 +829,25 @@ void xp_parser(void)
       xp_send_message(FUTURE_ID | 0, tx_message);
       processed = 1;
       break;
+
+    case 0x7: // SDS xpnet extension for feedback decoders
+      // 0x72 Addr DAT [XOR] "Accessory Decoder notify"
+      // DAT = 8-bits = 8 I/O in 1 byte -> translate to xpnet nibbles
+      // willen we dit eventueel ook voor wissels/seinen gebruiken?
+      // voorlopig hangen de accdecoders niet aan xpnet, dus geen feedback
+      // het volstaat dat de info op xpnet wordt doorgegeven door de centrale (accdecoder zonder feedback)
+      // TODO : feedback bijhouden in iets à la s88!
+      // TODO : for now just broadcast back to all xpnet clients ()
+      // format according to §2.1.11 (nibbles), TT=10 (feedback decoder), I=0
+      tx_message[0] = 0x44;
+      tx_message[1] = rx_message[1];
+      tx_message[2] = 0b01000000 | (rx_message[2] & 0x0F); // lower nibble
+      tx_message[3] = rx_message[1];
+      tx_message[4] = 0b00110000 | ((rx_message[2] & 0xF0)>>4); // higher nibble
+      xp_send_message(FUTURE_ID | 0, tx_message);
+      processed = 1;
+      break;
+
     case 0x8:
       // Alle Loks anhalten 0x80 0x80
       if (rx_message[1] == 0x80) {
@@ -1084,10 +1097,10 @@ void xp_parser(void)
           }
           break; 
         case 0x40:   //Lokverwaltung (Double Header)
-          // !!! Lok zu MTR hinzuf�gen ab V3 0xE4 0x40 + R ADR High ADR Low MTR X-Or
+          // !!! Lok zu MTR hinzufügen ab V3 0xE4 0x40 + R ADR High ADR Low MTR X-Or
           // !!! Lok aus MTR entfernen ab V3 0xE4 0x42 ADR High ADR Low MTR X-Or
           // !!! DTR-Befehle ab V3 0xE5 0x43 ADR1 H ADR1 L ADR2 H ADR2 L X-Or
-          // !!! Lok aus Stack l�schen ab V3 0xE3 0x44 ADR High ADR Low X-Or
+          // !!! Lok aus Stack löschen ab V3 0xE3 0x44 ADR High ADR Low X-Or
           addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
           switch(rx_message[1] & 0x0f) {
             case 0x04:

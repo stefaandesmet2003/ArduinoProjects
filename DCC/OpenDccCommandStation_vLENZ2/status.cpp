@@ -108,7 +108,6 @@ void init_state(void)
 
   #if (DCC_FAST_CLOCK==1)
     fast_clock.ratio = eeprom_read_byte((uint8_t *)eadr_fast_clock_ratio);
-    //fast_clock.ratio = 8; //SDS from config.cpp
   #endif
   mainShortState = NO_SHORT;
   progShortState = NO_SHORT;
@@ -249,6 +248,8 @@ void dcc_fast_clock_step_5ms(void)
 #endif // DCC_FAST_CLOCK
 
 // Hinweis: RUN_PAUSE wird zur Zeit nicht angesprungen
+// SDS TODO 2021: als er EXT_STOP is én een short, dan flippert de run_state continu tussen de 2
+// en krijgen we massaal veel events -> kan beter
 void run_state(void)
 {
   if ((millis() - runState5msLastMillis) > 5) {

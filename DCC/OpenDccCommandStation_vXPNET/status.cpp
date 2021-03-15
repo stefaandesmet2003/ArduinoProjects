@@ -249,6 +249,8 @@ void dcc_fast_clock_step_5ms(void)
 #endif // DCC_FAST_CLOCK
 
 // Hinweis: RUN_PAUSE wird zur Zeit nicht angesprungen
+// SDS TODO 2021: als er EXT_STOP is én een short, dan flippert de run_state continu tussen de 2
+// en krijgen we massaal veel events -> kan beter
 void run_state(void)
 {
   if ((millis() - runState5msLastMillis) > 5) {

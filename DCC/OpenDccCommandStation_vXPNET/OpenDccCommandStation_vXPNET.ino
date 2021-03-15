@@ -44,15 +44,14 @@
 #include "programmer.h"            // DCC service mode
 
 // op atmega328 is het of LENZ of XPNET
-#if (XPRESSNET_ENABLED == 1)
+#if (XPRESSNET_ENABLED ==1)
 #include "rs485.h"                 // interface to xpressnet
 #include "xpnet.h"                 // xpressnet parser
 #endif
 
 #if (PARSER == LENZ)
-    #include "rs232.h"                 // interface to pc
-    #include "lenz_parser.h"         // talk to pc (same as ibox_parser.h)
-    #warning Parseremulation = LENZ
+  #include "rs232.h"                 // interface to pc
+  #include "lenz_parser.h"         // talk to pc (same as ibox_parser.h)
 #endif
 //SDS #include "s88.h"                   // s88-bus
 
@@ -77,312 +76,197 @@ const uint8_t charBitmap[][8] = {
 
 /*********************************************************************************************************/
 
-//-------------------------------------------------------------------------------------------
-// (32L * 1000000L / F_CPU)    // we use div 64 on timer 2 -> 4us
-
 #if  (TIMER2_TICK_PERIOD != (64L * 1000000L / F_CPU))    // we use div 64 on timer 2 -> 4us
     #warning TIMER2_TICK_PERIOD does not match divider!
 #endif
 
+// SDS TODO 2021
+// in mijn CS is timer2 enkel nog nodig voor de xpnet slot timing
+// kan dat niet met micros() ?, dan hebben we timer2 geheel niet nodig
+
 void init_timer2(void)
-  {
-    #if (__AVR_ATmega644P__)
-        // Timer/Counter 2 initialization
-        // Clock source: System Clock / 32 -> 2us
-        TCCR2A = (0<< COM2A1)   // 00 = normal port mode
-               | (0<< COM2A0)
-               | (0<< COM2B1)   // 00 = normal port mode
-               | (0<< COM2B0)
-               | (0<< WGM21)    // WGM = 000: normal mode
-               | (0<< WGM20);
-        TCCR2B = (0<< FOC2A)    // 0 = no forced compare match
-               | (0<< FOC2B)    // 0 = no forced compare match
-               | (0<< WGM22)    // WGM = 000: normal mode
-               | (1<<CS22)      // CS = 000: stopped
-               | (0<<CS21)      //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
-               | (0<<CS20);     //      110 = div256, 111 = div1024
-        TCNT2=0x00;
-    #elif (__AVR_ATmega644__)
-        // Timer/Counter 2 initialization
-        // Clock source: System Clock / 32 -> 2us
-        // Mode: Normal top=FFh
-        // OC2 output: Disconnected
-        TCCR2 =  (0<<  FOC2)    // 0 = no forced compare match
-               | (0<<  WGM20)   // WGM = 00: normal mode  
-               | (0<<  COM21)   // 00 = normal port mode
-               | (0<<  COM20)
-               | (0<<  WGM21)
-               | (1<<  CS22)    // CS = 000: stopped
-               | (0<<  CS21)    //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
-               | (0<<  CS20);   //      110 = div256, 111 = div1024
-        TCNT2=0x00;
-    #elif (__AVR_ATmega32__)
-        // Timer/Counter 2 initialization
-        // Clock source: System Clock / 32 -> 2us
-        // Mode: Normal top=FFh
-        // OC2 output: Disconnected
-        TCCR2 =  (0<<  FOC2)    // 0 = no forced compare match
-               | (0<<  WGM20)   // WGM = 00: normal mode  
-               | (0<<  COM21)   // 00 = normal port mode
-               | (0<<  COM20)
-               | (0<<  WGM21)
-               | (1<<  CS22)    // CS = 000: stopped
-               | (0<<  CS21)    //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
-               | (0<<  CS20);   //      110 = div256, 111 = div1024
-        TCNT2=0x00;
-    #elif (__AVR_ATmega328P__) //SDS for atmega328 - zelfde als 644P
-        // Timer/Counter 2 initialization
-        // Clock source: System Clock / 32 -> 2us
-        TCCR2A = (0<< COM2A1)   // 00 = normal port mode
-               | (0<< COM2A0)
-               | (0<< COM2B1)   // 00 = normal port mode
-               | (0<< COM2B0)
-               | (0<< WGM21)    // WGM = 000: normal mode
-               | (0<< WGM20);
-        TCCR2B = (0<< FOC2A)    // 0 = no forced compare match
-               | (0<< FOC2B)    // 0 = no forced compare match
-               | (0<< WGM22)    // WGM = 000: normal mode
-               | (1<<CS22)      // CS = 000: stopped
-               | (0<<CS21)      //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
-               | (0<<CS20);     //      110 = div256, 111 = div1024
-        TCNT2=0x00;
-    #else 
-       #error: counter2 undefined
-    #endif
-  }
+{
+#if (__AVR_ATmega328P__) //SDS for atmega328 - zelfde als 644P
+  // Timer/Counter 2 initialization
+  // Clock source: System Clock / 32 -> 2us
+  TCCR2A = (0<< COM2A1)   // 00 = normal port mode
+          | (0<< COM2A0)
+          | (0<< COM2B1)   // 00 = normal port mode
+          | (0<< COM2B0)
+          | (0<< WGM21)    // WGM = 000: normal mode
+          | (0<< WGM20);
+  TCCR2B = (0<< FOC2A)    // 0 = no forced compare match
+          | (0<< FOC2B)    // 0 = no forced compare match
+          | (0<< WGM22)    // WGM = 000: normal mode
+          | (1<<CS22)      // CS = 000: stopped
+          | (0<<CS21)      //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
+          | (0<<CS20);     //      110 = div256, 111 = div1024
+  TCNT2=0x00;
+#else 
+    #error: counter2 undefined
+#endif
+} // init_timer2
 
+void init_main(void) {
+  // Input/Output Ports initialization
+  // Port B
+  pinMode(BUTTON_GREEN, INPUT); // pullup is extern 10K
+  pinMode(BUTTON_RED, INPUT); // pullup is extern 10K
+  pinMode(NDCC, OUTPUT); // pullup is extern 10K
+  pinMode(DCC, OUTPUT); // pullup is extern 10K
+  digitalWrite(DCC,HIGH);
+  digitalWrite(NDCC,LOW);
 
+  // Port C
+  pinMode (NSHORT_PROG,INPUT); // uitgang van 7414, geen pullup nodig
+  pinMode (NSHORT_MAIN,INPUT); // uitgang van 7414, geen pullup nodig
+  pinMode (SW_ENABLE_MAIN,OUTPUT);
+  pinMode (SW_ENABLE_PROG,OUTPUT);
+  pinMode (EXT_STOP,INPUT); // pullup is extern 10K
+  digitalWrite(SW_ENABLE_MAIN,LOW);
+  digitalWrite(SW_ENABLE_PROG,LOW);
 
-void init_main(void)
-    {
-    // Input/Output Ports initialization
+  // Port D
+  pinMode (ROTENC_CLK,INPUT); // pullup zit op de ROTENC module
+  pinMode (ROTENC_DT,INPUT); // pullup zit op de ROTENC module
+  pinMode (ROTENC_SW,INPUT_PULLUP);
+  pinMode (ACK_DETECTED,INPUT); // pullup is extern 10K
+  pinMode (RS485_DERE,OUTPUT);
 
-    // Port B
-    pinMode(BUTTON_GREEN, INPUT); // pullup is extern 10K
-    pinMode(BUTTON_RED, INPUT); // pullup is extern 10K
-    pinMode(NDCC, OUTPUT); // pullup is extern 10K
-    pinMode(DCC, OUTPUT); // pullup is extern 10K
-    digitalWrite(DCC,HIGH);
-    digitalWrite(NDCC,LOW);
+  // with xpnet the TX/RX direction will be switched by the rs485 driver
+  // since CS is xpnet-master, TX-direction as init is the right choice
+  // with lenz pc interface, the direction will never change.
+  // but since the RS485 chip is connected to the uart, setting RS485Transmit disables the RS485 bus for receiving, 
+  // so we can receive properly over usb-uart
+  digitalWrite(RS485_DERE,RS485Transmit); 
 
-    // Port C
-    pinMode (NSHORT_PROG,INPUT); // uitgang van 7414, geen pullup nodig
-    pinMode (NSHORT_MAIN,INPUT); // uitgang van 7414, geen pullup nodig
-    pinMode (SW_ENABLE_MAIN,OUTPUT);
-    pinMode (SW_ENABLE_PROG,OUTPUT);
-    pinMode (EXT_STOP,INPUT); // pullup is extern 10K
-    digitalWrite(SW_ENABLE_MAIN,LOW);
-    digitalWrite(SW_ENABLE_PROG,LOW);
+  // Timer1: done in init_dccout();
+  init_timer2();
 
-    // Port D
-    pinMode (ROTENC_CLK,INPUT); // pullup zit op de ROTENC module
-    pinMode (ROTENC_DT,INPUT); // pullup zit op de ROTENC module
-    pinMode (ROTENC_SW,INPUT_PULLUP);
-    pinMode (ACK_DETECTED,INPUT); // pullup is extern 10K
-    pinMode (RS485_DERE,OUTPUT);
-    digitalWrite(RS485_DERE,RS485Receive);
+  // Analog Comparator: Off (SDS: stond hier zo, is allicht al default in arduino)
+  // Analog Comparator Input Capture by Timer/Counter 1: Off
+  ACSR=0x80;
 
-    // Timer/Counter 0 initialization: done in Status.c
-    
-    // Timer1: done in init_dccout();
-
-    init_timer2();
-
-    // Analog Comparator initialization
-    // Analog Comparator: Off
-    // Analog Comparator Input Capture by Timer/Counter 1: Off
-    ACSR=0x80;
-    // SFIOR=0x00;   // PUD = 0: no "pull up disabled"
-    //SDS 201610 : waarom is SFIOR lijn hier gecomment?? niet in de GOLD
-
-    invert_accessory = eeprom_read_byte((uint8_t*)eadr_invert_accessory);     // used for Lenz and XP
-    xpressnet_feedback_mode = eeprom_read_byte((uint8_t*)eadr_xpressnet_feedback); 
-   
-  }
-
-void init_interrupt(void)
-  {
-    // External Interrupt(s) initialization
-    // INT0: Off
-    // INT1: Off
-    // INT2: Off
-    // INT3: Off
-    // INT4: Off
-    // INT5: Off
-    // INT6: Off
-    // INT7: Off
-    // INT7 Mode: Low level
-
-    // Timer(s)/Counter(s) Interrupt(s) initialization
+  invert_accessory = eeprom_read_byte((uint8_t*)eadr_invert_accessory);     // used for Lenz and XP
+  xpressnet_feedback_mode = eeprom_read_byte((uint8_t*)eadr_xpressnet_feedback); 
   
-    #if (__AVR_ATmega644P__)
-        // TIMSK0: OCIE0B OCIE0A TOIE0
-        
-
-    #elif (__AVR_ATmega644__)
-       
-    #elif (__AVR_ATmega32__)
-        TIMSK = (0<<OCIE2)       // Output Compare
-              | (0<<TOIE2)
-              | (0<<TICIE1)      // Input Capture Int
-              | (1<<OCIE1A)      // Output Compare A
-              | (0<<OCIE1B)      // Output Compare B
-              | (0<<TOIE1)       // war 1::::: Timer1/Counter1 Overflow Int Enable
-              | (0<<OCIE0)
-              | (0<<TOIE0);      // Timer0 Overflow
-    #elif (__AVR_ATmega328P__)
-      //SDS moeten we hier iets doen voor atmega328??
-    #else
-      #error:  undefined
-    #endif
-  
-
-
-    sei();              // Global enable interrupts
-
-  }
-
-
+} // init_main
 
 void dcc_startup_messages (void)
-  {
-    t_message testmess;
-    t_message *testmessptr;
-    testmessptr = &testmess;
+{
+  t_message testmess;
+  t_message *testmessptr;
+  testmessptr = &testmess;
 
-    // 20 Reset Pakete
+  // 20 Reset Pakete
+  testmessptr = &DCC_Reset;
+  set_next_message(testmessptr);
+  next_message_count = 20;
 
-    testmessptr = &DCC_Reset;
-    set_next_message(testmessptr);
-    next_message_count = 20;
-
-    while (next_message_count > 0)      // wait
-      {
-        delay(1);
-      }
-    // 10 Idle Pakete
-
-    testmessptr = &DCC_Idle;
-    set_next_message(testmessptr);
-    next_message_count = 10;
-
-    while (next_message_count > 0)      // wait
-      {
-        delay(1);
-      }
+  while (next_message_count > 0){ // wait
+    delay(1);
   }
+  // 10 Idle Pakete
 
+  testmessptr = &DCC_Idle;
+  set_next_message(testmessptr);
+  next_message_count = 10;
 
-
-//===============================================================================
-//
-//  Main Program: There are several branches - depending on jumper settings
-//
-//  Jumpers:
-//  0  0     Run as OpenDCC, either Lenz or Intellibox mode
-//
-//===============================================================================
-
+  while (next_message_count > 0){ // wait
+    delay(1);
+  }
+} // dcc_startup_messages
 
 // Run as DCC central station, emulating Lenz LI101 or Uhlenbrock Intellibox
-// see config.h for compile swtiches
-
+// see config.h for compile switches
 static void setup_lcd()
 {
-    int charBitmapSize = (sizeof(charBitmap ) / sizeof (charBitmap[0]));
+  int charBitmapSize = (sizeof(charBitmap ) / sizeof (charBitmap[0]));
 
-    lcd.begin(20,4); // initialize the lcd 
-    // Switch on the backlight
-    //lcd.setBacklight(1); // overbodig, want by default al aan
+  lcd.begin(20,4); // initialize the lcd 
+  // Switch on the backlight
+  //lcd.setBacklight(1); // overbodig, want by default al aan
 
-    // init special characters
-    for ( int i = 0; i < charBitmapSize; i++ )
-    {
-        lcd.createChar ( i, (uint8_t *)charBitmap[i] );
-    }
+  // init special characters
+  for (int i = 0; i < charBitmapSize; i++) {
+    lcd.createChar ( i, (uint8_t *)charBitmap[i] );
+  }
 
-    ui_Init ();
-    keys_Init ();
+  ui_Init ();
+  keys_Init ();
 
-    lcd.home ();
+  lcd.home ();
 } // setup_lcd
 
-
-
 void setup() {
-   
-    init_main();                                  // all io's + globals
-    init_database();                    // loco format and names
-    init_interrupt();
-    init_dccout();                      // timing engine for dcc    
-    
-    //init_rs232((t_baud)eeprom_read_byte((uint8_t *)eadr_baudrate));   // 19200 is default for Lenz 3.0
-                                                                        // see also DEFAULT_BAUD
+  
+  init_main();          // all io's + globals
+  init_database();      // loco format and names
+  init_dccout();        // timing engine for dcc    
 
-    #if (PARSER == LENZ)
-        init_rs232(BAUD_19200); 
-    #endif
+  //SDS20160823-eeprom data voorlopig niet gebruiken in test arduino
+  //init_rs232((t_baud)eeprom_read_byte((uint8_t *)eadr_baudrate));   // 19200 is default for Lenz 3.0
+  #if (PARSER == LENZ)
+    init_rs232(BAUD_19200); 
+  #endif
 
-    #if (XPRESSNET_ENABLED == 1)
-      init_rs485();
-      init_xpressnet();
-    #endif
-       
-    init_state();                      // 5ms timer tick 
-    #if (PARSER == LENZ) 
-        init_parser(); // command parser
-    #endif        
+  #if (XPRESSNET_ENABLED == 1)
+  init_rs485();
+  init_xpressnet();
+  #endif
+      
+  init_state();                      // 5ms timer tick 
+  #if (PARSER == LENZ) 
+    init_parser(); // command parser
+  #endif        
 
-    init_organizer();                   // engine for command repetition, 
-                                        // memory of loco speeds and types
-    init_programmer();             // State Engine des Programmers
-    
-    #if (S88_ENABLED == 1)
-     init_s88(READ_FROM_EEPROM);  
-    #endif
+  init_organizer();     // engine for command repetition, 
+                        // memory of loco speeds and types
+  init_programmer();    // State Engine des Programmers
+  
+  #if (S88_ENABLED == 1)
+    init_s88(READ_FROM_EEPROM);  
+  #endif
 
-    if (eeprom_read_byte((void *)eadr_OpenDCC_Version) != OPENDCC_VERSION)
-    {
-        // oops, no data loaded or wrong version! 
-        // sds : todo :add something
-    }
+  if (eeprom_read_byte(eadr_OpenDCC_Version) != OPENDCC_VERSION) {
+    // oops, no data loaded or wrong version! 
+    // sds : todo :add something
+  }
 
-    //set_opendcc_state(RUN_OFF);         // start up with power off
-    set_opendcc_state(RUN_OKAY);         // start up with power enabled
-    
-    // dcc_startup_messages();          // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
-    // 2021 : test xpnet op losse nano
-    //setup_lcd();
-
+  //set_opendcc_state(RUN_OFF); // start up with power off
+  set_opendcc_state(RUN_OKAY);  // start up with power enabled
+  
+  // dcc_startup_messages();   // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
+  
+  // voor test met losse nano
+  setup_lcd();
 } // setup
 
 void loop() 
 {
-    // put your main code here, to run repeatedly:
-    run_state();                     // check short and keys
-    run_organizer();                 // run command organizer, depending on state,
-                                   // it will execute normal track operation
-                                   // or programming
-    run_programmer();
-    #if ((XPRESSNET_ENABLED == 1) && (LOCO_DATABASE == NAMED))
-        run_database();                  // check transfer of loco database 
-    #endif
-    #if (PARSER == LENZ) //sds 
-        run_parser();                    // check commands from pc
-    #endif
+  // put your main code here, to run repeatedly:
+  run_state();            // check short and keys
+  run_organizer();        // run command organizer, depending on state,
+                          // it will execute normal track operation
+                          // or programming
+  run_programmer();
+  #if ((XPRESSNET_ENABLED == 1) && (LOCO_DATABASE == NAMED))
+    run_database();                  // check transfer of loco database 
+  #endif
+  #if (PARSER == LENZ) //sds 
+    run_parser();                    // check commands from pc
+  #endif
 
-    #if (S88_ENABLED == 1)
-        if (!is_prog_state()) run_s88(); // s88 has busy loops, we block it when programming
-                                       // this is no longer true - but keep it blocked
-    #endif
+  #if (S88_ENABLED == 1)
+    if (!is_prog_state()) run_s88(); // s88 has busy loops, we block it when programming
+                                    // this is no longer true - but keep it blocked
+  #endif
 
-    #if (XPRESSNET_ENABLED == 1)
-        run_xpressnet();
-    #endif
+  #if (XPRESSNET_ENABLED == 1)
+    run_xpressnet();
+  #endif
 
-    // 2021 : test xpnet op losse nano
-    //keys_Update();
-    //ui_Update();   
-
-
+  keys_Update();
+  // test met losse nano
+  //ui_Update();   
 } // loop

@@ -71,6 +71,19 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 //       for siumlation: normal eeprom
 // Offsets are defined in config.h
 
+// TODO 2021 : eadr_CTS_usage en andere mogen weg, werkt dat als we hier gewoon die lijnen deleten?
+// eadr_CTS_usage
+// s88*
+// eadr_dcc_acc_time
+// eadr_startmode_ibox
+// eadr_feedback_s88_offset
+// eadr_feedback_s88_type
+// eadr_s88_clk_timing
+// eadr_feedback_s88_size
+// eadr_s88_total_from_pc
+// eadr_I2C_present
+// eadr_serial_id
+
 #if (__AVR_ATmega32__)
      uint8_t ee_mem[] EEMEM =
 #elif (__AVR_ATmega644P__)
