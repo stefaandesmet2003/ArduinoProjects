@@ -46,10 +46,26 @@ voorlopig niet mogelijk om CV's van de command station te lezen/schrijven
 - JMRI 0xE?-0x30 : juist implementeren in lenz_parser  
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert  
 
-# XPNET
+# CommandStation XPNET
+configuration for command station with XPNET interface on uart1  
+needs RS485 PHY for xpnet  
+works with PcInterface, but only tested with direct uartTX-RX connection between 2 atmega328  
+not yet tested on CommandStation hardware over RS485  
+
 ## todo
 - test met RS485
-- PC interface lenz <> xpnet
+
+# PcInterface
+a sketch that implements a LI101 PC Interface  
+-> PC side : softSerial (pin 8,9) to usb-serial adapter, running default 19200 baud  
+-> XPNET side : atmega uart1  
+works with JMRI connected to the softSerial  
+tested : track power on/off, xpnet monitor  
+not tested with CommandStation hardware over RS485, comms errors etc
+
+## todo
+- test met RS485
+- test stability
 
 # accessory decoder
 ## todo

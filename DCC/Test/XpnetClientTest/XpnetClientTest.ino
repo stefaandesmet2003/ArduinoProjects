@@ -1,4 +1,3 @@
-#include "status.h" //voor de fast clock waarde
 #include "rs485c.h"
 #include "xpc.h"
 
@@ -140,15 +139,16 @@ void xpc_LocStolenNotify(uint16_t stolenLocAddress)
   mySerial.print("xpc_LocStolenNotify : ");
   mySerial.println(stolenLocAddress);
 }
-
-void xpc_FastClockUpdated ()
+xpcFastClock_t theClock;
+void xpc_FastClockNotify (xpcFastClock_t *newClock)
 {
+  theClock = *newClock; // kopieert dat alle fields?
   mySerial.print("fast clock updated : day = ");
-  mySerial.print(fast_clock.day_of_week);
+  mySerial.print(theClock.day_of_week);
   mySerial.print(" - ");
-  mySerial.print(fast_clock.hour);
+  mySerial.print(theClock.hour);
   mySerial.print(":");
-  mySerial.println(fast_clock.minute);
+  mySerial.println(theClock.minute);
 }
 void xpc_LocGetInfoResponse(uint8_t dccSpeed128, uint16_t locFuncs_f0_f12, bool isLocFree)
 {

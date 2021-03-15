@@ -555,7 +555,13 @@ void xpc_Run(void)
         digitalWrite(LED_BUILTIN,!digitalRead(LED_BUILTIN)); //toggle pin13 for test
         uint16_t callbyte = XP_rx_read(); // the call byte ?
         rxLastMillis = millis(); // rx timeout manager
-        if (!(callbyte & 0x100)) return; // we hebben een byte in het midden van een conversatie opgepikt; we gaan hersynchroniseren en wachten op een call byte
+        if (!(callbyte & 0x100)) return; // we heben een byte in het midden van een conversatie opgepikt; we gaan hersynchroniseren en wachten op een call byte
+
+        if (xpc_isConnectionError) {
+          // we had a connection error, 
+          // now notify pc that we are back in contact with the command station!
+          if (xpc_EventNotify) xpc_EventNotify(XPEVENT_CONNECTION_OK);
+        }
         
         xpc_isConnectionError = false; // we hebben contact met CommandStation
         if ((callbyte & 0x1F) == XPNET_BROADCAST_ADDRESS)
