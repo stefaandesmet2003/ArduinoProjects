@@ -435,7 +435,7 @@ void xp_send_lokdaten(unsigned int addr)
 #if (DCC_F13_F28 == 1)
 void xp_send_funct_level_f13_f28(unsigned int addr)
 {
-  register unsigned char i;
+  uint8_t i;
   
   i = scan_locobuffer(addr);
 
@@ -451,6 +451,23 @@ void xp_send_funct_level_f13_f28(unsigned int addr)
   }
   xp_send_message_to_current_slot(tx_ptr = tx_message);
 } // xp_send_funct_level_f13_f28
+
+//SDS added
+// zelfde soort antwoord als func_status voor de F1-F12 (dummy data)
+// TODO : waarom staat hier 0xE4 in de spec, er zijn toch maar 3 data bytes??
+void pc_send_funct_status_f13_f28(unsigned int addr)
+{
+  // TODO : heeft nu geen zin om de locobuffer te doorzoeken, data staan er toch niet in
+  //uint8_t i;
+  //i = scan_locobuffer(addr);
+
+  tx_message[0] = 0xE3;
+  tx_message[1] = 0x51;
+  tx_message[2] = 0; // no data
+  tx_message[3] = 0; // no data
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // pc_send_funct_status_f13_f28
+
 #endif
 
 // we answer, but this is not really supported (not stored in locobuffer).
@@ -458,7 +475,7 @@ void xp_send_funct_level_f13_f28(unsigned int addr)
 void xp_send_loco_func_status(unsigned int addr)
 {
   tx_message[0] = 0xE3; // Headerbyte = 0xE3
-  tx_message[1] = 0x80; // Byte1 = Kennung = 10000000
+  tx_message[1] = 0x50; // Byte1 = Kennung = 10000000 // SDS : waarom stond hier 0x80?? dat lijkt fout voor JMRI
   tx_message[2] = 0x00; // Byte2 = 000sSSSS; s=F0, SSSS=F4...F1
   tx_message[3] = 0;    // Byte3 = SSSSSSSS; SSSSSSSS=F12...F5
   xp_send_message_to_current_slot(tx_ptr = tx_message);
@@ -904,12 +921,12 @@ void xp_parser(void)
             #if (DCC_F13_F28 == 1)
               // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
             case 0x08:
-              xp_send_funct_level_f13_f28(addr);  // !!! Das ist nicht korrekt, wir faken das!!!
+              pc_send_funct_status_f13_f28(addr); // SDS : sends dummy data
               processed = 1;
               break;
               // 0xE3 0x09 AddrH AddrL [XOR] "Function level request F13-F28"
             case 0x09:
-              xp_send_funct_level_f13_f28(addr);
+              xp_send_funct_level_f13_f28(addr); // SDS : sends dummy data
               processed = 1;
               break;
             #endif

@@ -238,7 +238,6 @@ void setup() {
   
   // dcc_startup_messages();   // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
   
-  // voor test met losse nano
   setup_lcd();
 } // setup
 
@@ -267,6 +266,5 @@ void loop()
   #endif
 
   keys_Update();
-  // test met losse nano
-  //ui_Update();   
+  ui_Update();   
 } // loop

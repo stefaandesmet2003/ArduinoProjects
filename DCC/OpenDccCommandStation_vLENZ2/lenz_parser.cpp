@@ -257,8 +257,6 @@ void pc_send_lokdaten(unsigned int addr)
     register unsigned char speed;
     
     i = scan_locobuffer(addr);
-
-    
     
     pcm_build[0] = 0xE4;               // Headerbyte = 0xE4
     pcm_build[1] = 0x00;               // Byte1 = Kennung = 0000BFFF:  B=0: nicht besetzt
@@ -347,7 +345,7 @@ void pc_send_funct_status_f13_f28(unsigned int addr)
     
     i = scan_locobuffer(addr);
 
-    pcm_build[0] = 0xE4;                       // Headerbyte = 0xE3
+    pcm_build[0] = 0xE3;                       // Headerbyte - SDS : waarom hier 0xE3 in de spec???
     pcm_build[1] = 0x51;                       // Byte1 = Kennung
     pcm_build[2] = 0;                          // momentary/continuous niet opgeslagen in locobuffer
     pcm_build[3] = 0;                          // momentary/continuous niet opgeslagen in locobuffer

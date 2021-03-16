@@ -45,27 +45,43 @@ voorlopig niet mogelijk om CV's van de command station te lezen/schrijven
 - turnout feedback herimplementeren zonder s88  
 - JMRI 0xE?-0x30 : juist implementeren in lenz_parser  
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert  
+- locobuffer uitmesten (ook startup checken, DCC default format etc. nodig?)
+- lenz parser cleanup
 
 # CommandStation XPNET
 configuration for command station with XPNET interface on uart1  
 needs RS485 PHY for xpnet  
-works with PcInterface, but only tested with direct uartTX-RX connection between 2 atmega328  
-not yet tested on CommandStation hardware over RS485  
+works with PcInterface (connection with JMRI)  
+## tested :
+- loco control via local UI & JMRI, JMRI receives loc stolen message
+- turnout control via local UI & JMRI, turnout feedback doesn't work yet (s88 functionality to be reimplemented)
+- track power on/off, on/off/short notifications
+- not all possible commands in the parser have been tested!!  
 
 ## todo
-- test met RS485
+- lok_stolen_by_pc etc -> rework locobuffer & organizer (orgz_old_lok_owner=dirty, ".manual_operated" field : can be removed? )  
+- release loco from local UI :  
+  --> not sure how JMRI can steal a loc, it keeps polling the lost loco but stops after a while  
+  --> and no way to steal it back ??  
+- loc stolen notification on local UI
+- appstub clean-up
 
 # PcInterface
 a sketch that implements a LI101 PC Interface  
--> PC side : softSerial (pin 8,9) to usb-serial adapter, running default 19200 baud  
+-> PC side : softSerial (pin 8=RX,9=TX) to usb-serial adapter, running default 19200 baud  
 -> XPNET side : atmega uart1  
 works with JMRI connected to the softSerial  
-tested : track power on/off, xpnet monitor  
-not tested with CommandStation hardware over RS485, comms errors etc
+JMRI doesn't accept ACK for every command => parseCommand function updated to only ack requests that don't generate a command station response!  
+rs485c - xpc : adapted to message bytes for other slots are discarded by the ISR, 
+i.e. never make it to the RxBuffer = less work for xpc_Run()
+tested :  
+- see CommandStationXPNET  
 
-## todo
-- test met RS485
-- test stability
+## stability
+keeps working under constant polling from JMRI, but with RX_ERRORS (buffer overrun probably) when JMRI uses every slot  
+--> JMRI was polling very fast on a few wrongly implemented command responses; because it wasn't receiving the right answer  
+--> JMRI logs showed occasional 0x1 - 0x3 - 0x2 = "comms error"  
+no crashes so far
 
 # accessory decoder
 ## todo

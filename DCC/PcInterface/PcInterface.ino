@@ -78,17 +78,39 @@ static void pc_ParseMessage(void) {
           // respond with xpnet address currently in use
           pcc[2] = xpc_Address; // respond with xpnet address currently in use
           pc_SendMessage(&pcc[0]);
-          return;
+          break;
         case 0x02: 
           // doen we niet, altSerial werkt toch niet deftig boven 19200
           pc_SendMessage(pcc); // send back as reply
-          return;
+          break;
       }
-    }
+      return;
+    default :
+      break; // and continue sending the message onto xpnet
+  }
   xpc_SendMessage(pcc);
-  // TODO : voorlopig sturen we altijd ack terug naar pc
-  // de eventuele reply van command station volgt dan nadien via xpc_MessageNotify
-  pc_SendMessage(pcm_ack); 
+
+  // some commands don't generate a response from CS -> we have to send ack to PC instead. 
+  // and apparently we can't just ack any command!
+  switch(pcc[0] >> 4) { // this is opcode
+    case 0x5: // accessory command
+    case 0x9: // loc stop
+      pc_SendMessage(pcm_ack);
+      break;
+    case 0x2: // CS power-up mode
+      if (pcc[1] == 0x22)
+        pc_SendMessage(pcm_ack);
+      break;
+    case 0xE:
+      if (((pcc[1] & 0xF0) == 0x10) || // 0x10..0x13 commands
+          ((pcc[1] & 0xF0) == 0x20) || // 0x20..0x26 commands
+          (pcc[1] == 0x30) || (pcc[1] == 0x44)) {
+        pc_SendMessage(pcm_ack);
+      }
+      break;
+    default:
+      break;
+  }
 } // pc_ParseMessage
 
 // vgl lenz_parser run, maar zonder parsing

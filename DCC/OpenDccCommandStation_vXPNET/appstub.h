@@ -7,7 +7,6 @@
 #define APP_OK              0
 #define APP_INTERNALERR0R   1
 
-
 void app_Init(void);
 char * app_GetTime (void);
 char * app_GetCSState (void);
