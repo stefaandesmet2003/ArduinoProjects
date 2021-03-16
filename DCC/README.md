@@ -76,3 +76,10 @@ not tested with CommandStation hardware over RS485, comms errors etc
 # RAILCOM
 - todo!
 
+# TODO
+- xpnet throttle
+- bedienpaneel wissels op xpnet (luistert naar feedback messages voor led-indicatie updates & knoppen voor bediening)
+- esp als XnTcp interface of volledig CS
+
+
+

@@ -17,15 +17,15 @@ typedef struct {
   uint8_t ratio;
 } xpcFastClock_t;
                
-typedef enum {PROG_READY, PROG_SHORT, PROG_NOACK, PROG_BUSY} progStatus_t;               
+typedef enum {
+  PROG_READY, PROG_SHORT, PROG_NOACK, PROG_BUSY
+} progStatus_t;
 
 // deze waarden komen overeen met xpnet spec 2.1.7 (v3.6; opgelet bit0 en bit1 zijn gewisseld in v3.6!! correct geimplementeerd in opendcc)
 #define COMMANDSTATION_STATUS_POWER_ON          0x0
 #define COMMANDSTATION_STATUS_EMERGENCY_STOP    0x1          
 #define COMMANDSTATION_STATUS_POWER_OFF         0x2
 #define COMMANDSTATION_STATUS_SERVICE_MODE_ON   0x8
-
-extern uint8_t xpc_MyAddress; // om eventueel on-the-fly je xpnet addres te wijzigen
 
 void xpc_Init(uint8_t slaveAddress);
 void xpc_Run(void);

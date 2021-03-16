@@ -18,31 +18,34 @@
 #define CALL_TYPE         0x60
 #define CALL_TYPE_INQUIRY 0x40
 
+#define XPNET_BROADCAST_ADDRESS (0)
+
 // the slave address we will be listening on
-uint8_t X_slaveAddress = 0; // 1..31 xpnet slave, 0 = broadcast
+static uint8_t X_slaveAddress = 0; // 1..31 xpnet slave, 0 = broadcast
 
 // FIFO objects for RX and TX
 // max. Size: 255
 // careful types! client TX is 8-bit (well, bit8=0 always), RX=9-bit (need bit8!)
-#define X_RxBuffer_Size  32              // mind. 16
+#define X_RxBuffer_Size  32           // >= 16
 #define X_TxBuffer_Size  32
-uint16_t X_RxBuffer[X_RxBuffer_Size];  // client tx 8bit, rx 9bit
-uint8_t X_TxBuffer[X_TxBuffer_Size]; // client tx 8bit, rx 9bit
+static uint16_t X_RxBuffer[X_RxBuffer_Size]; // client tx 8bit, rx 9bit
+static uint8_t X_TxBuffer[X_TxBuffer_Size];  // client tx 8bit, rx 9bit
 
-uint8_t X_rx_read_ptr = 0;                // point to next read
-volatile uint8_t X_rx_write_ptr = 0;               // point to next write
-volatile uint8_t X_tx_read_ptr = 0;
-uint8_t X_tx_write_ptr = 0;
-uint8_t X_tx_fill = 0;
+static uint8_t X_rx_read_ptr = 0;            // point to next read
+static volatile uint8_t X_rx_write_ptr = 0;  // point to next write
+static volatile uint8_t X_tx_read_ptr = 0;
+static uint8_t X_tx_write_ptr = 0;
+static uint8_t X_tx_fill = 0;
+static volatile uint8_t X_slotAddress;       // active slot on the xpnet, discard all data if X_slotAddress != X_slaveAddress or broadcast
 
 static inline void set_XP_to_receive(void)
 {
-  HARDWARE_SET_XP_RECEIVE; // see rs485.h
+  HARDWARE_SET_XP_RECEIVE;
 }
 
 static inline void set_XP_to_transmit(void)
 {
-  HARDWARE_SET_XP_TRANSMIT; // see rs485.h
+  HARDWARE_SET_XP_TRANSMIT;
 }
 
 static void XP_flush_rx(void) // Flush Receive-Buffer
@@ -145,50 +148,50 @@ ISR(USART_UDRE_vect)
 // sds : code anders dan RS485 master!! 
 // we filteren hier al op call bytes voor ons, en starten TX bij inquiry call
 // zodat we enkel transmitten in ons timeslot
-// voorlopig is RxBuffer 16-bit (bit8 wordt ook opgeslagen)
+// RxBuffer is 16-bit (bit8 also stored, so xpc can further handle the different call types)
 ISR(USART_RX_vect)
 {
   uint16_t aData = 0;
-  uint8_t aAddress = 0;
   if (UCSR0A & (1<< FE0)) { 
     // Frame Error
     UDR0; // read data anyway to stop the int
+    return;
 	}
-  else {
-    if (UCSR0A & (1<< DOR0)) { // DATA Overrun
-      // sds : we zijn data kwijt, xpc zal het wel oplossen, er zal een timeout of xor error volgen
-    }
 
-    if (UCSR0B & (1<< RXB80)) { // bit 8 is 1
-      aData = 0x100;
-    }
-    aData |= UDR0;
-    if (aData & 0x100) {
-      aAddress = aData & 0x1F;
-      if (aAddress == 0) // a broadcast goes to RxBuffer
-        X_RxBuffer[X_rx_write_ptr++] = aData;
-      else if (aAddress == X_slaveAddress) { // a call-byte for us
-        if (((aData & CALL_TYPE) == CALL_TYPE_INQUIRY) && 
-            (X_tx_write_ptr != X_tx_read_ptr)) { // start data transmission!
-          set_XP_to_transmit();
-          UCSR0A |= (1 << TXC0);      // clear any pending tx complete flag
-          UCSR0B |= (1 << TXEN0);     // enable TX
-          UCSR0B |= (1 << UDRIE0);    // enable TxINT
-          UCSR0B |= (1 << TXCIE0);    // enable TX complete --> sds : dit gaat de ISR(USART_TX_vect) voeden
-        }
-        else // put all other data addressed to us in the RxBuffer
-          X_RxBuffer[X_rx_write_ptr++] = aData;
-      }
-      else {
-        // discard call bytes not addressed to us
-        // TODO : test if this can be handled by using the MPCM bit in the usart
-      }
-    }
-    else { // it's a databyte -> in RxBuffer
-      X_RxBuffer[X_rx_write_ptr++] = aData;
-    }
-    if (X_rx_write_ptr == X_RxBuffer_Size) X_rx_write_ptr=0; // wrap-around the buffer pointer
+  if (UCSR0A & (1<< DOR0)) { // DATA Overrun
+    // sds : we zijn data kwijt, xpc zal het wel oplossen, er zal een timeout of xor error volgen
   }
+
+  if (UCSR0B & (1<< RXB80)) { // bit 8 is 1
+    aData = 0x100;
+  }
+  aData |= UDR0;
+
+  // TODO : test if this can be more easily handled by using the MPCM bit in the usart
+  // NOTE : this code doesn't detect that another device is erroneously sending data on our slot
+  // for now these bytes will be stored in X_RxBuffer and further discarded by xpc (data without preceding call byte in XPC_WAIT_FOR_CALL)
+  if (aData & 0x100) { // a  call-byte
+    X_slotAddress = aData & 0x1F; // store the active slot address, subsequent data bytes are then associated with this slot
+    if ((X_slotAddress == X_slaveAddress) && 
+        ((aData & CALL_TYPE) == CALL_TYPE_INQUIRY)) { // a normal inquiry for us
+      if (X_tx_write_ptr != X_tx_read_ptr) { /// we have something to send
+        set_XP_to_transmit();       // start data transmission!
+        UCSR0A |= (1 << TXC0);      // clear any pending tx complete flag
+        UCSR0B |= (1 << TXEN0);     // enable TX
+        UCSR0B |= (1 << UDRIE0);    // enable TxINT
+        UCSR0B |= (1 << TXCIE0);    // enable TX complete --> sds : this will feed ISR(USART_TX_vect)
+      }
+      // TODO : we could return here and not store the normal inquiry in RxBuffer, but 
+      // we need to track connection errors, and that's done in xpc for now
+      // return; 
+    }
+  }
+
+  // any data on broadcast slot or our slot are put in RxBuffer
+  if ((X_slotAddress == XPNET_BROADCAST_ADDRESS) || (X_slotAddress == X_slaveAddress))
+    X_RxBuffer[X_rx_write_ptr++] = aData;
+
+  if (X_rx_write_ptr == X_RxBuffer_Size) X_rx_write_ptr=0; // wrap-around the buffer pointer
 } // USART_RX_vect
 
 //=============================================================================

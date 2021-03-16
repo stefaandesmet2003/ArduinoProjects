@@ -41,7 +41,7 @@ typedef enum {                                   // actual state for the Xpressn
 // zie xpnet spec 2.1.15 : adres 0..99 in 1 byte (AH=0), adres 100..9999 in 2-byte
 #define XP_SHORT_DCC_ADDR_LIMIT (100)
 
-uint8_t xpc_MyAddress = 0; // 0 = broadcast address, so is safe
+static uint8_t xpc_MyAddress = 0; // 0 = broadcast address, so is safe
 static xpcState_t xpc_state;
 
 // fixed messages

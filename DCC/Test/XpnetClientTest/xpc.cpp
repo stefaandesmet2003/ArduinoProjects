@@ -41,7 +41,7 @@ typedef enum {                                   // actual state for the Xpressn
 // zie xpnet spec 2.1.15 : adres 0..99 in 1 byte (AH=0), adres 100..9999 in 2-byte
 #define XP_SHORT_DCC_ADDR_LIMIT (100)
 
-uint8_t xpc_MyAddress = 0; // 0 = broadcast address, so is safe
+static uint8_t xpc_MyAddress = 0; // 0 = broadcast address, so is safe
 static xpcState_t xpc_state;
 
 // fixed messages
@@ -555,14 +555,20 @@ void xpc_Run(void)
         digitalWrite(LED_BUILTIN,!digitalRead(LED_BUILTIN)); //toggle pin13 for test
         uint16_t callbyte = XP_rx_read(); // the call byte ?
         rxLastMillis = millis(); // rx timeout manager
-        if (!(callbyte & 0x100)) return; // we hebben een byte in het midden van een conversatie opgepikt; we gaan hersynchroniseren en wachten op een call byte
+        if (!(callbyte & 0x100)) return; // we heben een byte in het midden van een conversatie opgepikt; we gaan hersynchroniseren en wachten op een call byte
+
+        if (xpc_isConnectionError) {
+          // we had a connection error, 
+          // now notify pc that we are back in contact with the command station!
+          if (xpc_EventNotify) xpc_EventNotify(XPEVENT_CONNECTION_OK);
+        }
         
         xpc_isConnectionError = false; // we hebben contact met CommandStation
         if ((callbyte & 0x1F) == XPNET_BROADCAST_ADDRESS)
           xpc_state = XPC_WAIT_FOR_MESSAGE;
         else if ((callbyte & 0x1F) == xpc_MyAddress) { // filteren op eigen address
           if ((callbyte & CALL_TYPE) == CALL_TYPE_INQUIRY) {
-            // komt niet meer hier,is nu in rs485 afgehandeld -> TODO mag weg
+            // handled by rs485c, nothing left to do here
           }
           else if ((callbyte & CALL_TYPE) == CALL_TYPE_ACK) {
             // command station verwacht een acknowledge
