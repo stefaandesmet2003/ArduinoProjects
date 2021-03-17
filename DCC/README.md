@@ -47,6 +47,7 @@ voorlopig niet mogelijk om CV's van de command station te lezen/schrijven
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert  
 - locobuffer uitmesten (ook startup checken, DCC default format etc. nodig?)
 - lenz parser cleanup
+- dccout uitmesten (opendcc feedback stuff eruit)
 
 # CommandStation XPNET
 configuration for command station with XPNET interface on uart1  
@@ -83,11 +84,20 @@ keeps working under constant polling from JMRI, but with RX_ERRORS (buffer overr
 --> JMRI logs showed occasional 0x1 - 0x3 - 0x2 = "comms error"  
 no crashes so far
 
-# accessory decoder
+# Accessory Decoder
+working version of a turnout decoder, see readme there
 ## todo
 - STM8 version
 - extended accessory (signals)
-- feedback decoder met xpc
+
+# Feedback Decoder
+working version with xpressnet as feedback bus  
+the basic version uses 8 inputs on atmega328 and sends the status over xpressnet
+
+## todo
+- configuration using variables stored in eeprom
+Lenz uses a DCC interface to program the configuration as CV variables.  
+Feedback decoder is not connected to DCC on the track, but probably the easiest way, the DCC input only requires an opto & few resistors
 
 # RAILCOM
 - todo!
@@ -96,6 +106,7 @@ no crashes so far
 - xpnet throttle
 - bedienpaneel wissels op xpnet (luistert naar feedback messages voor led-indicatie updates & knoppen voor bediening)
 - esp als XnTcp interface of volledig CS
+- dcc clock
 
 
 

@@ -860,7 +860,7 @@ void xp_parser(void)
       tx_message[1] = rx_message[1];
       tx_message[2] = 0b01000000 | (rx_message[2] & 0x0F); // lower nibble
       tx_message[3] = rx_message[1];
-      tx_message[4] = 0b00110000 | ((rx_message[2] & 0xF0)>>4); // higher nibble
+      tx_message[4] = 0b01010000 | ((rx_message[2] & 0xF0)>>4); // higher nibble
       xp_send_message(FUTURE_ID | 0, tx_message);
       processed = 1;
       break;

@@ -83,7 +83,7 @@ typedef struct
 {
   uint8_t   Flags ;
   uint8_t   OpsModeAddressBaseCV ;
-  uint8_t   inServiceMode ;
+  uint8_t   inServiceMode ; // TODO 2021 : change in bool
   long      LastServiceModeMillis ;
   uint8_t   PageRegister ;  // Used for Paged Operations in Service Mode Programming
   uint8_t   DuplicateCount ;
@@ -280,6 +280,9 @@ uint16_t getMyAddr(void)
   return Addr ;
 } // getMyAddr
 
+// SDS : TODO 2021 : deze code doet ook gewoon ackCV (60mA stroompuls) in POM, dat mag toch niet?
+// dat is toch enkel voor programming track ??
+// ack in POM moet via railcom
 void processDirectOpsOperation( uint8_t Cmd, uint16_t CVAddr, uint8_t Value )
 {
   // is it a Byte Operation
@@ -561,6 +564,7 @@ void resetServiceModeTimer(uint8_t inServiceMode)
   DccProcState.LastServiceModeMillis = inServiceMode ? millis() : 0 ;
 }
 
+// TODO 2021: hernoem naar setServiceMode true/false of zoiets
 void clearDccProcState(uint8_t inServiceMode)
 {
   resetServiceModeTimer( inServiceMode ) ;
@@ -618,7 +622,7 @@ void execDccProcessor( DCC_MSG * pDccMsg )
       }
     }
 
-    else
+    else // SDS : not service mode
     {
       if( DccProcState.inServiceMode )
         clearDccProcState( 0 );	
@@ -644,33 +648,36 @@ void execDccProcessor( DCC_MSG * pDccMsg )
       {
         if( DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER )
         {
-          uint16_t BoardAddress ;
-          uint8_t  OutputAddress ;
-          uint8_t  OutputIndex ;
-          uint16_t Address ;
+          uint16_t DecoderAddress ; // SDS: 9-bit accessory decoder address 0..511
+          uint8_t  OutputAddress ; // SDS : 3bits output 0..7
+          uint8_t  OutputIndex ; // SDS : wissel 0..3
+          uint16_t Address ; // SDS : wadisda??? soort nr van de wissel, waarom nodig??
 
-          BoardAddress = ( ( (~pDccMsg->Data[1]) & 0b01110000 ) << 2 ) | ( pDccMsg->Data[0] & 0b00111111 ) ;
+          DecoderAddress = ( ( (~pDccMsg->Data[1]) & 0b01110000 ) << 2 ) | ( pDccMsg->Data[0] & 0b00111111 ) ;
 
           // If we're filtering was it my board address or a broadcast address
-          if( ( DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY ) && ( BoardAddress != getMyAddr() ) && ( BoardAddress != 511 ) )
+          if( ( DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY ) && ( DecoderAddress != getMyAddr() ) && ( DecoderAddress != 511 ) )
             return;
 
           OutputAddress = pDccMsg->Data[1] & 0b00000111 ;
           
           OutputIndex = OutputAddress >> 1;
 
-          Address = ( ( ( BoardAddress - 1 ) << 2 ) | OutputIndex ) + 1 ;
+          Address = ( ( ( DecoderAddress - 1 ) << 2 ) | OutputIndex ) + 1 ;
 
           if(pDccMsg->Data[1] & 0b10000000)
           {
             if( notifyDccAccState )
-              notifyDccAccState( Address, BoardAddress, OutputAddress, pDccMsg->Data[1] & 0b00001000 ) ;
+              notifyDccAccState( Address, DecoderAddress, OutputAddress, pDccMsg->Data[1] & 0b00001000 ) ;
           }
 
           else
-          {
+          { // SDS 2021 : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
+            // dit staat in de extended packet formats spec, maar toch hier, handig
+            // zo hebben we NMRA_DCC_PROCESS_MULTIFUNCTION niet nodig (enkel locdecoder stuff)?
+            // of zit POM voor accessories daar ook onder? JA
             if( notifyDccSigState )
-              notifyDccSigState( Address, OutputIndex, pDccMsg->Data[2] ) ;
+              notifyDccSigState( Address, OutputIndex, pDccMsg->Data[2] & 0x1F) ;
           }
         }
       }
