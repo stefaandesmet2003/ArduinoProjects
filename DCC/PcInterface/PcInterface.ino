@@ -1,4 +1,7 @@
 // altserial naar pc : LENZ interface @ 19200 baud
+// pin D8 = Serial Receive pin
+// pin D9 = Serial Transmit pin
+
 // xpnet client op uart1
 #include "altrs232.h"
 #include "rs485c.h"

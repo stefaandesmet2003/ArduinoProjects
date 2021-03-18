@@ -66,6 +66,7 @@ works with PcInterface (connection with JMRI)
   --> and no way to steal it back ??  
 - loc stolen notification on local UI
 - appstub clean-up
+- there is an issue in programming mode : JMRI polls too fast, and results in communication errors (rs485c RxBuffer overflow?), and it stops the programming
 
 # PcInterface
 a sketch that implements a LI101 PC Interface  

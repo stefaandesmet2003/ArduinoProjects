@@ -14,15 +14,14 @@
 // author:    Alex Shepherd
 // webpage:   http://opendcc.org/
 // history:   2011-06-26 Initial Version copied in from OpenDCC
-//
+//            2021 modified for STM8
 //------------------------------------------------------------------------
 //
 // purpose:   Provide a simplified interface to decode NMRA DCC packets
-//			  and build DCC Mobile and Stationary Decoders
+//			      and build DCC Mobile and Stationary Decoders
 //------------------------------------------------------------------------
-
 #include "NmraDcc.h"
-#include <avr/eeprom.h>
+#include "EEPROM.h"
 
 //------------------------------------------------------------------------
 // DCC Receive Routine
@@ -50,6 +49,7 @@
 #define TIMER_PRESCALER 64
 
 // We will use a time period of 80us and not 87us as this gives us a bit more time to do other stuff 
+// DCC_BIT_SAMPLE_PERIOD = nbr of TIMER0 ticks in 70us (TIMER0 = 4us/tick @ 16MHz)
 #define DCC_BIT_SAMPLE_PERIOD (F_CPU * 70L / TIMER_PRESCALER / 1000000L)
 
 #if (DCC_BIT_SAMPLE_PERIOD > 254)
@@ -59,80 +59,58 @@
 #error DCC_BIT_SAMPLE_PERIOD too small, use either smaller prescaler or faster processor
 #endif
 
-typedef enum
-{
+typedef enum {
   WAIT_PREAMBLE = 0,
   WAIT_START_BIT,
   WAIT_DATA,
   WAIT_END_BIT
-} 
-DccRxWaitState ;
+} DccRxWaitState;
 
-struct DccRx_t
+typedef struct DccRx_t
 {
-  DccRxWaitState  State ;
-  uint8_t         DataReady ;
-  uint8_t         BitCount ;
-  uint8_t         TempByte ;
+  DccRxWaitState  State;
+  uint8_t         DataReady;
+  uint8_t         BitCount;
+  uint8_t         TempByte;
   DCC_MSG         PacketBuf;
   DCC_MSG         PacketCopy;
-} 
-DccRx ;
+} DccRx_t;
 
 typedef struct
 {
   uint8_t   Flags ;
   uint8_t   OpsModeAddressBaseCV ;
-  uint8_t   inServiceMode ; // TODO 2021 : change in bool
+  bool      inServiceMode ;
   long      LastServiceModeMillis ;
   uint8_t   PageRegister ;  // Used for Paged Operations in Service Mode Programming
   uint8_t   DuplicateCount ;
   DCC_MSG   LastMsg ;
-  uint8_t	ExtIntNum; 
-  uint8_t	ExtIntPinNum;
-#ifdef DCC_DEBUG
-  uint8_t	IntCount;
-  uint8_t	TickCount;
-#endif
-} 
-DCC_PROCESSOR_STATE ;
+} DCC_PROCESSOR_STATE;
 
-DCC_PROCESSOR_STATE DccProcState ;
+static DccRx_t DccRx;
+static DCC_PROCESSOR_STATE DccProcState;
+static DCC_MSG Msg;
 
+/*****************************************************************************/
+/***  ISR  *******************************************************************/
+/*****************************************************************************/
 void ExternalInterruptHandler(void)
 {
-  OCR0B = TCNT0 + DCC_BIT_SAMPLE_PERIOD ;
+  // de DCC_BIT_SAMPLE_PERIOD zit verwerkt in de ARRH/ARRL
+  // start timer2 & continue dcc processing after the 70us timeout
+  TIM2->CNTRH = 0;
+  TIM2->CNTRL = 0;
+  TIM2->CR1 = 1; // counter enable met URS=0 (CR1=5 met URS=1)
 
-#if defined(TIMSK0)
-  TIMSK0 |= (1<<OCIE0B);  // Enable Timer0 Compare Match B Interrupt
-  TIFR0  |= (1<<OCF0B);   // Clear  Timer0 Compare Match B Flag 
-#elif defined(TIMSK)
-  TIMSK |= (1<<OCIE0B);  // Enable Timer0 Compare Match B Interrupt
-  TIFR  |= (1<<OCF0B);   // Clear  Timer0 Compare Match B Flag 
-#endif
-#ifdef DCC_DEBUG
-	DccProcState.IntCount++;
-#endif
-}
+} // ExternalInterruptHandler
 
-ISR(TIMER0_COMPB_vect)
-{
+INTERRUPT_HANDLER(TIM2_UPD_OVF_BRK_IRQHandler, ITC_IRQ_TIM2_OVF) {
   uint8_t DccBitVal ;
+  TIM2->SR1 = 0;
+  TIM2->CR1 = 0; // counter disable until next external interrupt
 
   // Read the DCC input value, if it's low then its a 1 bit, otherwise it is a 0 bit
-  DccBitVal = !digitalRead(DccProcState.ExtIntPinNum) ;
-
-  // Disable Timer0 Compare Match B Interrupt
-#if defined(TIMSK0)
-  TIMSK0 &= ~(1<<OCIE0B);
-#elif defined(TIMSK)
-  TIMSK &= ~(1<<OCIE0B);
-#endif
-
-#ifdef DCC_DEBUG
-	DccProcState.TickCount++;
-#endif
-
+  DccBitVal = !digitalRead(PIN_DCCIN);
   DccRx.BitCount++;
 
   switch( DccRx.State )
@@ -198,92 +176,61 @@ ISR(TIMER0_COMPB_vect)
     DccRx.BitCount = 0 ;
     DccRx.TempByte = 0 ;
   }
-}
+} // TIM2_UPD_OVF_BRK_IRQHandler
 
-void ackCV(void)
-{
-  if( notifyCVAck )
-    notifyCVAck() ;
-}
+/*****************************************************************************/
+/***  LOCAL FUNCTIONS  *******************************************************/
+/*****************************************************************************/
+// for prog track, implement a 60ms current pulse
+// for main track, this should be railcom: TODO
+static void ackCV(void) {
+  notifyCVAck();
+} // ackCV
 
-uint8_t validCV( uint16_t CV, uint8_t Writable )
-{
-  if( notifyCVValid )
-    return notifyCVValid( CV, Writable ) ;
-    
-// hieronder is een default implementatie, aangezien de callback niet ge�mplementeerd is
-
-  uint8_t Valid = 1 ;
-
-  if( CV > E2END )
-    Valid = 0 ;
-
-  if( Writable && ( ( CV ==CV_VERSION_ID ) || (CV == CV_MANUFACTURER_ID ) ) )
-    Valid = 0 ;
-
-  return Valid ;
-}
-
-uint8_t readCV( uint16_t CV )
-{
+static uint8_t readCV(uint16_t CV) {
   uint8_t Value ;
-
+  // STM8 SDCC doesn't know weak functions, and we are happy with the default
+  /*
   if( notifyCVRead )
     return notifyCVRead( CV ) ;
-// hieronder is een default implementatie, aangezien de callback niet ge�mplementeerd is
+  */
+  // a default implementatie when the callback is not implemented
+  Value = EEPROM_read( (int) CV ) ;
+  return Value;
+} // readCV
 
-  Value = eeprom_read_byte( (uint8_t*) CV ) ;
+static uint8_t validCV(uint16_t CV, uint8_t Writable) {
+  // STM8 SDCC doesn't know weak functions, and we are happy with the default
+  return notifyCVValid(CV, Writable);
+  // a default implementatie when the callback is not implemented -> not used for STM8
+  /*
+  uint8_t Valid = 1 ;
+  if( CV > E2END )
+    Valid = 0 ;
+  if( Writable && ( ( CV ==CV_VERSION_ID ) || (CV == CV_MANUFACTURER_ID ) ) )
+    Valid = 0 ;
+  return Valid ;
+  */
+} // validCV
 
-  return Value ;
-}
+static uint8_t writeCV( uint16_t CV, uint8_t Value) {
+  return notifyCVWrite(CV, Value);
 
-uint8_t writeCV( uint16_t CV, uint8_t Value)
-{
-  if( notifyCVWrite )
-    return notifyCVWrite( CV, Value ) ;
-
-    // hieronder is een default implementatie, aangezien de callback niet ge�mplementeerd is
-    // TODO : aanpassen, zodat bepaalde CVs enkel in programming mode kunnen geschreven worden!!!
-
-  if( eeprom_read_byte( (uint8_t*) CV ) != Value )
-  {
-    eeprom_write_byte( (uint8_t*) CV, Value ) ;
-
-    if( notifyCVChange )
-      notifyCVChange( CV, Value) ;
+  // a default implementatie when the callback is not implemented -> not used for STM8
+  /*
+  if (EEPROM_read((int) CV ) != Value) {
+    EEPROM_write((int) CV, Value);
+    if (notifyCVChange)
+      notifyCVChange(CV, Value);
   }
-
-  return eeprom_read_byte( (uint8_t*) CV ) ;
+  return EEPROM_read( (int) CV ) ;
+  */
 } // writeCV
-
-//SDS : te optimaliseren : voor elke DCC message wordt nu uit eeprom gelezen --> overbodig
-// is enkel nodig na een factory reset of wanneer de adresCVs worden gewijzigd in service mode
-uint16_t getMyAddr(void)
-{
-  uint16_t  Addr ;
-  uint8_t   CV29Value ;
-
-  CV29Value = readCV( CV_29_CONFIG ) ;
-
-  if( CV29Value & 0b10000000 )  // Accessory Decoder? 
-    Addr = ( readCV( CV_ACCESSORY_DECODER_ADDRESS_MSB ) << 6 ) | readCV( CV_ACCESSORY_DECODER_ADDRESS_LSB ) ;
-
-  else   // Multi-Function Decoder?
-  {
-    if( CV29Value & 0b00100000 )  // Two Byte Address?
-      Addr = ( readCV( CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB ) << 8 ) | readCV( CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB ) ;
-
-    else
-      Addr = readCV( 1 ) ;
-  }
-
-  return Addr ;
-} // getMyAddr
 
 // SDS : TODO 2021 : deze code doet ook gewoon ackCV (60mA stroompuls) in POM, dat mag toch niet?
 // dat is toch enkel voor programming track ??
 // ack in POM moet via railcom
-void processDirectOpsOperation( uint8_t Cmd, uint16_t CVAddr, uint8_t Value )
+static void processDirectOpsOperation( uint8_t Cmd, uint16_t CVAddr, uint8_t Value )
 {
   // is it a Byte Operation
   if( Cmd & 0x04 )
@@ -350,10 +297,10 @@ void processDirectOpsOperation( uint8_t Cmd, uint16_t CVAddr, uint8_t Value )
       }
     }
   }
-}
+} // processDirectOpsOperation
 
 #ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
-void processMultiFunctionMessage( uint16_t Addr, uint8_t Cmd, uint8_t Data1, uint8_t Data2 )
+static void processMultiFunctionMessage( uint16_t Addr, uint8_t Cmd, uint8_t Data1, uint8_t Data2 )
 {
   uint8_t  speed ;
   uint16_t CVAddr ;
@@ -385,106 +332,93 @@ void processMultiFunctionMessage( uint16_t Addr, uint8_t Cmd, uint8_t Data1, uin
     switch( Cmd & 0b00001110 )
     {
     case 0b00000000:  
-      if( notifyDccReset && ( Cmd & 0b00000001 ) ) // Hard Reset
-        if( notifyDccReset)
-          notifyDccReset( 1 ) ;
-      break ;
+      if(Cmd & 0b00000001) // Hard Reset
+        notifyDccReset(1);
+      break;
 
     case 0b00000010:  // Factory Test
-      break ;
+      break;
 
     case 0b00000110:  // Set Decoder Flasg
-      break ;
+      break;
 
     case 0b00001010:  // Set Advanced Addressing
-      break ;
+      break;
 
     case 0b00001110:  // Decoder Acknowledgment
-      break ;
+      break;
 
     default:    // Reserved
-      ;
+      break;
     }
-    break ;
+    break;
 
   case 0b00100000:  // Advanced Operations
-    switch( Cmd & 0b00011111 )
+    switch (Cmd & 0b00011111)
     {
     case 0b00011111:
-      if( notifyDccSpeed )
+      switch( Data1 & 0b01111111 )
       {
-        switch( Data1 & 0b01111111 )
-        {
-        case 0b00000000:  
-          speed = 1 ;
-          break ;
+      case 0b00000000:  
+        speed = 1 ;
+        break ;
 
-        case 0b00000001:  
-          speed = 0 ;
-          break ;
+      case 0b00000001:  
+        speed = 0 ;
+        break ;
 
-        default:
-          speed = (Data1 & 0b01111111) - 1 ;
-        }
-
-        notifyDccSpeed( Addr, speed, Data1 & 0b10000000, 127 ) ;
+      default:
+        speed = (Data1 & 0b01111111) - 1 ;
       }
+
+      notifyDccSpeed( Addr, speed, Data1 & 0b10000000, 127 ) ;
     }
     break;
 
   case 0b01000000:
   case 0b01100000:
-    if( notifyDccSpeed )
+    switch( Cmd & 0b00011111 )
     {
-      switch( Cmd & 0b00011111 )
-      {
-      case 0b00000000:  
-      case 0b00010000:
-        speed = 1 ;
-        break ;
+    case 0b00000000:  
+    case 0b00010000:
+      speed = 1 ;
+      break ;
 
-      case 0b00000001:  
-      case 0b00010001:
-        speed = 0 ;
-        break ;
+    case 0b00000001:  
+    case 0b00010001:
+      speed = 0 ;
+      break ;
 
-      default:
-        // This speed is not quite right as 14 bit mode can happen and we should check CV29 but... 
-        speed = (((Cmd & 0b00001111) << 1 ) | ((Cmd & 0b00010000) >> 4)) - 2 ;
-      }
-
-      notifyDccSpeed( Addr, speed, Cmd & 0b00100000, 28 ) ;
+    default:
+      // This speed is not quite right as 14 bit mode can happen and we should check CV29 but... 
+      speed = (((Cmd & 0b00001111) << 1 ) | ((Cmd & 0b00010000) >> 4)) - 2 ;
     }
 
-    break;
+    notifyDccSpeed( Addr, speed, Cmd & 0b00100000, 28 ) ;
+
+  break;
 
   case 0b10000000:  // Function Group 0..4
-    if( notifyDccFunc )
-      notifyDccFunc( Addr, FN_0_4, Cmd & 0b00011111 ) ;
+    notifyDccFunc( Addr, FN_0_4, Cmd & 0b00011111 ) ;
     break;
 
   case 0b10100000:  // Function Group 5..8
-    if( notifyDccFunc)
-    {
-      if (Cmd & 0b00010000 )
-        notifyDccFunc( Addr, FN_5_8,  Cmd & 0b00001111 ) ;
-      else
-        notifyDccFunc( Addr, FN_9_12, Cmd & 0b00001111 ) ;
-    }
+    if (Cmd & 0b00010000 )
+      notifyDccFunc( Addr, FN_5_8,  Cmd & 0b00001111 ) ;
+    else
+      notifyDccFunc( Addr, FN_9_12, Cmd & 0b00001111 ) ;
     break;
 
   case 0b11000000:  // Feature Expansion Instruction
   	switch(Cmd & 0b00011111)
   	{
   	case 0B00011110:
-  	  if( notifyDccFunc )
 	    notifyDccFunc( Addr, FN_13_20, Data1 ) ;
-	  break;
+  	  break;
 	  
   	case 0B00011111:
-  	  if( notifyDccFunc )
 	    notifyDccFunc( Addr, FN_21_28, Data1 ) ;
-	  break;
+  	  break;
   	}
     break;
 
@@ -494,8 +428,8 @@ void processMultiFunctionMessage( uint16_t Addr, uint8_t Cmd, uint8_t Data1, uin
     processDirectOpsOperation( Cmd, CVAddr, Data2 ) ;
     break;
   }
-}
-#endif
+} // processMultiFunctionMessage
+#endif // NMRA_DCC_PROCESS_MULTIFUNCTION
 
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
 void processServiceModeOperation( DCC_MSG * pDccMsg )
@@ -555,17 +489,17 @@ void processServiceModeOperation( DCC_MSG * pDccMsg )
     processDirectOpsOperation( pDccMsg->Data[0] & 0b00001100, CVAddr, Value ) ;
   }
 }
-#endif
-void resetServiceModeTimer(uint8_t inServiceMode)
+#endif // NMRA_DCC_PROCESS_SERVICEMODE
+
+static void resetServiceModeTimer(bool inServiceMode)
 {
   // Set the Service Mode
   DccProcState.inServiceMode = inServiceMode ;
-  
   DccProcState.LastServiceModeMillis = inServiceMode ? millis() : 0 ;
-}
+} // resetServiceModeTimer
 
 // TODO 2021: hernoem naar setServiceMode true/false of zoiets
-void clearDccProcState(uint8_t inServiceMode)
+static void clearDccProcState(bool inServiceMode)
 {
   resetServiceModeTimer( inServiceMode ) ;
 
@@ -575,14 +509,13 @@ void clearDccProcState(uint8_t inServiceMode)
   // Clear the LastMsg buffer and DuplicateCount in preparation for possible CV programming
   DccProcState.DuplicateCount = 0 ;
   memset( &DccProcState.LastMsg, 0, sizeof( DCC_MSG ) ) ;
-}
+} // clearDccProcState
 
-void execDccProcessor( DCC_MSG * pDccMsg )
+static void execDccProcessor( DCC_MSG * pDccMsg )
 {
   if( ( pDccMsg->Data[0] == 0 ) && ( pDccMsg->Data[1] == 0 ) )
   {
-    if( notifyDccReset )
-      notifyDccReset( 0 ) ;
+    notifyDccReset( 0 ) ;
 
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
     // If this is the first Reset then perform some one-shot actions as we maybe about to enter service mode
@@ -599,15 +532,6 @@ void execDccProcessor( DCC_MSG * pDccMsg )
     if( DccProcState.inServiceMode && ( pDccMsg->Data[0] >= 112 ) && ( pDccMsg->Data[0] < 128 ) )
     {
       resetServiceModeTimer( 1 ) ;
-      Serial.print("service mode packet : ");
-      Serial.print(pDccMsg->Data[0],HEX);
-      Serial.print(" ");
-      Serial.print(pDccMsg->Data[1],HEX);
-      Serial.print(" ");
-      Serial.print(pDccMsg->Data[2],HEX);
-      Serial.print(" ");
-      Serial.println(pDccMsg->Data[3],HEX);
-
       if( memcmp( pDccMsg, &DccProcState.LastMsg, sizeof( DCC_MSG ) ) )
       {
         DccProcState.DuplicateCount = 0 ;
@@ -631,8 +555,7 @@ void execDccProcessor( DCC_MSG * pDccMsg )
       // Idle Packet
       if( ( pDccMsg->Data[0] == 0b11111111 ) && ( pDccMsg->Data[1] == 0 ) )
       {
-        if( notifyDccIdle )
-          notifyDccIdle() ; //SDS : eventueel te gebruiken om bus activiteit te tonen met een led?
+        notifyDccIdle() ; //SDS : eventueel te gebruiken om bus activiteit te tonen met een led?
       }
 
 #ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
@@ -643,9 +566,8 @@ void execDccProcessor( DCC_MSG * pDccMsg )
       // Basic Accessory Decoders (9-bit) & Extended Accessory Decoders (11-bit)
       else if( pDccMsg->Data[0] < 192 )
 #else
-      else if( ( pDccMsg->Data[0] >= 128 ) && ( pDccMsg->Data[0] < 192 ) )
+      else if( ( pDccMsg->Data[0] >= 128 ) && ( pDccMsg->Data[0] < 192 ) ) {
 #endif
-      {
         if( DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER )
         {
           uint16_t DecoderAddress ; // SDS: 9-bit accessory decoder address 0..511
@@ -660,24 +582,17 @@ void execDccProcessor( DCC_MSG * pDccMsg )
             return;
 
           OutputAddress = pDccMsg->Data[1] & 0b00000111 ;
-          
           OutputIndex = OutputAddress >> 1;
-
           Address = ( ( ( DecoderAddress - 1 ) << 2 ) | OutputIndex ) + 1 ;
-
-          if(pDccMsg->Data[1] & 0b10000000)
-          {
-            if( notifyDccAccState )
-              notifyDccAccState( Address, DecoderAddress, OutputAddress, pDccMsg->Data[1] & 0b00001000 ) ;
+          if(pDccMsg->Data[1] & 0b10000000) {
+            notifyDccAccState( Address, DecoderAddress, OutputAddress, pDccMsg->Data[1] & 0b00001000 ) ;
           }
 
-          else
-          { // SDS 2021 : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
+          else  { // SDS 2021 : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
             // dit staat in de extended packet formats spec, maar toch hier, handig
             // zo hebben we NMRA_DCC_PROCESS_MULTIFUNCTION niet nodig (enkel locdecoder stuff)?
             // of zit POM voor accessories daar ook onder? JA
-            if( notifyDccSigState )
-              notifyDccSigState( Address, OutputIndex, pDccMsg->Data[2] & 0x1F) ;
+            notifyDccSigState( Address, OutputIndex, pDccMsg->Data[2] & 0x1F) ;
           }
         }
       }
@@ -695,116 +610,116 @@ void execDccProcessor( DCC_MSG * pDccMsg )
     }
 #endif
   }
-}
+} // execDccProcessor
 
-NmraDcc::NmraDcc()
-{
-}
-
-void NmraDcc::pin( uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup)
-{
-  DccProcState.ExtIntNum = ExtIntNum;
-  DccProcState.ExtIntPinNum = ExtIntPinNum;
-	
-  pinMode( ExtIntPinNum, INPUT );
-  if( EnablePullup )
-    digitalWrite(ExtIntPinNum, HIGH);
-}
-
-void NmraDcc::init( uint8_t Flags, uint8_t OpsModeAddressBaseCV )
-{
+/*****************************************************************************/
+/***  EXTERNAL INTERFACE *****************************************************/
+/*****************************************************************************/
+void DCC_init (uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullupEnable) {
   // Clear all the static member variables
   memset( &DccRx, 0, sizeof( DccRx) );
 
-#ifdef TCCR0A
-  // Change Timer0 Waveform Generation Mode from Fast PWM back to Normal Mode
-  TCCR0A &= ~((1<<WGM01)|(1<<WGM00));
-#else  
-#error NmraDcc Library requires a processor with Timer0 Output Compare B feature 
-#endif
-  attachInterrupt( DccProcState.ExtIntNum, ExternalInterruptHandler, RISING);
+  // setup external interrupt on PB4 = fixed pin for dcc input
+  if (ExtIntPinPullupEnable)
+    pinMode (PIN_DCCIN, INPUT_PULLUP);
+  else
+    pinMode (PIN_DCCIN, INPUT);
+  attachInterrupt(1,ExternalInterruptHandler, 0); // mode is not implemented in sduino, but we did the config manually
+
+  disableInterrupts(); // EXTI->CR1 kan je maar schrijven onder disabled interrupts (CCR=3); manual nog eens goed lezen, maar zo lijkt het wel te werken
+  EXTI->CR1 = 0x04; // set rising interrupt for all pins on port B
+  GPIOB->CR2 = 0x10; // enable ext interrupt on pin PB4
+  enableInterrupts();
+
+  // configure timer2
+  // lichtjes anders dan avr versie van nmradcc, omdat we hier timer2 voor onszelf hebben
+  // we gebruiken de overflow, maar starten de timer pas als we hem nodig hebben (na een ext int)
+  // voor avr gebruikt nmradcc de output compare interrupt van timer0 om millis() niet te verstoren
+  // we zouden dat voor de gein ook op sduino kunnen doen met TIM4
+  
+  TIM2->CR1 = TIM2_CR1_URS; // =4, counter disable & URS=1
+  TIM2->PSCR = 5; // prescale 2^5 = 16Mhz/32 = 500kHz=2us
+  TIM2->ARRH= 0; // write MSB first
+  TIM2->ARRL= 35; // overflow after 70us
+  TIM2->CNTRH = 0;
+  TIM2->CNTRL = 0;
+  TIM2->EGR = 1; // UG, forced update of ARRH & PSCR, not waiting for UEV, URS=1, so no update interrupt after this manual update
+  TIM2->SR1 = 0; // clear all int flags
+  TIM2->IER = 1; // update interrupt enable, IRQ triggered on UIF flag in SR1
 
   DccProcState.Flags = Flags ;
   DccProcState.OpsModeAddressBaseCV = OpsModeAddressBaseCV ;
-  clearDccProcState( 0 );
-}
+  clearDccProcState( 0 );    
 
-uint8_t NmraDcc::getCV( uint16_t CV )
+} // DCC_init
+
+uint8_t DCC_getCV( uint16_t CV )
 {
   return readCV(CV);
 }
 
-uint8_t NmraDcc::setCV( uint16_t CV, uint8_t Value)
+uint8_t DCC_setCV( uint16_t CV, uint8_t Value)
 {
   return writeCV(CV,Value);
 }
 
-uint8_t NmraDcc::isSetCVReady(void)
+bool DCC_isSetCVReady(void)
 {
+  // STM8 SDCC doesn't know weak functions, and we are happy with the default
+  /*
   if(notifyIsSetCVReady)
-	return notifyIsSetCVReady();
-	
-  return eeprom_is_ready();
+	  return notifyIsSetCVReady();
+  */
+  return true; // STM8 eeprom is always ready for read
 }
 
-uint8_t NmraDcc::process()
+//TODO : te optimaliseren : voor elke DCC message wordt nu uit eeprom gelezen --> overbodig
+// is enkel nodig na een factory reset of wanneer de adresCVs worden gewijzigd in service mode
+uint16_t getMyAddr(void)
 {
-  if( DccProcState.inServiceMode )
-  {
+  uint16_t  Addr;
+  uint8_t   CV29Value;
+
+  CV29Value = readCV( CV_29_CONFIG ) ;
+  if( CV29Value & 0b10000000 )  // Accessory Decoder? 
+    Addr = ( readCV( CV_ACCESSORY_DECODER_ADDRESS_MSB ) << 6 ) | readCV( CV_ACCESSORY_DECODER_ADDRESS_LSB ) ;
+  else {  // Multi-Function Decoder?
+    if( CV29Value & 0b00100000 )  // Two Byte Address?
+      Addr = ( readCV( CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB ) << 8 ) | readCV( CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB ) ;
+
+    else
+      Addr = readCV( 1 ) ;
+  }
+  return Addr ;
+} // getMyAddr
+
+uint8_t DCC_process()
+{
+  if( DccProcState.inServiceMode ) {
     if( (millis() - DccProcState.LastServiceModeMillis ) > 20L )
-    {
-      clearDccProcState( 0 ) ;
-    }
+      clearDccProcState( 0 );
   }
 
-  if( DccRx.DataReady )
-  {
+  if (DccRx.DataReady) {
     // We need to do this check with interrupts disabled
-    cli();
-    Msg = DccRx.PacketCopy ;
-    DccRx.DataReady = 0 ;
-    sei();
-    
-    uint8_t xorValue = 0 ;
-    
+    disableInterrupts();
+    Msg = DccRx.PacketCopy;
+    DccRx.DataReady = 0;
+    enableInterrupts();
+
+    uint8_t xorValue = 0;
     for(uint8_t i = 0; i < DccRx.PacketCopy.Size; i++)
       xorValue ^= DccRx.PacketCopy.Data[i];
 
     if(xorValue)
-      return 0 ;
+      return 0;
     else
 		{
-			if( notifyDccMsg )
-				notifyDccMsg( &Msg );
-		
+		  notifyDccMsg( &Msg );
       execDccProcessor( &Msg );
     }
     return 1 ;
   }
 
   return 0 ;  
-}; // NmraDcc::process
-
-/*******************************************************************************************************/
-
-#ifdef DCC_DEBUG
-uint8_t NmraDcc::getIntCount(void)
-{
-  return DccProcState.IntCount;
-}
-
-uint8_t NmraDcc::getTickCount(void)
-{
-  return DccProcState.TickCount;
-}
-
-uint8_t NmraDcc::getState(void)
-{
-  return DccRx.State;
-}
-
-uint8_t NmraDcc::getBitCount(void)
-{
-  return DccRx.BitCount;
-}
-#endif //DCC_DEBUG
+} // DCC_process

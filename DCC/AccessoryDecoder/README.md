@@ -28,6 +28,9 @@ In software mode = 0 :
 | 6 | timeOnOutput4 | 5 | x50ms, =250ms default coil activation time  |
 
 ## TODO
+- hoe komt het dat millis() werkt als nmra ook de timer0 gebruikt???
 - configuraties voor wisseldecoder, seindecoder etc maken  
 - code vereenvoudigen (timer.cpp en event.cpp nodig??)  
 - dcc clock in dcc-rx ?
+- Serial prints opkuisen
+- nmra code opkuisen
