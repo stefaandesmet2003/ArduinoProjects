@@ -41,13 +41,23 @@ voorlopig niet mogelijk om CV's van de command station te lezen/schrijven
 #33 : eadr_ext_stop_enabled     : =1, 0=default, 1=enable external Stop Input  
 #33 : eadr_ext_stop_deadtime    : =30, in ms  
 
+## turnout numbering
+not sure why opendcc translates DCC accessory address = XPNET accessory address + 1  (build_nmra_basic_accessory function in organizer.cpp)
+according to the NMRA spec, DCC accessory address 0 is valid  
+0..511 are valid, with 511= broadcast, so 511 individual accessory decoders = 511*4=2044 turnouts supported
+the xpnet range is 0..255, smaller than DCC range, so no problem
+JMRI counts turnouts from 1->MAX, turnout 1 is on XPNET accessory address = 0, and thus DCC accessory address = 1
+CommandStation UI counts from 0, with same translation from XPNET to DCC accessory address --> todo align with JMRI ao.
+
 ## todo
 - turnout feedback herimplementeren zonder s88  
 - JMRI 0xE?-0x30 : juist implementeren in lenz_parser  
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert  
+-> code die do_extended_accessory callt in de parsers mag weg  
 - locobuffer uitmesten (ook startup checken, DCC default format etc. nodig?)
 - lenz parser cleanup
 - dccout uitmesten (opendcc feedback stuff eruit)
+- UI : count turnouts from 1 instead of 0
 
 # CommandStation XPNET
 configuration for command station with XPNET interface on uart1  
@@ -67,6 +77,9 @@ works with PcInterface (connection with JMRI)
 - loc stolen notification on local UI
 - appstub clean-up
 - there is an issue in programming mode : JMRI polls too fast, and results in communication errors (rs485c RxBuffer overflow?), and it stops the programming
+- modify timing for short detection on programming track at startup  
+--> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
+--> timing for short detection is too tight  
 
 # PcInterface
 a sketch that implements a LI101 PC Interface  
@@ -74,9 +87,9 @@ a sketch that implements a LI101 PC Interface
 -> XPNET side : atmega uart1  
 works with JMRI connected to the softSerial  
 JMRI doesn't accept ACK for every command => parseCommand function updated to only ack requests that don't generate a command station response!  
-rs485c - xpc : adapted to message bytes for other slots are discarded by the ISR, 
+rs485c - xpc : adapted so message bytes for other slots are discarded by the ISR, 
 i.e. never make it to the RxBuffer = less work for xpc_Run()
-tested :  
+## tested
 - see CommandStationXPNET  
 
 ## stability
@@ -86,9 +99,10 @@ keeps working under constant polling from JMRI, but with RX_ERRORS (buffer overr
 no crashes so far
 
 # Accessory Decoder
-working version of a turnout decoder, see readme there
+working version of a turnout decoder  
+2 versions : atmega328 & STM8  
+see readme there  
 ## todo
-- STM8 version
 - extended accessory (signals)
 
 # Feedback Decoder

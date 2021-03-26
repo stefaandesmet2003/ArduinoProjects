@@ -35,12 +35,11 @@
 #define PIN_DCCIN   				PB4  // fixed DCC-IN pin for STM8 to make our life easier
 #define MAX_DCC_MESSAGE_LEN 6    // including XOR-Byte
 
-typedef struct
-{
+typedef struct {
 	uint8_t	Size;
 	uint8_t	PreambleBits;
 	uint8_t Data[MAX_DCC_MESSAGE_LEN];
-} DCC_MSG ;
+} DCC_MSG;
 
 //--------------------------------------------------------------------------
 //  This section contains the NMRA Assigned DCC Manufacturer Id Codes that
@@ -75,8 +74,7 @@ typedef struct
 
 #define MAXCV                                 E2END     // the upper limit of the CV value currently defined to max memory.
 
-typedef enum
-{
+typedef enum {
 	FN_0_4 = 1,
 	FN_5_8,
 	FN_9_12,
@@ -124,24 +122,25 @@ typedef enum
 #define FLAGS_DCC_ACCESSORY_DECODER	0x80  // CV 29/541 bit 7
 
 // pin + init, remove constructor was empty anyway
-void DCC_init (uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullupEnable);
+void DCC_init(uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullupEnable);
 uint8_t DCC_process();
-uint8_t DCC_getCV( uint16_t CV );
-uint8_t DCC_setCV( uint16_t CV, uint8_t Value);
-bool    DCC_isSetCVReady( void );
+uint8_t DCC_getCV(uint16_t CV);
+uint8_t DCC_setCV(uint16_t CV, uint8_t Value);
+bool    DCC_isSetCVReady(void);
 // SDS TODO2021 : deze vieze functie wordt blijkbaar door turnoutdecoder gebruikt en ino, en zat niet in de dcc class haha
 uint16_t getMyAddr(void);
 
 // TODO : rename DCC_resetNotify, etc
-void notifyDccReset(uint8_t hardReset );
+void notifyDccReset(uint8_t hardReset);
 void notifyDccIdle(void);
-void notifyDccSpeed( uint16_t Addr, uint8_t Speed, uint8_t ForwardDir, uint8_t MaxSpeed );
-void notifyDccFunc( uint16_t Addr, FN_GROUP FuncGrp, uint8_t FuncState);
-void notifyDccAccState( uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, uint8_t State );
-void notifyDccSigState( uint16_t Addr, uint8_t OutputIndex, uint8_t State);
-void    notifyDccMsg( DCC_MSG * Msg );
-uint8_t notifyCVValid( uint16_t CV, uint8_t Writable );
-uint8_t notifyCVWrite( uint16_t CV, uint8_t Value);
+void notifyDccSpeed(uint16_t Addr, uint8_t Speed, uint8_t ForwardDir, uint8_t MaxSpeed);
+void notifyDccFunc(uint16_t Addr, FN_GROUP FuncGrp, uint8_t FuncState);
+void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate);
+void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect);
+
+void    notifyDccMsg(DCC_MSG * Msg);
+uint8_t notifyCVValid(uint16_t CV, uint8_t Writable);
+uint8_t notifyCVWrite(uint16_t CV, uint8_t Value);
 void    notifyCVAck(void);
 // uint8_t notifyCVRead( uint16_t CV);
 // bool    notifyIsSetCVReady(void);

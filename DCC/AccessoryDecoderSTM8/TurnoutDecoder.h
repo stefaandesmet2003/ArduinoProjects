@@ -12,9 +12,9 @@
 #define DEFAULT_TIMEONOUTPUT 5 // = 5*50ms = 250ms, voor factory defaults
 
 
-void turnout_Init( void );
-void turnout_Handler( uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, uint8_t State);
+void turnout_Init();
+void turnout_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate);
 void turnout_ManualToggle (uint8_t turnoutId); // turnoutId = 0..3, manuele bediening met de knoppen
-uint8_t turnout_FactoryResetCV ( void );
+uint8_t turnout_FactoryResetCV();
 
 #endif //TurnoutDecoder_h

@@ -349,6 +349,9 @@ static void build_loko_14a128s(unsigned int nr, signed char speed, t_message *ne
   new_message->dcc[3] = speed;
 }
 
+// Note SDS! strange translation from xpnet accessory address to dcc accessory address
+// xpnet address = 0 is translated to dcc accessory address = 1
+// nr = composed in the lenz_parser / xpnet parser as (xpnet_address << 2) | turnoutId (turnoutId = 0..3, pair of outputs, the BB bits in the xpnet)
 static void build_nmra_basic_accessory(unsigned int nr, char output, char activate, t_message *new_message)
 {
   // Message: 10AAAAAA 1aaaBCCC

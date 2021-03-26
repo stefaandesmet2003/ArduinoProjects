@@ -222,7 +222,7 @@ void setup() {
 
   // Setup which External Interrupt, the Pin it's associated with that we're using and enable the Pull-Up 
   // + enable the DCC Receiver
-  DCC_init(FLAGS_OUTPUT_ADDRESS_MODE | FLAGS_DCC_ACCESSORY_DECODER, 0, true);
+  DCC_init(FLAGS_DCC_ACCESSORY_DECODER, 0, true);
 
   // progled, progkey
   pinMode(PIN_PROGKEY, INPUT_PULLUP);
@@ -326,10 +326,10 @@ void notifyCVAck(void) {
 } // notifyCVAck
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState(uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, uint8_t State)
+void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate)
 {
   if (decoderSoftwareMode == SOFTWAREMODE_TURNOUT_DECODER)
-    turnout_Handler (Addr, BoardAddr, OutputAddr, State);
+    turnout_Handler (decoderAddress, outputId, activate);
   else if (decoderSoftwareMode == SOFTWAREMODE_LIGHT_DECODER) // TODO
     Serial_println_s("unsupported software mode!");
   else
@@ -338,7 +338,7 @@ void notifyDccAccState(uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, ui
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState(uint16_t Addr, uint8_t OutputIndex, uint8_t State)
+void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect)
 {
   #ifdef DEBUG
     Serial_print_s("notifyDccSigState: unsupported for now :");
@@ -346,7 +346,7 @@ void notifyDccSigState(uint16_t Addr, uint8_t OutputIndex, uint8_t State)
     Serial_print_s(',');
     Serial_print_u(OutputIndex);
     Serial_print_s(',');
-    Serial_println_ub(State, HEX);
+    Serial_println_ub(state, HEX);
   #endif
 } // notifyDccSigState
 

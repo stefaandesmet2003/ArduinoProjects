@@ -1,0 +1,5 @@
+ui -> lcd intf moet nog gemaakt worden (ui is gebaseerd op char LCD!!!)
+
+TODO 2021 : code is not working 2017 stuff
+-> nieuwe xpc/rs485c inplakken, aanpassen aan throttle hardware, graphics ui nog todo
+allicht is de ucg lib al gewijzigd ondertussen ...

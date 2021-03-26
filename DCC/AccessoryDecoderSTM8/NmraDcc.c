@@ -571,28 +571,27 @@ static void execDccProcessor( DCC_MSG * pDccMsg )
         if( DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER )
         {
           uint16_t DecoderAddress ; // SDS: 9-bit accessory decoder address 0..511
-          uint8_t  OutputAddress ; // SDS : 3bits output 0..7
-          uint8_t  OutputIndex ; // SDS : wissel 0..3
-          uint16_t Address ; // SDS : wadisda??? soort nr van de wissel, waarom nodig??
-
+          uint8_t  OutputId ; // SDS : 3bits output 0..7
           DecoderAddress = ( ( (~pDccMsg->Data[1]) & 0b01110000 ) << 2 ) | ( pDccMsg->Data[0] & 0b00111111 ) ;
 
           // If we're filtering was it my board address or a broadcast address
           if( ( DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY ) && ( DecoderAddress != getMyAddr() ) && ( DecoderAddress != 511 ) )
             return;
 
-          OutputAddress = pDccMsg->Data[1] & 0b00000111 ;
-          OutputIndex = OutputAddress >> 1;
-          Address = ( ( ( DecoderAddress - 1 ) << 2 ) | OutputIndex ) + 1 ;
+          OutputId = pDccMsg->Data[1] & 0b00000111 ;
+          // geen idee wat dit is -> weg ermee
+          //Address = ( ( ( DecoderAddress - 1 ) << 2 ) | OutputIndex ) + 1 ;
           if(pDccMsg->Data[1] & 0b10000000) {
-            notifyDccAccState( Address, DecoderAddress, OutputAddress, pDccMsg->Data[1] & 0b00001000 ) ;
+            notifyDccAccState(DecoderAddress, OutputId, pDccMsg->Data[1] & 0b00001000 ) ;
           }
 
           else  { // SDS 2021 : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
             // dit staat in de extended packet formats spec, maar toch hier, handig
             // zo hebben we NMRA_DCC_PROCESS_MULTIFUNCTION niet nodig (enkel locdecoder stuff)?
             // of zit POM voor accessories daar ook onder? JA
-            notifyDccSigState( Address, OutputIndex, pDccMsg->Data[2] & 0x1F) ;
+            // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
+            uint8_t signalId = OutputId >> 1;
+            notifyDccSigState( DecoderAddress, signalId, pDccMsg->Data[2] & 0x1F) ;
           }
         }
       }

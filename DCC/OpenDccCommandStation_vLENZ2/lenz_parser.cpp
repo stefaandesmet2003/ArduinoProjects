@@ -636,7 +636,7 @@ void parse_command(void)
               }
             #endif
             break;
-
+        // TODO 2021 : remove! (vervangen door 0xE?-0x30)
         case 0x1: // rudolf killmann
             switch(pcc[0])
               {

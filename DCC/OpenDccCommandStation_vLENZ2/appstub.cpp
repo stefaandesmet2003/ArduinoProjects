@@ -158,12 +158,11 @@ void app_GetLocName( uint16_t locAddr, char *locName )
     
 } // app_GetLocName
 
-// voorlopig hier een geheugen van de wissels
+// voorlopig hier een geheugen voor 32 wissels
 uint32_t app_Turnouts = 0xFFFFFFFF; // alle wissels rechtdoor, 1 bit per turnoutAddr 0..31
 // turnoutAddr 0-4095, coil red/green 0/1
 // enkel het activate commando wordt gestuurd, de turnout decoder doet zelf de deactivate
-// voorlopig turnoutAddr 0..31
-
+// voorlopig turnoutAddr 0..31, organizer mapt die op dcc accessory addresses 1->8 (4 wissels per decoder)
 
 bool app_ToggleAccessory (uint16_t turnoutAddr)
 {

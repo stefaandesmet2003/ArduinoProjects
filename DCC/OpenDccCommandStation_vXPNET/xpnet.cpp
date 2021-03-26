@@ -657,6 +657,7 @@ void xp_parser(void)
       break;
     case 0x1:
       switch(rx_message[1]) {
+        // TODO 2021 : remove! (vervangen door 0xE?-0x30)
         case 0x01:
           // dcc extended accessory operations request
           addr = (unsigned int) (((unsigned char)(rx_message[2] & 0x07)) << 8) + rx_message[3];
