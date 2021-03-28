@@ -149,20 +149,20 @@ uint32_t blinkMillis; // temp: led on during temperature conversion (blocking) &
 
 // node 1 - a dummy test sensor
 typedef struct {
-  uint16_t solarVoltage;
-  uint16_t packetsOK;
-  uint16_t packetsNOK;
-  uint8_t batLevel;
+  uint16_t solarVoltage;        // child 1, V_VOLTAGE
+  uint16_t packetsOK;           // child 1, V_VAR1
+  uint16_t packetsNOK;          // child 1, V_VAR2
+  uint8_t batLevel;             // internal
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
 } SensorDataDummy_t;
 
 // node 2 - pump sensor, monitoring rain tank and pump activity
 typedef struct {
-  bool remoteOK;        // child 1
-  uint16_t tankLiters;  // child 2
-  bool tankEmpty;       // child 3
-  bool batCharging;     // child 4
+  bool remoteOK;        // child 1, V_STATUS
+  uint16_t tankLiters;  // child 2, V_VOLUME
+  bool tankEmpty;       // child 3, V_STATUS
+  bool batCharging;     // child 4, V_STATUS
   uint8_t batLevel;     // internal
   uint32_t pumpStartsCount;   // child 5, V_VAR1
   uint32_t pumpOnTimeInSeconds; // child 5, V_VAR2
@@ -174,32 +174,33 @@ typedef struct {
 
 // node 3 = TEMPIE, a weather data test sensor
 typedef struct {
-  float si7021Temperature;
-  float si7021Humidity;
-  float bmp280Temperature;
-  float bmp280Pressure;
-  float batVoltage;
-  uint8_t batLevel;
+  float bmp280Temperature;    // child 1, V_TEMP
+  float bmp280Pressure;       // child 2, V_PRESSURE
+                              // child 3, V_FORECAST -> not used
+  float si7021Temperature;    // child 4, V_TEMP
+  float si7021Humidity;       // child 5, H_HUM
+  float batVoltage;           // child 201
+  uint8_t batLevel;           // internal
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
 } SensorDataTempie_t;
 
 // node 4 - a shower monitoring sensor
 typedef struct  {
-  float dhtTemperature;
-  float dhtHumidity;
-  int32_t lightLevel; // NodeManager sensor sends 0..100 level as int32_t
-  float batVoltage;
-  uint8_t batLevel;
+  float dhtTemperature;   // child 1, V_TEMP
+  float dhtHumidity;      // child 2, V_HUM
+  int32_t lightLevel;     // child 4, NodeManager sensor sends 0..100 level as int32_t
+  float batVoltage;       // child 201
+  uint8_t batLevel;       // internal
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
 } SensorDataShower_t;
 
 // node 5 - home ventilation sensor
 typedef struct  {
-  bool fanOn;
-  char fanSpeed[7]; // V_HVAC_SPEED : "Min", "Normal","Max", "Auto" (and "Normal" not supported for us)
-  bool alarmActive;
+  bool fanOn;         // child 1, V_STATUS
+  char fanSpeed[7];   // child 1, V_HVAC_SPEED : "Min", "Normal","Max", "Auto" (and "Normal" not supported for us)
+  bool alarmActive;   // child 2, V_STATUS
   uint32_t lastReportMillis;
   uint32_t lastSeenMillis;
 } SensorDataFan_t;
@@ -727,6 +728,18 @@ void receive(const MyMessage &message) {
         else if (message.getType() == V_VAR4) curSensorDataDroppie.packetsCountNOK = message.getULong();
       }
       curSensorDataDroppie.lastReportMillis = millis();
+    }
+    else if (message.getCommand()== C_REQ) { // gateway responds to a request on behalf of a controller
+      if (sensorId == 1) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.remoteOK));
+      else if (sensorId == 2) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VOLUME,false).set(curSensorDataDroppie.tankLiters));
+      else if (sensorId == 3) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.tankEmpty));
+      else if (sensorId == 3) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.batCharging));
+      else if (sensorId == 5) {
+        if (message.getType() == V_VAR1) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR1,false).set(curSensorDataDroppie.pumpStartsCount));
+        else if (message.getType() == V_VAR2) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR2,false).set(curSensorDataDroppie.pumpOnTimeInSeconds));
+        else if (message.getType() == V_VAR3) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR3,false).set(curSensorDataDroppie.packetsCountOK));
+        else if (message.getType() == V_VAR4) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR4,false).set(curSensorDataDroppie.packetsCountNOK));
+      }
     }
     else if (message.getCommand()== C_INTERNAL) {
       if (message.getType() == I_BATTERY_LEVEL) curSensorDataDroppie.batLevel = message.getByte();

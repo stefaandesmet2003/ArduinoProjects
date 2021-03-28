@@ -109,6 +109,12 @@ typedef struct {
   uint32_t pumpOnTimeInSeconds; // total on-time, V_VAR2
   uint32_t packetsCountOK;    // V_VAR3
   uint32_t packetsCountNOK;   // V_VAR4
+
+  // flags for the initial values to receive from gateway/controller
+  bool pumpStartsCountInitDone;
+  bool pumpOnTimeInSecondsInitDone;
+  bool packetsCountOKInitDone;
+  bool packetsCountNOKInitDone;
 } sensorData_t;
 
 sensorData_t curSensorData;
@@ -194,9 +200,50 @@ void presentation() { // MySensors
 	present(PUMPSENSOR_CHILD_ID, S_CUSTOM, "Pump");
 } // presentation
 
-void receive(const MyMessage &message) { // MySensors - not used for now
+void receive(const MyMessage &message)
+{
   uint8_t msgType = message.getType();
   Serial.print(F("receiving msgType:"));Serial.println(msgType);
+
+	if (msgType==V_VAR1) { // pumpStartsCount
+		uint32_t pumpStartsCount = message.getULong();
+		Serial.print("Received last pumpStartsCount from gw/ctrl:");
+		Serial.println(pumpStartsCount);
+    if (!curSensorData.pumpStartsCountInitDone){
+      curSensorData.pumpStartsCount += pumpStartsCount;
+      curSensorData.pumpStartsCountInitDone = true;
+    } 
+	}
+	else if (msgType==V_VAR2) { // pumpOnTimeInSeconds
+		uint32_t pumpOnTimeInSeconds = message.getULong();
+		Serial.print("Received last pumpOnTimeInSeconds from gw/ctrl:");
+		Serial.println(pumpOnTimeInSeconds);
+    if (!curSensorData.pumpOnTimeInSecondsInitDone){
+      curSensorData.pumpOnTimeInSeconds += pumpOnTimeInSeconds;
+      curSensorData.pumpOnTimeInSecondsInitDone = true;
+    } 
+	}
+	else if (msgType==V_VAR3) { // packetsCountOK
+		uint32_t packetsCountOK = message.getULong();
+		Serial.print("Received last packetsCountOK from gw/ctrl:");
+		Serial.println(packetsCountOK);
+    if (!curSensorData.packetsCountOKInitDone){
+      curSensorData.packetsCountOK += packetsCountOK;
+      curSensorData.packetsCountOKInitDone = true;
+    } 
+	}
+	else if (msgType==V_VAR4) { // packetsCountNOK
+		uint32_t packetsCountNOK = message.getULong();
+		Serial.print("Received last packetsCountNOK from gw/ctrl:");
+		Serial.println(packetsCountNOK);
+    if (!curSensorData.packetsCountNOKInitDone) {
+      curSensorData.packetsCountNOK += packetsCountNOK;
+      curSensorData.packetsCountNOKInitDone = true;
+    }
+	}
+  else {
+    Serial.print("received unknown type : "); Serial.println(msgType);
+  }
 } // receive
 
 // function from MySensors, called before setting up the radio
@@ -209,6 +256,11 @@ void before() {
   //pinMode(PIN_INPUT_FLOW_SENSOR, INPUT);
   OT_init();
   curSensorData.batCharging = true;
+  curSensorData.pumpOnTimeInSecondsInitDone = false;
+  curSensorData.pumpStartsCountInitDone = false;
+  curSensorData.packetsCountOKInitDone = false;
+  curSensorData.packetsCountNOKInitDone = false;
+
   OT_setTxState(curSensorData.batCharging);
 } // before
 
@@ -318,27 +370,51 @@ void loop() {
       updatePacketCounters(sendBatteryLevel(convBatAnalogRead2BatLevel(curSensorData.batAnalogRead)));
     }
     else if (radioTxStep == 1) { // local sensor data
-      // todo : send pump info
+      // TODO CHECK : after boot this will send 4 requests in quick succession
+      // and gateway will start replying immediately
+      // does this give collisions and delays in initialisation?
+      // in that case we may need to stagger the requests in a separate init procedure
+      if (curSensorData.pumpStartsCountInitDone) {
       sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
       sensorMsg.setType(V_VAR1);
       sensorMsg.set(curSensorData.pumpStartsCount);
       updatePacketCounters(send(sensorMsg));
+      }
+      else { // request initial value from gw/ctrl
+        updatePacketCounters(request(PUMPSENSOR_CHILD_ID, V_VAR1));
+      }
 
-      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
-      sensorMsg.setType(V_VAR2);
-      sensorMsg.set(curSensorData.pumpOnTimeInSeconds);
-      updatePacketCounters(send(sensorMsg));
+      if (curSensorData.pumpOnTimeInSecondsInitDone) {
+        sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+        sensorMsg.setType(V_VAR2);
+        sensorMsg.set(curSensorData.pumpOnTimeInSeconds);
+        updatePacketCounters(send(sensorMsg)); 
+      }
+      else { // request initial value from gw/ctrl
+        updatePacketCounters(request(PUMPSENSOR_CHILD_ID, V_VAR2));
+      }
 
-      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
-      sensorMsg.setType(V_VAR3);
-      sensorMsg.set(curSensorData.packetsCountOK);
-      updatePacketCounters(send(sensorMsg));
+      if (curSensorData.packetsCountOKInitDone) {
+        sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+        sensorMsg.setType(V_VAR3);
+        sensorMsg.set(curSensorData.packetsCountOK);
+        updatePacketCounters(send(sensorMsg));
+      }
+      else { // request initial value from gw/ctrl
+        updatePacketCounters(request(PUMPSENSOR_CHILD_ID, V_VAR3));
+      }
 
-      sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
-      sensorMsg.setType(V_VAR4);
-      sensorMsg.set(curSensorData.packetsCountNOK);
-      updatePacketCounters(send(sensorMsg));
+      if (curSensorData.packetsCountOKInitDone) {
+        sensorMsg.setSensor(PUMPSENSOR_CHILD_ID);
+        sensorMsg.setType(V_VAR4);
+        sensorMsg.set(curSensorData.packetsCountNOK);
+        updatePacketCounters(send(sensorMsg));
+      }
+      else { // request initial value from gw/ctrl
+        updatePacketCounters(request(PUMPSENSOR_CHILD_ID, V_VAR4));
+      }
     }
+
     radioTxStep = (radioTxStep + 1) % 2;
     Serial.println("done!");
   }
