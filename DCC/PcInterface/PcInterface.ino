@@ -25,8 +25,8 @@ uint32_t pcRxMillis;
 
 // PC<>PCintf communication
 uint8_t pcm_timeout[] = {0x01, 0x01};                 // Timeout between PC & PCIntf
-uint8_t pcm_timeout_xp[] = {0x01, 0x02};              // timeout between PCIntf & Command Station
-uint8_t pcm_comms_error_xp[] = {0x01, 0x03};          // communication error PCIntf & Command Station
+uint8_t pcm_timeout_xp[] = {0x01, 0x02};              // comms error between PCIntf & Command Station (timeout)
+uint8_t pcm_comms_error_xp[] = {0x01, 0x03};          // communication error PCIntf & Command Station (CS requests ack from PCIntf)
 uint8_t pcm_ack[] = {0x01, 0x04};                     // ack
 uint8_t pcm_timeslot_error[] = {0x01, 0x05};          // Command Station is no longer providing us a timeslot for communication
 uint8_t pcm_overrun[] = {0x01, 0x06};                 // buffer overrun (voorlopig enkel aan de rs485c kant, geen idee hoe overruns aan de altSerial te detecteren)
@@ -60,9 +60,6 @@ static void pc_SendMessage(unsigned char *str)
 static void pc_ParseMessage(void) {
   // de meeste messages kan je rechtstreeks op xpc zetten
   // sommige moet de pc intf zelf afhandelen
-  // TODO : de msgs die geen respons van het command station krijgen, moeten we pcm_ack naar de PC
-  // hoe doen we dat zonder alle msgs te parsen??
-  // of mogen we gewoon alles acken? -> voorlopig zo
   switch(pcc[0] >> 4) { // this is opcode
     case 0xF:
       if (pcc[0] == 0xF0) // ask LI-Version
@@ -95,13 +92,20 @@ static void pc_ParseMessage(void) {
 
   // some commands don't generate a response from CS -> we have to send ack to PC instead. 
   // and apparently we can't just ack any command!
+  // TODO : CS returns occasional data error (overruns?)
+  // in that case we immediately ack her to PC, and a few ms later we send a data error (on TX_ERROR xpnet event)
+  // JMRI ignores the data error because it got an ack first
+  // when this happens on a programming command, the procedure blocks. 
+  // when this happens during the polling for the service mode results, the polling continues OK.
+  // maybe we should wait for a possible error reply from CS before sending ACK to PC?
   switch(pcc[0] >> 4) { // this is opcode
     case 0x5: // accessory command
     case 0x9: // loc stop
       pc_SendMessage(pcm_ack);
       break;
-    case 0x2: // CS power-up mode
-      if (pcc[1] == 0x22)
+    case 0x2: 
+      if ((pcc[1] == 0x22) || // CS power-up mode
+          (pcc[1]>=0x11 && pcc[1]<=0x17)) // programming commands except 'request results'
         pc_SendMessage(pcm_ack);
       break;
     case 0xE:
@@ -171,30 +175,34 @@ static void pc_Run() {
 } // pc_Run
 
 // als we een msg van xpc krijgen sturen we gewoon naar de pc
-void xpc_MessageNotify ( uint8_t *msg) {
+void xpc_MessageNotify (uint8_t *msg) {
   // pc_SendMessage is potentieel blocking, en ondertussen kan de xpc X_RxBuffer vollopen
   // dus als de pc niet kan volgen, krijgen we overruns in rs485c
   pc_SendMessage(msg);
 } // xpc_MessageNotify
 
-void xpc_EventNotify( xpcEvent_t xpcEvent ) {
+void xpc_EventNotify(xpcEvent_t xpcEvent) {
   switch (xpcEvent) {
-    case XPEVENT_BUSY : 
+    case XPEVENT_BUSY : // CS signals it's busy -> pass msg to PC
       pc_SendMessage(pcm_busy);
       break;
-    case XPEVENT_UNKNOWN_COMMAND : 
+    case XPEVENT_UNKNOWN_COMMAND : // PCIntf sent an unknown command to CS -> pass msg to PC
       pc_SendMessage(pcm_unknown);
       break;
-    case XPEVENT_RX_TIMEOUT : // msg timeout op xpnet
-    case XPEVENT_ACK_REQUEST : 
-    case XPEVENT_TX_ERROR : // CS stuurt ons een data error notify, dus we hebben iets verkeerd gestuurd naar CS
-      // xpnet spec verwacht dat we pcm_comms_error_xp sturen als CS ons een ack request stuurt, maar dat handelt xpc voorlopig autonoom af
-      // geen idee of JMRI hier nu wacht op een req ack
-      // we gaan ervan uit dat de PC een retransmit zal doen, en dat we dit dus niet in de pcintf moeten implementeren
-      pc_SendMessage(pcm_comms_error_xp);
+    case XPEVENT_TX_ERROR : // CS stuurt PCIntf een data error notify, dus PCIntf heeft iets verkeerd gestuurd naar CS
+      // xpnet spec verwacht dat we pcm_comms_error_xp sturen als CS ons een ack request stuurt, dus doen we nu nog niets
+      // de req ack gaat niet naar JMRIgeen idee of JMRI hier nu wacht op een req ack
+      // PCIntf doet geen retransmits na een comms error, JMRI doet dit al
+      //pc_SendMessage(pcm_timeout_xp); // for test, want JMRI stopt met pollen als we niets antwoorden -> werkt niet, JMRI stopt de programming cycle
+      pc_SendMessage(pcm_datenfehler); // pass msg to PC
       break;
-    case XPEVENT_RX_ERROR : // antwoord van CS bevat een XOR error
+    case XPEVENT_RX_TIMEOUT : // PCIntf receives a part of msg, but the remainder doesn't arrive in time
       pc_SendMessage(pcm_timeout_xp);
+      break;
+    case XPEVENT_RX_ERROR : // answer from CS contained a XOR error
+      // niet duidelijk volgens spec of we de PC moeten informeren -> we sturen een 'unknown comms error'
+    case XPEVENT_ACK_REQUEST : // CS sent us a request for acknowledge
+      pc_SendMessage(pcm_comms_error_xp);
       break;
     case XPEVENT_MSG_ERROR : // buffer overrun in X_RxBuffer
       // TODO : how to detect overruns on the altSerial interface?
@@ -203,7 +211,7 @@ void xpc_EventNotify( xpcEvent_t xpcEvent ) {
     case XPEVENT_CONNECTION_ERROR : // not receiving call bytes from command station
       pc_SendMessage(pcm_timeslot_error);
       break;
-    case XPEVENT_CONNECTION_OK : 
+    case XPEVENT_CONNECTION_OK : // connection with CS is restored
       pc_SendMessage(pcm_ack);
       break;
   }

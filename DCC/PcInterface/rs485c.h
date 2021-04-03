@@ -11,7 +11,6 @@
 
 void init_rs485(void);
 void XP_setAddress (uint8_t slaveAddress); // set the slave address we will be listening on
-
 bool XP_send_byte (const uint8_t c);       // sends one byte with isr and fifo, bit 8 = 0
 
 bool XP_tx_ready (void);    // true if byte can be sent

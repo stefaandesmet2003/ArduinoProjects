@@ -101,6 +101,10 @@ void xpc_SendMessage(uint8_t *msg)
   // alternatief : hiermee kunnen we meerdere msg in de TxBuffer steken:
   // while (!XP_tx_ready());
 
+  // we copy all msg bytes to the TxBuffer under disabled ints because
+  // we had occasional data errors when the first byte was in transmission (UDRE) before all bytes of the msg were copied to rs485c
+  // UDRE int comes immediately after the 1st byte, and UDRIE=0.
+  cli(); 
   XP_send_byte(msg[0]); // send header
   while (n != total) {
     n++;
@@ -108,6 +112,7 @@ void xpc_SendMessage(uint8_t *msg)
     XP_send_byte(msg[n]); // send data
   }    
   XP_send_byte(my_xor); // send xor
+  sei();
   #ifdef XPC_DEBUG
     mySerial.println("xpc_SendMessage");
   #endif
@@ -580,7 +585,7 @@ void xpc_Run(void)
             // want de uitstaande request gaat dus geen normale reply krijgen!!
             // we zouden ook een transfer errors boodschap moeten gekregen hebben vd command station (§2.1.8)
             xpc_SendMessage(xpc_AcknowledgementResponse);
-            if (xpc_EventNotify) xpc_EventNotify(XPEVENT_CONNECTION_ERROR); // xpnet spec demands we inform the PC about this
+            if (xpc_EventNotify) xpc_EventNotify(XPEVENT_ACK_REQUEST); // xpnet spec demands we inform the PC about this
 
             // xpc_state = XPC_WAIT_FOR_CALL; -> we blijven in deze state
           }

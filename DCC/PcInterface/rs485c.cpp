@@ -50,6 +50,7 @@ static inline void set_XP_to_transmit(void)
 
 static void XP_flush_rx(void) // Flush Receive-Buffer
 {
+  uint8_t sreg = SREG;
   cli();
   do {
     UDR0;
@@ -60,7 +61,7 @@ static void XP_flush_rx(void) // Flush Receive-Buffer
   UCSR0B |= (1 << RXEN0);
   X_rx_read_ptr = 0;      
   X_rx_write_ptr = 0;
-  sei();
+  SREG = sreg; // this will renable global ints (sei) if they were enabled before
 } // XP_flush_rx
 
 void init_rs485(void)
@@ -107,7 +108,7 @@ void init_rs485(void)
 
   XP_flush_rx();
   UCSR0A |= (1 << TXC0);         // clear tx complete flag
-  sei();
+  SREG = sreg; // this will renable global ints (sei) if they were enabled before
 } // init_rs485
 
 //---------------------------------------------------------------------------
@@ -219,24 +220,28 @@ bool XP_tx_empty(void) {
 } // XP_tx_empty
 
 void XP_tx_clear (void) {
+  uint8_t sreg = SREG;
   cli();
   X_tx_write_ptr = X_tx_read_ptr;
   X_tx_fill = 0;
-  sei();
+  SREG = sreg; // this will renable global ints (sei) if they were enabled before
 }
 
 // ret 1 if full
 // This goes with fifo (up to 32), bit 8 is 0.
-bool XP_send_word (const unsigned int c)
+bool XP_send_byte (const uint8_t c)
 {
+  uint8_t sreg;
+
   X_TxBuffer[X_tx_write_ptr] = c;
 
   X_tx_write_ptr++;
   if (X_tx_write_ptr == X_TxBuffer_Size) X_tx_write_ptr=0;
 
+  sreg = SREG;
   cli();
   X_tx_fill++;
-  sei();
+  SREG = sreg; // this will renable global ints (sei) if they were enabled before
 
   // niet hier maar enkel als ons slot geopend is!
   /*
@@ -249,11 +254,6 @@ bool XP_send_word (const unsigned int c)
 
   if (X_tx_fill > (X_TxBuffer_Size-18)) return(true);
   return(false);
-} // XP_send_word
-
-bool XP_send_byte (const uint8_t c)
-{
-  return(XP_send_word(c));
 } // XP_send_byte
 
 //------------------------------------------------------------------------------
