@@ -6,6 +6,7 @@
  * de defines zijn default gezet, en includen meer code, door te commenten wordt de flash size kleiner
  * net klein genoeg 14278/14336 bytes
  * voorlopig geen andere lib dan adafruit gevonden voor ina219, die lijkt ook zeer groot voor niets te doen
+ * TODO 03/2021 verkleinen, want fit niet meer, wat een vooruitgang
  */
 
 #include <U8g2lib.h>
@@ -31,7 +32,9 @@ void setup(void)
   ina219.setCalibration_16V_400mA();
 
   u8g2.begin();  
-  u8g2.setFont(u8g2_font_ncenB12_tr);
+  //u8g2.setFont(u8g2_font_ncenB12_tr); // NOK 03/2021
+  //u8g2.setFont(u8g2_font_tenfatguys_tu); // use font without lowercase to fit 16k flash, OK 03/2021
+  u8g2.setFont(u8g2_font_VCR_OSD_tu); // use font without lowercase to fit 16k flash, OK 03/2021
   
 }
 
@@ -62,7 +65,7 @@ void loop(void)
     u8g2.setCursor(0,15);
     u8g2.print(busvoltage);u8g2.print(" V");
     u8g2.setCursor(0,31);
-    u8g2.print(current_mA);u8g2.print(" mA");
+    u8g2.print(current_mA);u8g2.print(" MA"); // use font without lowercase to fit 16k flash
   } while ( u8g2.nextPage() );
   delay(200);
 
