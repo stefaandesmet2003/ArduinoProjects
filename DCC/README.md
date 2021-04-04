@@ -76,7 +76,6 @@ works with PcInterface (connection with JMRI)
   --> and no way to steal it back ??  
 - loc stolen notification on local UI
 - appstub clean-up
-- there is an issue in programming mode : JMRI polls too fast, and results in communication errors (rs485c RxBuffer overflow?), and it stops the programming
 - modify timing for short detection on programming track at startup  
 --> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
 --> timing for short detection is too tight  
@@ -93,15 +92,14 @@ i.e. never make it to the RxBuffer = less work for xpc_Run()
 - see CommandStationXPNET  
 
 ## stability
-keeps working under constant polling from JMRI, but with RX_ERRORS (buffer overrun probably) when JMRI uses every slot  
---> JMRI was polling very fast on a few wrongly implemented command responses; because it wasn't receiving the right answer  
---> JMRI logs showed occasional 0x1 - 0x3 - 0x2 = "comms error"  
-no crashes so far
+keeps working under constant polling from JMRI, especially during programming  
+issue with occasional RX_ERRORS solved; xpnet command is now copied to rs485c with global ints disabled to garantee transmission in 1 slot.
 
 # Accessory Decoder
 working version of a turnout decoder  
 2 versions : atmega328 & STM8  
 see readme there  
+
 ## todo
 - extended accessory (signals)
 
@@ -114,11 +112,18 @@ the basic version uses 8 inputs on atmega328 and sends the status over xpressnet
 Lenz uses a DCC interface to program the configuration as CV variables.  
 Feedback decoder is not connected to DCC on the track, but probably the easiest way, the DCC input only requires an opto & few resistors
 
+# Throttle
+initial version with static xpnet address = 3.  
+throttle controls loc speed on loc address = 3, and shows dcc fast clock  
+
+## todo
+- UI
+- encoder doesn't work well, probably linked to slow display refresh (compared to char-lcd)
+
 # RAILCOM
 - todo!
 
 # TODO
-- xpnet throttle
 - bedienpaneel wissels op xpnet (luistert naar feedback messages voor led-indicatie updates & knoppen voor bediening)
 - esp als XnTcp interface of volledig CS
 - dcc clock

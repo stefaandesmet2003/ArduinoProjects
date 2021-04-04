@@ -1,12 +1,5 @@
-#include <arduino.h>
+#include "Arduino.h"
 #include "keys.h"
-/*
- * CLK = pin D2 (verplicht,gelinkt aan int0)
- * DT = pin D6 (vrij)
- * SW = pin D7 (vrij)
- * als DT achterloopt op CLK -> wijzerzin turn
- * als DT voorloopt op CLK -> tegenwijzerzin turn
- */
 
 volatile int turns; // aantal turns gedetecteerd vooraleer de main loop er iets mee doet
 long encoderMillis = 0;
