@@ -14,6 +14,9 @@
 #include "Arduino.h"
 #include "rs485c.h"
 
+#define RS485Transmit    HIGH
+#define RS485Receive     LOW
+
 // move some xpnet logic here to handle fast interrupt response
 #define CALL_TYPE         0x60
 #define CALL_TYPE_INQUIRY 0x40
@@ -22,6 +25,7 @@
 
 // the slave address we will be listening on
 static uint8_t X_slaveAddress = 0; // 1..31 xpnet slave, 0 = broadcast
+static uint8_t rs485DirectionPin;
 
 // FIFO objects for RX and TX
 // max. Size: 255
@@ -40,12 +44,12 @@ static volatile uint8_t X_slotAddress;       // active slot on the xpnet, discar
 
 static inline void set_XP_to_receive(void)
 {
-  HARDWARE_SET_XP_RECEIVE;
+  digitalWrite(rs485DirectionPin,RS485Receive);
 }
 
 static inline void set_XP_to_transmit(void)
 {
-  HARDWARE_SET_XP_TRANSMIT;
+  digitalWrite(rs485DirectionPin,RS485Transmit);
 }
 
 static void XP_flush_rx(void) // Flush Receive-Buffer
@@ -64,12 +68,15 @@ static void XP_flush_rx(void) // Flush Receive-Buffer
   SREG = sreg; // this will renable global ints (sei) if they were enabled before
 } // XP_flush_rx
 
-void init_rs485(void)
+void init_rs485(uint8_t enablePin)
 {
   uint16_t ubrr;
-  uint8_t sreg = SREG;
-  
-  pinMode (RS485_DERE, OUTPUT); // voor zover dit in ino-setup nog niet is gebeurd..
+  uint8_t sreg;
+
+  rs485DirectionPin = enablePin;
+  pinMode (enablePin, OUTPUT);
+
+  sreg = SREG;
   cli();
   UCSR0B = 0;                  // stop everything
 
@@ -215,7 +222,7 @@ bool XP_tx_ready (void) {
 bool XP_tx_empty(void) {
   // not enough to just look at driver bit, need to check the TxBuffer pointers too
   // we want to prevent multiple xpc_SendMessage() between the last completed transmission and the next inquiry call byte
-  return (X_tx_write_ptr == X_tx_read_ptr) && (digitalRead(RS485_DERE) != RS485Transmit);
+  return (X_tx_write_ptr == X_tx_read_ptr) && (digitalRead(rs485DirectionPin) != RS485Transmit);
 
 } // XP_tx_empty
 

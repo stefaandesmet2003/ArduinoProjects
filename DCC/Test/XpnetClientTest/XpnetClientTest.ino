@@ -12,6 +12,8 @@ AltSoftSerial mySerial;
 // command line input via mySerial for test
 
 #define XPNET_MY_ADDRESS (5)
+#define RS485_DIRECTION_PIN   4 // hw specific
+
 
 uint16_t curLocAddress = 3;
 uint8_t curLocSpeed = 0;
@@ -50,7 +52,7 @@ void setup()
   pinMode(LED_BUILTIN,OUTPUT);
   digitalWrite(LED_BUILTIN,LOW);
 
-  init_rs485();
+  init_rs485(RS485_DIRECTION_PIN);
   xpc_Init(XPNET_MY_ADDRESS);
   
   // set the data rate for the SoftwareSerial port

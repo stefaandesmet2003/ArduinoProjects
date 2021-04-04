@@ -16,6 +16,7 @@ AltSoftSerial mySerial;
 //#define SSerialTX 9   //Serial Transmit pin --> is fixed in AltSoftSerial
 #endif
 
+#define RS485_DIRECTION_PIN   4     // hw specific!
 #define XPNET_MY_ADDRESS (5)
 #define MAX_NBR_INPUTS  16
 
@@ -95,7 +96,7 @@ void setup()
 #endif 
 
   decoder_init();
-  init_rs485();
+  init_rs485(RS485_DIRECTION_PIN);
   xpc_Init(XPNET_MY_ADDRESS);
 
   // led state indication

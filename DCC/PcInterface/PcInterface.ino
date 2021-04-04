@@ -10,6 +10,8 @@
 #define XPNET_MY_ADDRESS (1)
 uint8_t xpc_Address = XPNET_MY_ADDRESS; // kan aangepast worden door de pc interface
 
+#define RS485_DIRECTION_PIN   4     // hw specific!
+
 typedef enum { // actual state
   IDLE,
   WF_MESSAGE,
@@ -220,7 +222,7 @@ void xpc_EventNotify(xpcEvent_t xpcEvent) {
 void setup() 
 {
   init_rs232(); // pc interface
-  init_rs485();
+  init_rs485(RS485_DIRECTION_PIN);
   xpc_Init(xpc_Address);
 } // setup
 
