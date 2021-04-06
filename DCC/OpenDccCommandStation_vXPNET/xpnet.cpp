@@ -1073,6 +1073,13 @@ void xp_parser(void)
             }
           break;
         case 0x30:
+          // SDS 2021 test - 0xE?-0x30 zijn raw dcc msgs encapsulated in xpnet
+          uint8_t dccSize = (rx_message[0] & 0xF) - 1;
+          do_raw_msg(&rx_message[2], dccSize);
+          processed = 1;
+
+          // SDS 2021 TEMP commented
+          /*
           // Prog. on Main Byte ab V3   0xE6 0x30 AddrH AddrL 0xEC + C CV DAT X-Or
           // Prog. on Main Bit ab V3    0xE6 0x30 AddrH AddrL 0xE8 + C CV DAT X-Or
           // Prog. on Main Read ab V3.6 0xE6 0x30 AddrH AddrL 0xEA + C CV DAT [XOR] 
@@ -1113,6 +1120,7 @@ void xp_parser(void)
             do_pom_ext_accessory_cvrd(xaddr.as_uint16, xp_cv);
             processed = 1;
           }
+          */
           break; 
         case 0x40:   //Lokverwaltung (Double Header)
           // !!! Lok zu MTR hinzufügen ab V3 0xE4 0x40 + R ADR High ADR Low MTR X-Or

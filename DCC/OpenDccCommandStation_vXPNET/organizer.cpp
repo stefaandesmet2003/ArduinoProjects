@@ -397,6 +397,17 @@ static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_mess
   new_message->dcc[2]  = aspect;
 }
 
+// SDS 2021 : voor de xpnet encapsulated msgs
+static void build_nmra_raw(uint8_t *msg, uint8_t msgSize, t_message *new_message) {
+  new_message->repeat = dcc_acc_repeat;
+  new_message->type = is_acc; // TODO CHECK!!
+  if (msgSize > 6) msgSize = 6;
+  new_message->size = msgSize;
+  for (uint8_t i=0; i< msgSize; i++) {
+    new_message->dcc[i] = msg[i];
+  }
+} // build_nmra_raw
+
 static void build_function_7a_grp1(int nr, unsigned char func, t_message *new_message)
 {
   // Message: 0AAAAAAA 100FFFFF
@@ -2462,6 +2473,15 @@ bool do_extended_accessory(unsigned int addr, unsigned char aspect)
   unsigned char retval;
 
   build_nmra_extended_accessory(addr, aspect, locobuff_mes_ptr);
+  retval = put_in_queue_low(locobuff_mes_ptr);
+  return(retval);
+}
+
+// SDS voor de xpnet encapsulated msgs
+bool do_raw_msg(uint8_t *msg, uint8_t msgSize) {
+  bool retval;
+
+  build_nmra_raw(msg, msgSize, locobuff_mes_ptr);
   retval = put_in_queue_low(locobuff_mes_ptr);
   return(retval);
 }

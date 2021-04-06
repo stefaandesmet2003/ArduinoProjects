@@ -79,6 +79,7 @@ works with PcInterface (connection with JMRI)
 - modify timing for short detection on programming track at startup  
 --> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
 --> timing for short detection is too tight  
+- CS blijft fast clock msgs sturen tijdens programming, is dat ok?
 
 # PcInterface
 a sketch that implements a LI101 PC Interface  
@@ -119,6 +120,15 @@ throttle controls loc speed on loc address = 3, and shows dcc fast clock
 ## todo
 - UI
 - encoder doesn't work well, probably linked to slow display refresh (compared to char-lcd)
+
+# SignalDecoder
+an extended accessory decoder implementing various signal heads  
+a working prototype on atmega328 for now  
+signal heads can be controlled via JMRI over PcInterface (command station UI does not implement extended accessories)
+
+## TODO
+- configuration over CV
+- use STM8
 
 # RAILCOM
 - todo!

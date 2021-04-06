@@ -110,6 +110,7 @@ unsigned char do_loco_func_grp3(unsigned char slot, unsigned int addr, unsigned 
 void do_all_stop(void);
 bool do_accessory(unsigned char slot, unsigned int addr, unsigned char output, unsigned char activate);      // turnout
 bool do_extended_accessory(unsigned int addr, unsigned char aspect);
+bool do_raw_msg(uint8_t *msg, uint8_t msgSize); // new SDS 2021
 bool do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data);                     // program on the main; cv: 1...1024
 bool do_pom_loco_cvrd(unsigned int addr, unsigned int cv);                                    // cv 1...1024
 bool do_pom_accessory(unsigned int addr, unsigned int cv, unsigned char data);                // program on the main

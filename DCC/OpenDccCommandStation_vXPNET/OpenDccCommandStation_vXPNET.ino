@@ -88,7 +88,7 @@ void init_timer2(void)
 {
 #if (__AVR_ATmega328P__) //SDS for atmega328 - zelfde als 644P
   // Timer/Counter 2 initialization
-  // Clock source: System Clock / 32 -> 2us
+  // Clock source: System Clock / 64 -> 4us (komt overeen met TIMER2_TICK_PERIOD in config.h)
   TCCR2A = (0<< COM2A1)   // 00 = normal port mode
           | (0<< COM2A0)
           | (0<< COM2B1)   // 00 = normal port mode
