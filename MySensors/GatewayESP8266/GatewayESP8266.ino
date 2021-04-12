@@ -898,36 +898,42 @@ void loop() {
 
   // logging every LOGGING_INTERVAL
   // TODO: replace fixed node config with something flexible
-  if ((log_cloud || log_local) && (actualTime) && (currentMillis - lastLogMillis > LOGGING_INTERVAL)) {
+  if ((actualTime) && (currentMillis - lastLogMillis > LOGGING_INTERVAL)) {
 
+    // log tempie
     lastLogMillis = currentMillis;
     String logString = String(actualTime) + "," + String(currentMillis - curSensorDataTempie.lastSeenMillis) + 
                         "," + String(curSensorDataTempie.bmp280Pressure) + "," + String(curSensorDataTempie.bmp280Temperature) +
                         "," + String(curSensorDataTempie.si7021Humidity) + "," + String(curSensorDataTempie.si7021Temperature);
-    if (log_local) {
+    if (tempie_loglocal) {
       File logFile = SPIFFS.open("/tempie.csv", "a");
       logFile.print(logString);
       logFile.println();
       logFile.close();
     }
-    if (log_cloud) {
-      cloudlog_log(logString);
+    if (tempie_logcloud) {
+      cloudlog_log(tempie_cloudurl, logString);
     }
 
-    // TODO : droppie : local log only for now (TODO : need more flexible cloudlog implementation)
-    // TODO : droppie : only log after a pump start update until rain tank sensor is operational
-    // TODO : decide if sensors need logging when offline
-    if (logDroppie && log_local) {
-      logDroppie = false; // reset the flag
-      logString = String(actualTime) + "," + String(currentMillis - curSensorDataDroppie.lastSeenMillis) + 
-                  "," + String(curSensorDataDroppie.remoteOK) + 
-                  "," + String(curSensorDataDroppie.tankLiters) + "," + String(curSensorDataDroppie.tankEmpty) + 
-                  "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging) + 
-                  "," + String(curSensorDataDroppie.pumpStartsCount) + "," + String(curSensorDataDroppie.pumpOnTimeInSeconds) ;
+    // log droppie
+    // TODO : for now only log after a pump start update until rain tank sensor is operational
+    // TODO : decide if need logging when connection lost with remote sensor
+    logString = String(actualTime) + "," + String(currentMillis - curSensorDataDroppie.lastSeenMillis) + 
+                "," + String(curSensorDataDroppie.remoteOK) + 
+                "," + String(curSensorDataDroppie.tankLiters) + "," + String(curSensorDataDroppie.tankEmpty) + 
+                "," + String(curSensorDataDroppie.batLevel) + "," + String(curSensorDataDroppie.batCharging) + 
+                "," + String(curSensorDataDroppie.pumpStartsCount) + "," + String(curSensorDataDroppie.pumpOnTimeInSeconds) ;
+    if (logDroppie && droppie_loglocal) {
       File logFile = SPIFFS.open("/droppie.csv", "a");
       logFile.print(logString);
       logFile.println();
       logFile.close();
+    }
+    if (logDroppie && droppie_logcloud) {
+      cloudlog_log(droppie_cloudurl, logString);
+    }
+    if (logDroppie) {
+      logDroppie = false; // reset the flag
     }
 
     // TEMP : log van de shower sensor enkel als het licht brandt

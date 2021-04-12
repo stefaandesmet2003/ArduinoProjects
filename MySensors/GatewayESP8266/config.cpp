@@ -17,9 +17,14 @@ String duck_domain;
 String duck_token;
 
 // logging
-bool log_local;
-bool log_cloud;
-String log_cloudurl;
+bool tempie_loglocal;
+bool tempie_logcloud;
+String tempie_cloudurl;
+
+bool droppie_loglocal;
+bool droppie_logcloud;
+String droppie_cloudurl;
+
 String cloud_user, cloud_pass;
 
 int config_load() {
@@ -73,14 +78,23 @@ int config_load() {
     else if (key == "duck_token") {
       duck_token = val;
     }
-    else if (key == "log_local") {
-      log_local = (val.toInt()!=0)?true:false;
+    else if (key == "tempie_loglocal") {
+      tempie_loglocal = (val.toInt()!=0)?true:false;
     }
-    else if (key == "log_cloud") {
-      log_cloud = (val.toInt()!=0)?true:false;
+    else if (key == "tempie_logcloud") {
+      tempie_logcloud = (val.toInt()!=0)?true:false;
     }
-    else if (key == "log_cloudurl") {
-      log_cloudurl = val;
+    else if (key == "tempie_cloudurl") {
+      tempie_cloudurl = val;
+    }
+    else if (key == "droppie_loglocal") {
+      droppie_loglocal = (val.toInt()!=0)?true:false;
+    }
+    else if (key == "droppie_logcloud") {
+      droppie_logcloud = (val.toInt()!=0)?true:false;
+    }
+    else if (key == "droppie_cloudurl") {
+      droppie_cloudurl = val;
     }
     else if (key == "cloud_user") {
       cloud_user = val;

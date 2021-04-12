@@ -5,18 +5,16 @@
 #include "config.h"
 #include "cloudlog.h"
 
-void cloudlog_log(String logString) {
+void cloudlog_log(String url,String logString) {
 
   Serial.print("cloudlog: "); Serial.println(logString);
 
   std::unique_ptr<BearSSL::WiFiClientSecure>client(new BearSSL::WiFiClientSecure);
   //client->setFingerprint(fingerprint);
   client->setInsecure();
-
   HTTPClient https;
-  String log_url;
 
-  if (https.begin(*client, log_cloudurl)) {
+  if (https.begin(*client, url)) {
     // opgelet : geen ':' bij de header key!!!!
     https.setAuthorization(cloud_user.c_str(), cloud_pass.c_str());
     https.addHeader("Content-Type", "text/plain");

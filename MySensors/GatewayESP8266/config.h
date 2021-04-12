@@ -17,9 +17,12 @@ extern String duck_domain;
 extern String duck_token;
 
 //logging
-extern bool log_local;
-extern bool log_cloud;
-extern String log_cloudurl;
+extern bool tempie_loglocal;
+extern bool tempie_logcloud;
+extern String tempie_cloudurl;
+extern bool droppie_loglocal;
+extern bool droppie_logcloud;
+extern String droppie_cloudurl;
 extern String cloud_user, cloud_pass;
 
 // return 0 = OK, -1 = ERROR!

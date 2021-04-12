@@ -3,6 +3,6 @@
 
 #include <Arduino.h>
 
-void cloudlog_log(String logString);
+void cloudlog_log(String url,String logString);
 
 #endif // _CLOUDLOG_H_
