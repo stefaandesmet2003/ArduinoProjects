@@ -1,6 +1,12 @@
 // controls the speed of the home ventilation fan motor using 2 relays
 // compile for AVR
 // TODO : if radio init fails, Mysensors hangs before setup() and loop() is not executed
+/*
+ * fanOn=true from remote -> switch to high speed
+ * fanOn=false from remote -> switch off
+ * auto high->low speed after 15 minutes
+ * remote sends C_SET with ack=true -> MySensors sends auto reply
+*/
 
 // Enable debug prints to serial monitor
 #define MY_DEBUG
@@ -10,12 +16,11 @@
 #include <MySensors.h>
 
 /*
-
 MySensors
 ***********
 uses MySensors, but without NodeManager framework
-
 */
+
 // hardware configuration
 #define PIN_RELAY_LOWSPEED  4
 #define PIN_RELAY_HIGHSPEED 5
@@ -30,6 +35,7 @@ uses MySensors, but without NodeManager framework
 #define RELAY_OFF   HIGH
 
 #define DEBOUNCE_TIME   100 // for the local control button
+#define FAN_HIGH_AUTO_LOW_DELAY   15*60*1000 // after 15 minutes, fan switches back to low speed
 
 // MySensors config
 // MY_NODE_ID needs to be defined before #include
@@ -41,7 +47,7 @@ char *strFanSpeed[]= {"Min","Normal","Max","Auto"};
 #define FAN_SPEED_LOW 0
 #define FAN_SPEED_MED 1
 #define FAN_SPEED_HIGH 2
-#define FAN_SPEED_AUTO 2
+#define FAN_SPEED_AUTO 2 // will be handled as "Max" & returned as "Max" too
 
 typedef struct {
   bool fanOn;  // FAN_CHILD_ID, V_STATUS : on/off
@@ -57,15 +63,15 @@ MyMessage sensorMsg; // one structure reused for all messages
 uint32_t radioTxInterval = 30000; // in ms
 uint32_t radioTxLastMillis;
 
-typedef enum {  FANSTATE_IS_OFF, 
-                FANSTATE_IS_LOW, 
-                FANSTATE_IS_HIGH, 
-                FANSTATE_TO_OFF, 
-                FANSTATE_ERROR
-              } FanState_t;
+typedef enum {  
+  FANSTATE_IS_OFF, 
+  FANSTATE_IS_LOW, 
+  FANSTATE_IS_HIGH, 
+  FANSTATE_TO_OFF, 
+  FANSTATE_ERROR
+} FanState_t;
 static FanState_t fanState;
 uint32_t fanStateMillis; // respect minimum of 2 seconds in each fanState to avoid too many relay switches
-
 uint32_t debounceMillis;
 
 static void updatePacketCounters (bool txOK) {
@@ -82,13 +88,13 @@ void presentation() { // MySensors
 } // presentation
 
 void receive(const MyMessage &message) { // MySensors
-  
   uint8_t sensorId = message.getSensor();
   if (message.getCommand() == C_SET)
   {
     if (sensorId == FAN_CHILD_ID) {
       if (message.getType() == V_STATUS) {
         curSensorData.fanOn = message.getBool();
+        curSensorData.fanSpeed = FAN_SPEED_HIGH; // for now because remote only sends on/off
         Serial.print("req:FanOn: ");Serial.println(curSensorData.fanOn);
       }
       else if (message.getType() == V_HVAC_SPEED) {
@@ -128,7 +134,7 @@ void before() {
     pinMode(PIN_TESTBUTTON, INPUT_PULLUP);
     curSensorData.fanOn = false;
     curSensorData.alarmActive = false;
-    curSensorData.fanSpeed = FAN_SPEED_LOW; // TODO : via config?
+    curSensorData.fanSpeed = FAN_SPEED_HIGH; // TODO : via config?
     fanState = FANSTATE_IS_OFF;
 } // before
 
@@ -164,7 +170,11 @@ void fanProcess() {
       }
       break;
     case FANSTATE_IS_HIGH:
-      if ((!curSensorData.fanOn) || (curSensorData.fanSpeed != FANSTATE_IS_HIGH)) {
+      if ((millis() - fanStateMillis) > FAN_HIGH_AUTO_LOW_DELAY) { // auto switch to low speed
+        curSensorData.fanSpeed = FAN_SPEED_LOW;
+        // and the next if-block will do the rest
+      }
+      if ((!curSensorData.fanOn) || (curSensorData.fanSpeed != FAN_SPEED_HIGH)) {
         // first switch off fan, and then switch speed
         digitalWrite(PIN_RELAY_HIGHSPEED, RELAY_OFF);
         fanState = FANSTATE_TO_OFF;
