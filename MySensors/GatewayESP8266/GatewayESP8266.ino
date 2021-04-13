@@ -226,7 +226,7 @@ bool isShowerOnline = false;
 bool isDummyNMOnline = false;
 
 bool logDroppie = false; // temp, log enkel na een pump start
-MyMessage gwResponseMsg; // this gateway handles certain requests on behalf of a controller
+MyMessage gwMsg; // this gateway handles certain requests on behalf of a controller, and can generate msgs to the network from the web intf
 
 /**************************************************************/
 /*   HELPER FUNCTIONS                                         */
@@ -265,74 +265,104 @@ String getContentType(String filename){ // determine the filetype of a given fil
 /*   SERVER HANDLERS                                          */
 /**************************************************************/
 
-// /sensor?id=<sensorId>
-// voorlopig alleen sensorId=3=TEMPIE
+// /sensor?id=<nodeId> -> request sensor node data stored in hub
+// /sensor?id=<nodeId>&sensorid=<sensorId>&cmd=<C_SET=1,C_REQ=2>&type=<V_STATUS=2,V_HVAC_SPEED=22>&val=<0,1,Min,Max,...> -> send a cmd to the mysensors network
+// C_REQ does not generate node response data on http, but update can be polled
+// not yet fully flexible because of the different datatypes, and only FanSensor handles C_SET
 void handleSensorRequest()
 {
   String message;
-  uint8_t sensorId = 1;
-  for (uint8_t i=0;i<server.args();i++)
-    if (server.argName(i) == "id") sensorId = server.arg(i).toInt();
+  uint8_t nodeId = 0;
+  if (server.args() == 1) { // answer with locally available node data
+    if (server.argName(0) == "id") nodeId = server.arg(0).toInt();
   
-  if (sensorId == 1) {
-    message = "{\"solarValue\": " + String(curSensorDataDummy.solarVoltage) +
-              ",\"batteryLevel\": " + String(curSensorDataDummy.batLevel) + 
-              ",\"packetsOK\": " + String(curSensorDataDummy.packetsOK) + 
-              ",\"packetsNOK\": " + String(curSensorDataDummy.packetsNOK) +              
-              ",\"lastReport\": " + String(millis() - curSensorDataDummy.lastReportMillis) +              
-              ",\"lastSeen\": " + String(millis() - curSensorDataDummy.lastSeenMillis) + "}";             
+    if (nodeId == 1) {
+      message = "{\"solarValue\": " + String(curSensorDataDummy.solarVoltage) +
+                ",\"batteryLevel\": " + String(curSensorDataDummy.batLevel) + 
+                ",\"packetsOK\": " + String(curSensorDataDummy.packetsOK) + 
+                ",\"packetsNOK\": " + String(curSensorDataDummy.packetsNOK) +              
+                ",\"lastReport\": " + String(millis() - curSensorDataDummy.lastReportMillis) +              
+                ",\"lastSeen\": " + String(millis() - curSensorDataDummy.lastSeenMillis) + "}";             
+    }
+    else if (nodeId == 2) {
+      message = "{\"remoteOK\": " + String(curSensorDataDroppie.remoteOK) + 
+                ",\"tankLiters\": " + String(curSensorDataDroppie.tankLiters) +     
+                ",\"tankEmpty\": " + String(curSensorDataDroppie.tankEmpty) + 
+                ",\"batCharging\": " + String(curSensorDataDroppie.batCharging) + 
+                ",\"batLevel\": " + String(curSensorDataDroppie.batLevel) + 
+                ",\"pumpStartsCount\": " + String(curSensorDataDroppie.pumpStartsCount) + 
+                ",\"pumpOnTimeInSeconds\": " + String(curSensorDataDroppie.pumpOnTimeInSeconds) + 
+                ",\"packetsCountOK\": " + String(curSensorDataDroppie.packetsCountOK) + 
+                ",\"packetsCountNOK\": " + String(curSensorDataDroppie.packetsCountNOK) + 
+                ",\"lastReport\": " + String(millis() - curSensorDataDroppie.lastReportMillis) +              
+                ",\"lastSeen\": " + String(millis() - curSensorDataDroppie.lastSeenMillis) + "}";             
+    }
+    else if (nodeId == 3) {
+      message = "{\"BMP280Pressure\": " + String(curSensorDataTempie.bmp280Pressure,2) + 
+                ",\"BMP280Temperature\": " + String(curSensorDataTempie.bmp280Temperature,2) + 
+                ",\"SI7021Humidity\": " + String(curSensorDataTempie.si7021Humidity,2) + 
+                ",\"SI7021Temperature\": " + String(curSensorDataTempie.si7021Temperature,2) + 
+                ",\"batLevel\": " + String(curSensorDataTempie.batLevel) + 
+                ",\"batVoltage\": " + String(curSensorDataTempie.batVoltage,2) + 
+                ",\"lastReport\": " + String(millis() - curSensorDataTempie.lastReportMillis) +              
+                ",\"lastSeen\": " + String(millis() - curSensorDataTempie.lastSeenMillis) + "}";             
+    }
+    else if (nodeId == 4) {
+      message = "{\"dhtTemperature\": " + String(curSensorDataShower.dhtTemperature,2) + 
+                ",\"dhtHumidity\": " + String(curSensorDataShower.dhtHumidity,2) + 
+                ",\"lightLevel\": " + String(curSensorDataShower.lightLevel) + 
+                ",\"batLevel\": " + String(curSensorDataShower.batLevel) + 
+                ",\"batVoltage\": " + String(curSensorDataShower.batVoltage,2) + 
+                ",\"lastReport\": " + String(millis() - curSensorDataShower.lastReportMillis) +              
+                ",\"lastSeen\": " + String(millis() - curSensorDataShower.lastSeenMillis) + "}";             
+    }
+    else if (nodeId == 5) {
+      message = "{\"fanOn\": " + String(curSensorDataFan.fanOn) + 
+                ",\"fanSpeed\": \"" + curSensorDataFan.fanSpeed + /* fanSpeed = string -> in quotes! */
+                "\",\"alarmActive\": " + String(curSensorDataFan.alarmActive) + 
+                ",\"lastReport\": " + String(millis() - curSensorDataFan.lastReportMillis) +              
+                ",\"lastSeen\": " + String(millis() - curSensorDataFan.lastSeenMillis) + "}";             
+    }
+    else if (nodeId == 99) {
+      message = "{\"solarVoltage\": " + String(curSensorDataDummyNM.solarVoltage,2) + 
+                ",\"batLevel\": " + String(curSensorDataDummyNM.batLevel) + 
+                ",\"batVoltage\": " + String(curSensorDataDummyNM.batVoltage,2) + 
+                ",\"lastReport\": " + String(millis() - curSensorDataDummyNM.lastReportMillis) +              
+                ",\"lastSeen\": " + String(millis() - curSensorDataDummyNM.lastSeenMillis) + "}";             
+    }
+    else { // invalid nodeId
+      message = "{ \"Sensor " + String(nodeId) + "\": \"not supported\"}";
+    }
+    server.send(200, "text/json", message);
   }
-  else if (sensorId == 2) {
-    message = "{\"remoteOK\": " + String(curSensorDataDroppie.remoteOK) + 
-              ",\"tankLiters\": " + String(curSensorDataDroppie.tankLiters) +     
-              ",\"tankEmpty\": " + String(curSensorDataDroppie.tankEmpty) + 
-              ",\"batCharging\": " + String(curSensorDataDroppie.batCharging) + 
-              ",\"batLevel\": " + String(curSensorDataDroppie.batLevel) + 
-              ",\"pumpStartsCount\": " + String(curSensorDataDroppie.pumpStartsCount) + 
-              ",\"pumpOnTimeInSeconds\": " + String(curSensorDataDroppie.pumpOnTimeInSeconds) + 
-              ",\"packetsCountOK\": " + String(curSensorDataDroppie.packetsCountOK) + 
-              ",\"packetsCountNOK\": " + String(curSensorDataDroppie.packetsCountNOK) + 
-              ",\"lastReport\": " + String(millis() - curSensorDataDroppie.lastReportMillis) +              
-              ",\"lastSeen\": " + String(millis() - curSensorDataDroppie.lastSeenMillis) + "}";             
+
+  else { // hub passes command to the mysensors network
+    uint8_t sensorId, cmd, varType;
+    String varValue;
+    for (uint8_t i=0;i<server.args();i++) {
+      if (server.argName(i) == "id") nodeId = server.arg(i).toInt();
+      else if (server.argName(i) == "sensorid") sensorId = server.arg(i).toInt();
+      else if (server.argName(i) == "cmd") cmd = server.arg(i).toInt();
+      else if (server.argName(i) == "type") varType = server.arg(i).toInt();
+      else if (server.argName(i) == "val") varValue = server.arg(i);
+    }
+    // basic check if all parameters for a valid command are passed
+    // ask ack, so gateway internal state gets updated if command is correctly executed by the node
+    if (sensorId && cmd && varValue) {
+      if (varType == V_STATUS) {
+        bool bVal = (bool) varValue.toInt();
+        _sendRoute(build(gwMsg,nodeId,sensorId,(mysensors_command_t) cmd,varType,true).set(bVal));
+      }
+      else if (varType == V_HVAC_SPEED)
+        _sendRoute(build(gwMsg,nodeId,sensorId,(mysensors_command_t) cmd,varType,true).set(varValue)); // sent as string directly "Min","Max"
+      message = "{\"resp\":\"OK\"}";
+      server.send(200, "text/json", message);
+    }
+    else {
+      message = "{\"resp\":\"NOK\"}";
+      server.send(200, "text/json", message);
+    }
   }
-  else if (sensorId == 3) {
-    message = "{\"BMP280Pressure\": " + String(curSensorDataTempie.bmp280Pressure,2) + 
-              ",\"BMP280Temperature\": " + String(curSensorDataTempie.bmp280Temperature,2) + 
-              ",\"SI7021Humidity\": " + String(curSensorDataTempie.si7021Humidity,2) + 
-              ",\"SI7021Temperature\": " + String(curSensorDataTempie.si7021Temperature,2) + 
-              ",\"batLevel\": " + String(curSensorDataTempie.batLevel) + 
-              ",\"batVoltage\": " + String(curSensorDataTempie.batVoltage,2) + 
-              ",\"lastReport\": " + String(millis() - curSensorDataTempie.lastReportMillis) +              
-              ",\"lastSeen\": " + String(millis() - curSensorDataTempie.lastSeenMillis) + "}";             
-  }
-  else if (sensorId == 4) {
-    message = "{\"dhtTemperature\": " + String(curSensorDataShower.dhtTemperature,2) + 
-              ",\"dhtHumidity\": " + String(curSensorDataShower.dhtHumidity,2) + 
-              ",\"lightLevel\": " + String(curSensorDataShower.lightLevel) + 
-              ",\"batLevel\": " + String(curSensorDataShower.batLevel) + 
-              ",\"batVoltage\": " + String(curSensorDataShower.batVoltage,2) + 
-              ",\"lastReport\": " + String(millis() - curSensorDataShower.lastReportMillis) +              
-              ",\"lastSeen\": " + String(millis() - curSensorDataShower.lastSeenMillis) + "}";             
-  }
-  else if (sensorId == 5) {
-    message = "{\"fanOn\": " + String(curSensorDataFan.fanOn) + 
-              ",\"fanSpeed\": \"" + curSensorDataFan.fanSpeed + /* fanSpeed = string -> in quotes! */
-              "\",\"alarmActive\": " + String(curSensorDataFan.alarmActive) + 
-              ",\"lastReport\": " + String(millis() - curSensorDataFan.lastReportMillis) +              
-              ",\"lastSeen\": " + String(millis() - curSensorDataFan.lastSeenMillis) + "}";             
-  }
-  else if (sensorId == 99) {
-    message = "{\"solarVoltage\": " + String(curSensorDataDummyNM.solarVoltage,2) + 
-              ",\"batLevel\": " + String(curSensorDataDummyNM.batLevel) + 
-              ",\"batVoltage\": " + String(curSensorDataDummyNM.batVoltage,2) + 
-              ",\"lastReport\": " + String(millis() - curSensorDataDummyNM.lastReportMillis) +              
-              ",\"lastSeen\": " + String(millis() - curSensorDataDummyNM.lastSeenMillis) + "}";             
-  }
-  else {
-    // invalid sensorId
-    message = "{ \"Sensor " + String(sensorId) + "\": \"not supported\"}";
-  }
-  server.send(200, "text/json", message);
 
 } // handleSensorRequest
 
@@ -512,7 +542,6 @@ void startWiFi() {
   */  
 
 } // startWiFi
-
 
 void startOTA() { // Start the OTA service
   ArduinoOTA.setHostname((const char*) ota_name.c_str());
@@ -704,7 +733,7 @@ void receive(const MyMessage &message) {
   if ((nodeId != GATEWAY_ADDRESS) && (message.getCommand() == C_INTERNAL)) {
     if  (message.getType() == I_TIME) { // reply gateway local time back to the node
       uint32_t gwLocalTime = ntp_GetDateTime();
-      _sendRoute(build(gwResponseMsg,nodeId,NODE_SENSOR_ID,C_INTERNAL,I_TIME,false).set(gwLocalTime));
+      _sendRoute(build(gwMsg,nodeId,NODE_SENSOR_ID,C_INTERNAL,I_TIME,false).set(gwLocalTime));
       return;
     }
     // other internal messages handled per node below
@@ -730,15 +759,15 @@ void receive(const MyMessage &message) {
       curSensorDataDroppie.lastReportMillis = millis();
     }
     else if (message.getCommand()== C_REQ) { // gateway responds to a request on behalf of a controller
-      if (sensorId == 1) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.remoteOK));
-      else if (sensorId == 2) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VOLUME,false).set(curSensorDataDroppie.tankLiters));
-      else if (sensorId == 3) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.tankEmpty));
-      else if (sensorId == 3) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.batCharging));
+      if (sensorId == 1) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.remoteOK));
+      else if (sensorId == 2) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VOLUME,false).set(curSensorDataDroppie.tankLiters));
+      else if (sensorId == 3) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.tankEmpty));
+      else if (sensorId == 3) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_STATUS,false).set(curSensorDataDroppie.batCharging));
       else if (sensorId == 5) {
-        if (message.getType() == V_VAR1) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR1,false).set(curSensorDataDroppie.pumpStartsCount));
-        else if (message.getType() == V_VAR2) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR2,false).set(curSensorDataDroppie.pumpOnTimeInSeconds));
-        else if (message.getType() == V_VAR3) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR3,false).set(curSensorDataDroppie.packetsCountOK));
-        else if (message.getType() == V_VAR4) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR4,false).set(curSensorDataDroppie.packetsCountNOK));
+        if (message.getType() == V_VAR1) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VAR1,false).set(curSensorDataDroppie.pumpStartsCount));
+        else if (message.getType() == V_VAR2) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VAR2,false).set(curSensorDataDroppie.pumpOnTimeInSeconds));
+        else if (message.getType() == V_VAR3) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VAR3,false).set(curSensorDataDroppie.packetsCountOK));
+        else if (message.getType() == V_VAR4) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VAR4,false).set(curSensorDataDroppie.packetsCountNOK));
       }
     }
     else if (message.getCommand()== C_INTERNAL) {
@@ -815,8 +844,8 @@ void receive(const MyMessage &message) {
     }
     // test : gateway responds to a request on behalf of a controller
     else if ((message.getCommand()== C_REQ) && (sensorId == 1)) {
-      if (message.getType() == V_VAR1) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR1,false).set(curSensorDataDummy.packetsOK));
-      else if (message.getType() == V_VAR2) _sendRoute(build(gwResponseMsg,nodeId,sensorId,C_SET,V_VAR2,false).set(curSensorDataDummy.packetsNOK));
+      if (message.getType() == V_VAR1) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VAR1,false).set(curSensorDataDummy.packetsOK));
+      else if (message.getType() == V_VAR2) _sendRoute(build(gwMsg,nodeId,sensorId,C_SET,V_VAR2,false).set(curSensorDataDummy.packetsNOK));
     }
     else if (message.getCommand()== C_INTERNAL) {
       if (message.getType() == I_BATTERY_LEVEL) curSensorDataDummy.batLevel = message.getByte();
