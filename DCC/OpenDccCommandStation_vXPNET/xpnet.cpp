@@ -778,7 +778,12 @@ void xp_parser(void)
       //                       BB=local adr,
       //                       O=Ausgang 0 (red) / Ausgang 1 (grün)
       // (das würde eigentlich schon passend für DCC vorliegen, aber lieber sauber übergeben)
-      uint16_t turnoutAddress = ((uint16_t) rx_message[1] << 2) + ((rx_message[2] >> 1) & 0x3);
+      // SDS : als je turnoutAddress op dezelfde declareert en initieert krijg je een bizarre fout bij case 0xE: de E?-30 messages worden niet geprocessed
+      // en er wordt een unknown command op xpnet gestuurd
+      // ??? is dit een compiler-issue, snap er niets van
+      // uint16_t turnoutAddress = ((uint16_t) rx_message[1] << 2) + ((rx_message[2] >> 1) & 0x3); // NIET DOEN!!
+      uint16_t turnoutAddress;
+      turnoutAddress = ((uint16_t) rx_message[1] << 2) + ((rx_message[2] >> 1) & 0x3);
       activate = (rx_message[2] & 0b01000) >> 3;
       coil = rx_message[2] & 0x1;
       do_accessory(turnoutAddress, coil, activate);
