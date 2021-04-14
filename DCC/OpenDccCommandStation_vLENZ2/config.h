@@ -331,7 +331,6 @@ typedef struct {
 //========================================================================
 // Globals
 extern const unsigned char opendcc_version PROGMEM;
-extern unsigned char invert_accessory;
 extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 
 #define SIZE_QUEUE_PROG       6       // programming queue (7 bytes each entry)
@@ -401,7 +400,7 @@ extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 #define   eadr_s88_size1                0x009  //    / given in bytes
 #define   eadr_s88_size2                0x00a  // 
 #define   eadr_s88_size3                0x00b  //
-#define   eadr_invert_accessory         0x00c  //    / bit 0: invert Lenz, bit 1: invert IB
+#define   eadr_invert_accessory         0x00c  //    / SDS removed 
 #define   eadr_dcc_acc_repeat           0x00d  //
 #define   eadr_dcc_acc_time             0x00e  // r  / turn on time of acc (used by IB, default 100)
 #define   eadr_startmode_ibox           0x00f  //    / 0=Normal Mode, 1=fixed to P50X

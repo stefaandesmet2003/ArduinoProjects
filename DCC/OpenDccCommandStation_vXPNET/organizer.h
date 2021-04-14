@@ -108,7 +108,7 @@ unsigned char do_loco_func_grp3(unsigned char slot, unsigned int addr, unsigned 
  bool do_loco_restricted_speed(unsigned int addr, unsigned char data);
 #endif 
 void do_all_stop(void);
-bool do_accessory(unsigned char slot, unsigned int addr, unsigned char output, unsigned char activate);      // turnout
+bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate);
 bool do_extended_accessory(unsigned int addr, unsigned char aspect);
 bool do_raw_msg(uint8_t *msg, uint8_t msgSize); // new SDS 2021
 bool do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data);                     // program on the main; cv: 1...1024
@@ -130,14 +130,6 @@ unsigned char store_loco_format(unsigned int addr, t_format format);
 unsigned int addr_inquiry_locobuffer(unsigned int addr, unsigned char dir);    // returns next addr in buffer
 void delete_from_locobuffer(unsigned int addr);
 bool do_searchid(t_unique_id* test_id);
-
-//------------------------------------------------------------------
-// SDS TODO 2021 : nog nodig?
-void save_turnout(unsigned char slot, unsigned int addr, unsigned char output);
-unsigned char recall_turnout(unsigned int addr);  // addr 0.. 
-unsigned char recall_turnout_group(unsigned int group_addr);
-unsigned char get_number_of_manual_turnout_ops(void);           // collect flags in turnoutmanual
-unsigned int recall_manual_turnout(void);                       // get one manual entry and clear it
 
 //------------------------------------------------------------------
 // Upstream Interface for programmer

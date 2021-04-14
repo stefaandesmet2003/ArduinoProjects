@@ -20,9 +20,6 @@
 //                             Umbau der internen Speed auf 0..127
 //                             Parser nun als Compilevariante
 //            2006-11-19 V0.05 Bugfix beim parser(); hat jetzt locale
-//            2007-01-11 V0.06 Lenz scheint rot-grï¿½n zu vertauschen
-//                             hier mit einer EEPROM-CV (invert_accessory)
-//                             gefixed.
 //            2007-03-21 V0.07 turnout feedback
 //                             !!! noch ungetestet !!!
 //            2007-04-20 V0.08 changed programming messages according to log
@@ -927,7 +924,6 @@ void parse_command(void)
             addr = (unsigned int) (pcc[1] << 2) + ((pcc[2] >> 1) & 0b011);
             activate = (pcc[2] & 0b01000) >> 3;
             coil = pcc[2] & 0b01;
-            if (invert_accessory & 0b01) coil = coil ^ 1;
             do_accessory(0, addr, coil, activate);
             pc_send_lenz(pars_pcm = pcm_ack);
             if (pcc[1] < 0x40)                              // only xpressnet feedback if < 256

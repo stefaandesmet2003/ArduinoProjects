@@ -40,22 +40,6 @@ volatile extern unsigned char next_message_count;     // load message and set co
                                                // if > 1 -> output next_message
 											   // if = 0 -> ready for next_message
 
-#if (TURNOUT_FEEDBACK_ENABLED == 1)
-// upstream interface for turnout feedback:
-
-// bits
-#define FB_READY 7
-#define FB_OKAY  1
-
-extern volatile unsigned int feedbacked_accessory; // this is the current turnout under query
-                                                   // this includes the coil address!
-extern volatile unsigned char feedback_required;   // 1: make a query at end of next preamble
-extern volatile unsigned char feedback_ready;      // MSB: if 1: the query is done (communication flag)
-                                                   // LSB: if 1: there was no feedback
-                                                   //            == position error
-#endif
-
-
 void init_dccout(void);                      // call once at boot up
 void dccout_enable_cutout(void);             // create railcom cutout
 void dccout_disable_cutout(void);

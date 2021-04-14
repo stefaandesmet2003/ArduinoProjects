@@ -159,21 +159,10 @@
   #define DEFAULT_BAUD      BAUD_19200      // supported: 2400, 4800, 9600, 19200, 38400, 57600, 115200         
 #endif
 
-#define STORE_TURNOUT_POSITIONS     1       // if enabled, add code and sram memory for
-                                            // local stored switch positions
-
-#define TURNOUT_FEEDBACK_ENABLED    1       // if enabled, add code for turnout feedback
-
-#define TURNOUT_FEEDBACK_ACTIVATED  0       // if enabled,
-                                            // the corresponding mode-flags in EEPROM are set.
-                                            // external S88-reading is disabled (see also config.c)
-
 #define DCC_FAST_CLOCK              1       // 0: standard DCC
                                             // 1: add commands for DCC fast clock
-
 #define DCC_XLIMIT                  0       // 0: standard -> sds : xpnet ondersteunt dit toch niet
                                             // 1: add Xlimit command (see ibox_parser)
-
 #define DCC_BIN_STATES              0       // 0: normal
                                             // 1. add XbinSt (DCC binary States)
 
@@ -194,9 +183,8 @@
 
 #define DCC_F13_F28            1        // 1: add code for functions F13 up to F28
 
-#define RAILCOM_ENABLED        0        // 1: add code to enable RailCom, 
+#define RAILCOM_ENABLED        1        // 1: add code to enable RailCom, 
                                         // SDS : deze bit wordt in eeprom opgeslagen, je moet dus ook de eep heropladen, anders werkt het niet
-                                        // deze define wordt nergens anders gebruikt! (geen impact op codesize)
                                         // dit is de default waarde bij startup, je kan ook runtime de railcom activeren (zie dccout.cpp)
 
 #define DCC_SHORT_ADDR_LIMIT   112      // This is the maximum number for short addressing mode on DCC
@@ -205,11 +193,8 @@
 
 #define NUM_DCC_SPEED_REPEAT   3        // Speed commands are repeated this number   (--> CV)
                                         // + one extra repetition if speed is decreased
-
 #define NUM_DCC_ACC_REPEAT     2        // Accessory Commands are repeated this number (--> CV)
-
 #define NUM_DCC_FUNC_REPEAT    0        // Function Commands are repeated this number (--> CV)
-
 #define NUM_DCC_POM_REPEAT     3        // Program on the main are repeated this number (--> CV)
 
 // note: in addition, there is the locobuffer, where all commands are refreshed
@@ -222,13 +207,11 @@
 #endif
 
 // This enum defines the type of message put to the tracks.
-// SDS TODO 2021 : is_feedback -> opkuisen!
 typedef enum {
   is_void,      // message with no special handling (like functions)
   is_stop,      // broadcast
   is_loco,      // standard dcc speed command
   is_acc,       // accessory command
-  is_feedback,  // accessory command with feedback
   is_prog,      // service mode - longer preambles
   is_prog_ack
 }  t_msg_type;
@@ -331,8 +314,6 @@ typedef struct {
 //========================================================================
 // Globals
 extern const unsigned char opendcc_version PROGMEM;
-extern unsigned char invert_accessory;
-extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 
 #define SIZE_QUEUE_PROG       6       // programming queue (7 bytes each entry)
 #define SIZE_QUEUE_LP        16       // low priority queue (7 bytes each entry)
@@ -340,27 +321,6 @@ extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 #define SIZE_REPEATBUFFER    32       // immediate repeat (7 bytes each entry)
 //SDS#define SIZE_LOCOBUFFER      64       // no of simult. active locos (6 bytes each entry)
 #define SIZE_LOCOBUFFER      5 //SDS, meer dan genoeg nu!! (gebruik ram voor een display)
-#if (STORE_TURNOUT_POSITIONS == 1)    
-#define SIZE_TURNOUTBUFFER  64       // no of Turnouts / 8 (64 = 512 Turnouts), waarom stond dit op 128?? in lenz_parser zijn toch maar 256 wissels ondersteund??
-#endif
-#ifndef SIZE_TURNOUTBUFFER
-#define SIZE_TURNOUTBUFFER    0       // not stored
-#endif
-
-//------------------------------------------------------------------------
-// defines for handling S88
-//------------------------------------------------------------------------
-#define SIZE_S88_MAX      128       // This is the number of 8-bit s88 modules
-                                    // (valid range: 6...128)
-                                    // max. at lenz V3.0 interface is 1024 feedbacks
-                                    // (2 bytes each entry)
-                                    // max at IB Interface is 2048
-                                    // we reduce to 2040, to keep counters
-                                    // as unsigned char
-#define SIZE_S88_1          8       // no of 8-bit S88-Modules on port 1
-#define SIZE_S88_2          8       // no of 8-bit S88-Modules on port 2
-#define SIZE_S88_3          8       // no of 8-bit S88-Modules on port 3
-                                    // note: size_s88_1+2+3 !<= size_s88_max
 
 //------------------------------------------------------------------------
 // 5.3. Memory Usage - EEPROM
@@ -401,7 +361,7 @@ extern unsigned char xpressnet_feedback_mode;   // filled from CV29
 #define   eadr_s88_size1                0x009  //    / given in bytes
 #define   eadr_s88_size2                0x00a  // 
 #define   eadr_s88_size3                0x00b  //
-#define   eadr_invert_accessory         0x00c  //    / bit 0: invert Lenz, bit 1: invert IB
+#define   eadr_invert_accessory         0x00c  //    / SDS removed 
 #define   eadr_dcc_acc_repeat           0x00d  //
 #define   eadr_dcc_acc_time             0x00e  // r  / turn on time of acc (used by IB, default 100)
 #define   eadr_startmode_ibox           0x00f  //    / 0=Normal Mode, 1=fixed to P50X
@@ -464,12 +424,12 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
 # Warning: and need-s one extra for search
 #endif
 
+// SDS 2021 dit is niet meer juist, want hier stond ook TURNOUTBUFFER bij
 #define USED_RAM (SIZE_QUEUE_PROG * 7 +   \
                   SIZE_QUEUE_LP * 7 +   \
                   SIZE_QUEUE_HP * 7 +   \
                   SIZE_REPEATBUFFER  * 7  + \
                   SIZE_LOCOBUFFER  * SIZE_LOCOBUFFER_ENTRY + \
-                  SIZE_TURNOUTBUFFER + \
                   SIZE_S88_MAX * 2)
 
 #if USED_RAM > (SRAM_SIZE - 400)
@@ -489,28 +449,6 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
 
 #if ((EEPROM_BASE + EEPROM_SIZE) < (EADR_LOCO_FORMAT + ESIZE_LOCO_FORMAT * 2))
 #warning LOCO_FORMAT outside real memory (too large)
-#endif
-
-#if (SIZE_TURNOUTBUFFER == 0)
-#if (TURNOUT_FEEDBACK_ENABLED != 1)
-#warning Error: TURNOUT_FEEDBACK_ENABLED is on, but STORE_TURNOUT_POSITIONS is off.
-#warning --> there is no data location to store feedback data. 
-#endif
-#endif
-
-#if (TURNOUT_FEEDBACK_ENABLED == 0)
-#if (TURNOUT_FEEDBACK_ACTIVATED != 0)
-#warning Error: TURNOUT_FEEDBACK_ACTIVATED is on, but TURNOUT_FEEDBACK_ENABLED is off.
-#warning --> cannot activate it and have the code remove :-(  
-#undef TURNOUT_FEEDBACK_ACTIVATED
-#define TURNOUT_FEEDBACK_ACTIVATED 0
-#endif
-#endif
-
-#if (XPRESSNET_ENABLED == 1)
- #if (!__AVR_ATmega644P__ )
-  #warning Error: XPRESSNET_ENABLED, but processor is too weak (not Atmega644P)
- #endif
 #endif
 
 // This union allows to access 16 bits as word or as two bytes.

@@ -9,6 +9,10 @@
 #include "status.h"
 #include "programmer.h"
 
+// xpnet broadcast na een wisselbediening vanaf local ui
+#include "xpnet.h"
+#include "accessories.h"
+
 // the organizer keeps track of each xpnet device
 // 0 = invalid xpnet slot (broadcast), so we can use this here to identify the local UI
 // original opendcc used slot 0 = PC (LENZ intf)
@@ -154,14 +158,25 @@ uint32_t app_Turnouts = 0xFFFFFFFF; // alle wissels rechtdoor, 1 bit per turnout
 bool app_ToggleAccessory (uint16_t turnoutAddr)
 {
   bool retval;
-  uint8_t coil = ((app_Turnouts >> turnoutAddr) & 0x1) ^0x1;
+  // een 1-bit in app_Turnouts betekent dat de wissel rechtdoor staat
+  // om te togglen moeten we dan coil=1 aansturen (throw)
+  // bij succes, komt dan een 0-bit in app_Turnouts = wissel gebogen op display
+  uint8_t coil = ((app_Turnouts >> turnoutAddr) & 0x1);
   
   if (!organizer_ready())
     return (APP_INTERNALERR0R);
   
-  retval = do_accessory(LOCAL_UI_SLOT,turnoutAddr,coil,1);
-  if (!retval)
+  retval = do_accessory(turnoutAddr,coil,1);
+  if (!retval) {
     app_Turnouts ^= (1 << turnoutAddr);
+
+    // notify andere xp clients dat we de wissel verzet hebben!
+    unsigned char tx_message[3];
+    tx_message[0] = 0x42;
+    turnout_getInfo(turnoutAddr,&tx_message[1]);
+    xp_send_message(0x20, tx_message); // feedback broadcast
+  }
+
   return (retval);
     
 } // app_ToggleAccessory
@@ -185,4 +200,3 @@ uint8_t app_GetProgResults (uint16_t &cv, uint8_t &cvdata)
   cvdata = prog_data;
   return (retval);
 }
-

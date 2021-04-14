@@ -118,7 +118,8 @@
 #include "status.h"                // opendcc_state
 
 #include "organizer.h" 
-#include "programmer.h"      // wegen programmer_busy();        
+#include "programmer.h"           // for programmer_busy();
+#include "accessories.h"
 
 //------------------------------------------------------------------------
 // define a structure for DCC messages
@@ -137,13 +138,6 @@ locomem locobuffer[SIZE_LOCOBUFFER];
   #error SIZE_LOCOBUFFER too large
 #endif
 
-//-------------------------------------- memory to store turnout positions
-#if (SIZE_TURNOUTBUFFER > 0)       // no of Turnouts / 8 (64 = 512 Turnouts)
-unsigned char turnoutbuffer[SIZE_TURNOUTBUFFER];            // positions
-    #if (XPRESSNET_ENABLED == 1)
-        unsigned char turnoutmanual[SIZE_TURNOUTBUFFER];    // operated manually
-    #endif  
-#endif
 // ---------------------------------------------------------------------
 // predefined messages
 // stored in bss, copied at start to sram
@@ -349,34 +343,33 @@ static void build_loko_14a128s(unsigned int nr, signed char speed, t_message *ne
   new_message->dcc[3] = speed;
 }
 
-static void build_nmra_basic_accessory(unsigned int nr, char output, char activate, t_message *new_message)
+// sds : turnoutAddress : 11-bits in dcc : 9-bit accessory decoder address + 2 bits wissel 1-4
+// in xpnet is wel maar 10-bits adresseerbaar, omdat acc decoder address 8-bits is in het xpnet msg
+static void build_nmra_basic_accessory(unsigned int turnoutAddress, unsigned char coil, char activate, t_message *new_message)
 {
   // Message: 10AAAAAA 1aaaBCCC
-  // parameters: nr: turnout [0000-4095]
-  //             output: coil (red, green) [0,1]
+  // parameters: turnoutAddress: turnout [0000-4095]
+  //             coil: coil (red, green) [0,1]
   //             activate: on off, [0,1]; note: intellibox only sends on, never off :-o
   //
   // Notes:   10111111 1000BCCC is broadcast
   //          aaa is bit 7 to 9 of address, but is transmitted inverted!
 
-  unsigned int address   = 0;     // of the decoder
-  unsigned char pairnr   = 0;     // decoders have pair of outputs, range [0-3]
+  unsigned int decoderAddress = 0;  // of the decoder
+  unsigned char pairnr = 0;           // decoders have pair of outputs, range [0-3]
   // calc real address of the decoder and the pairnr of the switch
-  address = ((nr) / 4) + 1;  /* valid decoder addresses: 1..1023 */
-  pairnr  = (nr) % 4;             // was nr-1
+  // note SDS : opendcc assumes here that acc decoder address = 0 is invalid
+  // and translates xpnet accessory address + 1 = dcc accessory address
+  decoderAddress = ((turnoutAddress) / 4) + 1; // valid decoder addresses: 1..1023
+  pairnr = (uint8_t)turnoutAddress & 0x3;              // was nr-1 ???
 
   new_message->repeat = dcc_acc_repeat;
-  #if (TURNOUT_FEEDBACK_ENABLED == 1)
-      if (activate) new_message->type = is_acc;
-      else new_message->type = is_feedback;
-  #else
-      new_message->type = is_acc;
-  #endif
+  new_message->type = is_acc;
   new_message->size = 2;
-  new_message->dcc[0] = 0x80 | (address & 0x3F);
-  new_message->dcc[1] = 0x80 | ( ((address / 0x40) ^ 0x07) * 0x10 );    // shift down, invert, shift up
+  new_message->dcc[0] = 0x80 | (decoderAddress & 0x3F);
+  new_message->dcc[1] = 0x80 | ( ((decoderAddress / 0x40) ^ 0x07) * 0x10 );    // shift down, invert, shift up
   new_message->dcc[1] = new_message->dcc[1] | ((activate & 0x01) * 0x08);   // add B
-  new_message->dcc[1] = new_message->dcc[1] | (pairnr * 2) | (output & 0x01);
+  new_message->dcc[1] = new_message->dcc[1] | (pairnr * 2) | (coil & 0x01);
 } // build_nmra_basic_accessory
 
 static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_message *new_message)
@@ -398,12 +391,12 @@ static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_mess
 }
 
 // SDS 2021 : voor de xpnet encapsulated msgs
-static void build_nmra_raw(uint8_t *msg, uint8_t msgSize, t_message *new_message) {
+static void build_nmra_raw(unsigned char *msg, unsigned char msgSize, t_message *new_message) {
   new_message->repeat = dcc_acc_repeat;
   new_message->type = is_acc; // TODO CHECK!!
   if (msgSize > 6) msgSize = 6;
   new_message->size = msgSize;
-  for (uint8_t i=0; i< msgSize; i++) {
+  for (unsigned char i=0; i< msgSize; i++) {
     new_message->dcc[i] = msg[i];
   }
 } // build_nmra_raw
@@ -909,132 +902,8 @@ static void build_dcc_searchid(t_unique_id* test_id,  t_message *new_message)
 // 3. Routines for turnoutbuffer
 //
 //============================================================================
-//
-// purpose:   stores and reload positions of turnouts
-//            in case of Xpressnet we maintain a second bitfield with all
-//            manual operated turnouts.
-//
-// note:      if memory is limited, only the turnouts in this memory are stored
-//            and recovered, all other are reported as 0 (=green).
-//
-// addressing:   Turnout: 1 .... 8, 9 .... 16, ...
-//               Group:   |--1---|, |--2----|, ...
-//               addr:    0 .... 7
+// SDS-> weg!
 
-// SDS TODO2021 : check of dit nog nodig is nadat  s88 alt is geïmplementeerd
-// hier probeert men lenz intf te informeren over turnouts die via xpnet zijn verzet??
-// is het nog nodig onderscheid te maken tussen manual of niet? -> dan kan turnoutmanual[] ook weg!
-
-#if (SIZE_TURNOUTBUFFER > 0) 
-
-void save_turnout(unsigned char slot, unsigned int addr, unsigned char output)
-{
-  unsigned int index;
-  unsigned char mask;
-
-  index = (addr) / 8;
-  mask = (unsigned char) (addr) & 0x7;
-  mask = 1 << mask;
-  if (index < SIZE_TURNOUTBUFFER) {
-    if (output)  turnoutbuffer[index] |= mask;
-    else         turnoutbuffer[index] &= ~mask;
-    #if (XPRESSNET_ENABLED == 1)
-      if (slot != 0) {
-        turnoutmanual[index] |= mask;       // mark as operated manually
-        organizer_state.turnout_by_handheld = 1;
-      }
-    #endif
-  }
-}
-
-unsigned char recall_turnout(unsigned int addr)
-  {
-    unsigned int index;
-    unsigned char mask;
-
-    index = addr / 8;
-    mask = (unsigned char) (addr) & 0x7;
-    mask = 1 << mask;
-
-    if (index < SIZE_TURNOUTBUFFER)
-      {
-        if ((turnoutbuffer[index] & mask) == 0) return(0);
-        else return(1);
-      }
-    return(0);  // as default, if buffer is not large enough
-  }
-
-unsigned char recall_turnout_group(unsigned int group_addr)
-  {
-    unsigned int index;
-    
-    index = group_addr - 1;
-
-    if (index < SIZE_TURNOUTBUFFER)
-      {
-        return(turnoutbuffer[index]);
-      }
-    return(0);  // as default, if buffer is not large enough
-  }
-
-#if (XPRESSNET_ENABLED == 1)
-unsigned char get_number_of_manual_turnout_ops(void)
-  {   
-    unsigned char i, no_trnt_events = 0;
-
-    for (i=0; i<SIZE_TURNOUTBUFFER; i++)            // scan turnoutmanual buffer for any change
-      {
-        if (turnoutmanual[i])
-          {
-            unsigned char j;
-            for (j=1; j!=0; j<<=1)
-              {
-                if (turnoutmanual[i] & j) 
-                  {
-                    no_trnt_events++;               // count changes
-                    if (no_trnt_events == 64) return(no_trnt_events);
-                  }
-              }
-          }
-      }
-    return(no_trnt_events);
-  }
-
-unsigned int recall_manual_turnout(void)
-  {
-    unsigned char i, j, mask;
-    t_data16 trnt_addr;
-
-    for (i=0; i<SIZE_TURNOUTBUFFER; i++)
-      {
-        if (turnoutmanual[i])
-          {
-            mask = 1;
-            for (j=0; j<8; j++)
-              {
-                if (turnoutmanual[i] & mask)
-                  {
-                    turnoutmanual[i] &= ~mask;
-                    trnt_addr.as_uint16 = (i * 8) + j;
-                    if ((turnoutbuffer[i] & mask) != 0)  trnt_addr.as_uint8[1] |= 0x80;  // set color
-                    return(trnt_addr.as_uint16);                // done
-                  }
-                mask <<= 1;
-              }
-          }
-      }
-    return(0);
-  }
-#endif
-#else  // SIZE_TURNOUTBUFFER
-
-void save_turnout(unsigned char slot, unsigned int addr, unsigned char output)  {  }
-unsigned char recall_turnout(unsigned int addr)  {    return(0);  }
-unsigned char recall_turnout_group(unsigned int group_addr)  {    return(0);  }
-unsigned char get_number_of_manual_turnout_ops(void)  {    return(0);  }
-unsigned int recall_manual_turnout(void);
-
-#endif // SIZE_TURNOUTBUFFER
 
 
 //============================================================================
@@ -1651,10 +1520,10 @@ void init_organizer(void)
 
   init_locobuffer();
 
-  dcc_acc_repeat = eeprom_read_byte((uint8_t *)eadr_dcc_acc_repeat); 
-  dcc_pom_repeat = eeprom_read_byte((uint8_t *)eadr_dcc_pom_repeat); 
-  dcc_func_repeat = eeprom_read_byte((uint8_t *)eadr_dcc_func_repeat); 
-  dcc_speed_repeat = eeprom_read_byte((uint8_t *)eadr_dcc_speed_repeat); 
+  dcc_acc_repeat = eeprom_read_byte((unsigned char *)eadr_dcc_acc_repeat); 
+  dcc_pom_repeat = eeprom_read_byte((unsigned char *)eadr_dcc_pom_repeat); 
+  dcc_func_repeat = eeprom_read_byte((unsigned char *)eadr_dcc_func_repeat); 
+  dcc_speed_repeat = eeprom_read_byte((unsigned char *)eadr_dcc_speed_repeat); 
 } // init_organizer
 
 // return TRUE if found and replaced, return false, if not found
@@ -2452,16 +2321,14 @@ bool do_pom_loco_cvrd(unsigned int addr, unsigned int cv)
   return(retval);
 }
 
-// 
-// parameters: addr:     turnout decoder [0000-4095]
-//             output:   coil (red, green) [0,1]
-//             activate: off, on = [0,1]; 
-bool do_accessory(unsigned char slot, unsigned int addr, unsigned char output, unsigned char activate)      // turnout
-{
+// parameters: turnoutAddress:  turnout decoder [0000-4095]
+//             coil:          coil (red, green) [0,1]
+//             activate:        off, on = [0,1]; 
+// TODO SDS 2021: notify local ui? (removed 'slot' function parameter, local UI is slot 0)
+bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate) {
   unsigned char retval;
-
-  if (activate) save_turnout(slot, addr, output);
-  build_nmra_basic_accessory(addr, output, activate, locobuff_mes_ptr);
+  if (activate) turnout_update(turnoutAddress, coil);
+  build_nmra_basic_accessory(turnoutAddress, coil, activate, locobuff_mes_ptr);
   retval = put_in_queue_low(locobuff_mes_ptr);
   return(retval);
 }
@@ -2478,7 +2345,7 @@ bool do_extended_accessory(unsigned int addr, unsigned char aspect)
 }
 
 // SDS voor de xpnet encapsulated msgs
-bool do_raw_msg(uint8_t *msg, uint8_t msgSize) {
+bool do_raw_msg(unsigned char *msg, unsigned char msgSize) {
   bool retval;
 
   build_nmra_raw(msg, msgSize, locobuff_mes_ptr);

@@ -67,9 +67,9 @@
 
 #include "programmer.h"
 
-//SDS #include "s88.h"
 #include "organizer.h"
-#include "xpnet.h"        
+#include "xpnet.h"
+#include "accessories.h"
 
 #if (XPRESSNET_ENABLED == 1)
 
@@ -169,7 +169,7 @@ unsigned char xpnet_version[] = {0x63, 0x21,
 
 // 2.b) Xpressnet Send routines
 
-void xp_send_message(unsigned char slot_id, unsigned char *str)
+void xp_send_message(unsigned char callByte, unsigned char *str)
 {
   unsigned char n, total, my_xor;
 
@@ -179,7 +179,7 @@ void xp_send_message(unsigned char slot_id, unsigned char *str)
   
   while (!XP_tx_ready()) ;                 // busy waiting! (but shouldn't happen)
 
-  XP_send_call_byte(slot_id);              // send slot (9th bit is 1)
+  XP_send_call_byte(callByte);              // send slot (9th bit is 1)
   XP_send_byte(str[0]);                    // send header
 
   while (n != total) {
@@ -655,18 +655,6 @@ void xp_parser(void)
       }
       #endif
       break;
-    case 0x1:
-      switch(rx_message[1]) {
-        // TODO 2021 : remove! (vervangen door 0xE?-0x30)
-        case 0x01:
-          // dcc extended accessory operations request
-          addr = (unsigned int) (((unsigned char)(rx_message[2] & 0x07)) << 8) + rx_message[3];
-          do_extended_accessory(addr, (unsigned char)(rx_message[2] >> 3) & 0x1F);
-          // no answer
-          processed = 1;
-          break;
-      }
-      break;
     case 0x2:
       switch(rx_message[1]) {
         case 0x10: 
@@ -764,81 +752,38 @@ void xp_parser(void)
       break;
 
     case 0x4:
-      // not yet tested: Schaltinformation anfordern 0x42 ADR Nibble X-Or
-      // Hex : 0x42 Adresse 0x80 + N X-Or-Byte
-      // für Weichen: Adresse = Adr / 4; N=Nibble
-      // nicht für Rückmelder!
+      // Accessory decoder info request 0x42 ADDR Nibble X-Or
+      // for turnout decoders: ADDR = TurnoutAddress / 4; N=Nibble
+      // for feedback decoders : ADDR = feedback decoder address
       // Antwort:
       // Hex : 0x42 ADR ITTNZZZZ X-Or-Byte
       // ADR = Adresse mod 4
-      // I: 1=in work; 0=done -> bei uns immer 0
+      // I: 1=in progress; 0=done
       // TT = Type: 00=Schaltempf. 01=Schaltempf. mit RM, 10: Rückmelder, 11 reserved
       // N: 0=lower Nibble, 1=upper
-      // ZZZZ: Zustand; bei Weichen je 2 Bits: 00=not yet; 01=links, 10=rechts, 11:void
+      // ZZZZ: Zustand; bei Weichen je 2 Bits: 00=not yet; 01=links, 10=rechts, 11:invalid
       // Bei Rückmeldern: Direkt die 4 Bits des Nibbles
-      // TC interpretiert das alles als direkt übereinanderliegend;
-      // also hier und in s88.c folgende Notlösung:
-      //  Adressen 0..63  werden als DCC-Accessory interpretiert, aus dem Turnout-Buffer geladen
-      //                  und mit TT 01 oder 00 quittiert. Das bedeutet 256 mögliche Weichen
-      //  Adressen 64-127 werden als Feedback interpretiert, das bedeutet 512 mögliche Melder
-
-    switch(xpressnet_feedback_mode) {
-      default:
-      case 0:                             // mixed mode    
-        if (rx_message[1] < 64)  {
-          // Nur für Schaltinfo:
-          addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
-          tx_message[0] = 0x42;
-          // TODO!! we moeten deze functie herimplementeren zonder S88
-          //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
-          xp_send_message_to_current_slot(tx_ptr = tx_message);
-          processed = 1;
-        }
-        else { // request feedback info, shift addr locally down 
-          addr = ((rx_message[1] - 64) << 3) + (unsigned char)((rx_message[2] & 0x01) << 2);
-          tx_message[0] = 0x42;
-          // TODO!! we moeten deze functie herimplementeren zonder S88
-          //SDS create_xpressnet_feedback(addr, &tx_message[1]);
-          xp_send_message_to_current_slot(tx_ptr = tx_message);
-          processed = 1;
-        }
-        break;
-      case 1:                           	   // only feedback
-        addr = ((rx_message[1]) << 3) + (unsigned char)((rx_message[2] & 0x01) << 2);
-        tx_message[0] = 0x42;
-        // TODO!! we moeten deze functie herimplementeren zonder S88
-        //SDS create_xpressnet_feedback(addr, &tx_message[1]);
-        xp_send_message_to_current_slot(tx_ptr = tx_message);
-        processed = 1;
-        break;
-      case 2:                           	   // only schaltinfo
-        addr = (rx_message[1] << 2) + (unsigned char)((rx_message[2] & 0x01) << 1);
-        tx_message[0] = 0x42;
-        // TODO!! we moeten deze functie herimplementeren zonder S88
-        //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
-        xp_send_message_to_current_slot(tx_ptr = tx_message);
-        processed = 1;
-        break;
-    }           
-    break;
+      // SDS opendcc maakt hier 2 afzonderlijke address ranges voor wisseldecoders/feedback decoders
+      // ikke nie
+      accessory_getInfo(rx_message[1],rx_message[2] & 0x01,&tx_message[1]);
+      tx_message[0] = 0x42;
+      xp_send_message_to_current_slot(tx_ptr = tx_message);
+      processed = 1;
+      break;
 
     case 0x5:
       // 0x52 Addr DAT [XOR] "Accessory Decoder operation request"
-      // Schaltbefehl 0x52 ADR DAT X-Or
       // Hex: 0x52 Adresse 0x80 + SBBO; 
       // Adresse: = Decoder;   S= 1=activate, 0=deactivate,
       //                       BB=local adr,
       //                       O=Ausgang 0 (red) / Ausgang 1 (grün)
       // (das würde eigentlich schon passend für DCC vorliegen, aber lieber sauber übergeben)
-      addr = (unsigned int) (rx_message[1] << 2) + ((rx_message[2] >> 1) & 0b011);
+      uint16_t turnoutAddress = ((uint16_t) rx_message[1] << 2) + ((rx_message[2] >> 1) & 0x3);
       activate = (rx_message[2] & 0b01000) >> 3;
-      coil = rx_message[2] & 0b01;
-      if (invert_accessory & 0b01) coil = coil ^ 1;
-
-      do_accessory(current_slot, addr, coil, activate);
+      coil = rx_message[2] & 0x1;
+      do_accessory(turnoutAddress, coil, activate);
       tx_message[0] = 0x42;
-        // TODO!! we moeten deze functie herimplementeren zonder S88
-      //SDS create_xpressnet_schaltinfo(addr, &tx_message[1]);
+      accessory_getInfo(rx_message[1],(rx_message[2]>>2)&0x1,&tx_message[1]); // B1 bit is the nibble bit
 
       // at this point I was not sure how to react:
       // either answer the request or/and send out a broadcast
@@ -857,12 +802,19 @@ void xp_parser(void)
       // TODO : feedback bijhouden in iets à la s88!
       // TODO : for now just broadcast back to all xpnet clients ()
       // format according to §2.1.11 (nibbles), TT=10 (feedback decoder), I=0
-      tx_message[0] = 0x44;
-      tx_message[1] = rx_message[1];
-      tx_message[2] = 0b01000000 | (rx_message[2] & 0x0F); // lower nibble
-      tx_message[3] = rx_message[1];
-      tx_message[4] = 0b01010000 | ((rx_message[2] & 0xF0)>>4); // higher nibble
-      xp_send_message(FUTURE_ID | 0, tx_message);
+      uint8_t prevData, newData;
+      newData = rx_message[2];
+      prevData = feedback_update(rx_message[1],newData);
+      if ((prevData & 0xF) != (newData & 0xF)) { // lower nibble changed
+        tx_message[0] = 0x42;
+        accessory_getInfo(rx_message[1],0,&tx_message[1]);
+        xp_send_message(FUTURE_ID | 0, tx_message);
+      }
+      if ((prevData & 0xF0) != (newData & 0xF0)) { // upper nibble changed
+        tx_message[0] = 0x42;
+        accessory_getInfo(rx_message[1],1,&tx_message[1]);
+        xp_send_message(FUTURE_ID | 0, tx_message);
+      }
       processed = 1;
       break;
 
@@ -873,6 +825,7 @@ void xp_parser(void)
         processed = 1;                                   // no answer here, but a broadcast will occur
       }
       break;
+
     case 0x9:
       // 0x91 loco_addr [XOR] "Emergency stop a locomotive"
       // 0x92 AddrH AddrL [XOR] "Emergency stop a locomotive"
@@ -889,6 +842,7 @@ void xp_parser(void)
       }
       // no response is to be sent
       break;
+
     case 0xE:
       switch(rx_message[1] & 0xf0) { // high nibble von rx_message[1]:
         case 0x00:
@@ -1073,7 +1027,8 @@ void xp_parser(void)
             }
           break;
         case 0x30:
-          // SDS 2021 test - 0xE?-0x30 zijn raw dcc msgs encapsulated in xpnet
+          // 0xE?-0x30 zijn raw dcc msgs encapsulated in xpnet
+          // SDS TODO : check of de POM nu nog werkt (misschien doet do_pom_loco_xxx nog meer dan enkel dcc msg maken??)
           uint8_t dccSize = (rx_message[0] & 0xF) - 1;
           do_raw_msg(&rx_message[2], dccSize);
           processed = 1;

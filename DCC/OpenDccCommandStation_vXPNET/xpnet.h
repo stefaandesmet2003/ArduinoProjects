@@ -27,4 +27,4 @@
 
 void init_xpressnet(void);
 void run_xpressnet(void);                       // multitask replacement
-void xp_send_message(unsigned char slot, unsigned char *str);   // send a message to this slot
+void xp_send_message(unsigned char callByte, unsigned char *str);   // send a message with this callbyte (ID+slot)

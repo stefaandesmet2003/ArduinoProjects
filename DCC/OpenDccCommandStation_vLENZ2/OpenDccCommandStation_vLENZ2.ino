@@ -147,7 +147,6 @@ void init_main(void) {
   // Analog Comparator Input Capture by Timer/Counter 1: Off
   ACSR=0x80;
 
-  invert_accessory = eeprom_read_byte((uint8_t*)eadr_invert_accessory);     // used for Lenz and XP
   xpressnet_feedback_mode = eeprom_read_byte((uint8_t*)eadr_xpressnet_feedback); 
   
 } // init_main

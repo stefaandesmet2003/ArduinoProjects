@@ -184,20 +184,6 @@ struct next_message_s next_message;    // see dccout.h
 
 volatile unsigned char next_message_count;
 
-
-
-// upstream interface for turnout feedback:
-
-#if (TURNOUT_FEEDBACK_ENABLED == 1)
-   
-  volatile unsigned int feedbacked_accessory; // this is the current turnout under query
-                                              // this includes the coil address!
-  volatile unsigned char feedback_required;   // 1: make a query at end of next preamble
-  volatile unsigned char feedback_ready;      // MSB: if 1: the query is done (communication flag)
-                                              // LSB: if 1: there was no feedback
-                                              //            == position error
-#endif
-
 //----------------------------------------------------------------------------------------
 // Timing for feedback
 //
@@ -417,22 +403,6 @@ ISR(TIMER1_COMPA_vect)
         if ((MY_STATE_REG & DOI_CNTMASK) == 0)
           {
             MY_STATE_REG = DOI_BSTART;          // doi.state = dos_send_bstart;
-            #if (TURNOUT_FEEDBACK_ENABLED == 1)
-            if (feedback_required)
-              {
-                if (EXT_STOP_ACTIVE) 
-                  {
-                    // feedback received -> yes, turnout has this position
-                    feedback_ready = (1 << FB_READY) | (1 << FB_OKAY);
-                  }
-                else
-                  {
-                    // no feedback: 
-                    feedback_ready = (1 << FB_READY);
-                  }
-                feedback_required = 0;
-              }
-            #endif // feedback
           }
 		return;
       }
@@ -474,18 +444,6 @@ ISR(TIMER1_COMPA_vect)
             if ((MY_STATE_REG & DOI_CNTMASK) == 0)                  // bitcounter lower 5 bits
               {
                 MY_STATE_REG = DOI_END_BIT;  // doi.state = dos_idle;
-                #if (TURNOUT_FEEDBACK_ENABLED == 1)
-                if (doi.type == is_feedback)
-                  {
-                    // message1 message0 -> ...||......|
-                    // -aaa-ccc --AAAAAA => aaaAAAAAAccc
-                    feedbacked_accessory = ((doi.current_dcc[0] & 0b00111111) << 3)   // addr low
-                                       | ((~doi.current_dcc[1] & 0b01110000) << 5)    // addr high
-                                       | (doi.current_dcc[1] & 0b00000111);           // output
-                    feedback_ready = 0;
-                    feedback_required = 1;
-                  }
-                #endif // feedback
               }
             return;
      }
@@ -521,11 +479,6 @@ void init_dccout(void)
     next_message.dcc[1] = 0;
 
     doi.railcom_enabled = eeprom_read_byte((uint8_t *)eadr_railcom_enabled);
-
-    #if (TURNOUT_FEEDBACK_ENABLED == 1)
-      feedback_ready = 0;
-      feedback_required = 0;
-    #endif
 
     do_send(1);                         // init COMP regs.
 

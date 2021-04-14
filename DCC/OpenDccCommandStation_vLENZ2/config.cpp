@@ -38,14 +38,6 @@
 //======================================================================
 // some globals used throughout OpenDCC
 // SDS TODO 2021 : kunnen die niet weg?
-unsigned char invert_accessory = 0;  // Uhlenbrock seems to invert red and green
-                                     // with accessory commands - Lenz not
-                                     // we do the same!
-                                     // so we have to decide in a mixed environment
-                                     // which side should be inverted
-                                     // Bit 1: invert IB, Bit 0: invert Lenz
-                                     // read from CV12
-                                     
 unsigned char xpressnet_feedback_mode;  // defines the address mapping of
 										// feedbacks in Xpressnet
                                         // read from CV29
@@ -136,7 +128,7 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
     [eadr_s88_size1]                = 0x02,
     [eadr_s88_size2]                = 0x02,
     [eadr_s88_size3]                = 0x02,
-    [eadr_invert_accessory]         = 0x01,                 // bit 0: invert Lenz, bit 1: invert IB
+    [eadr_invert_accessory]         = 0x01,                 // SDS : nog longer used
     [eadr_dcc_acc_repeat]           = NUM_DCC_ACC_REPEAT,   // Accessory Command repeat counter
     [eadr_dcc_acc_time]             = 100,                  // turn on time of acc (used by IB, default 100)
     [eadr_startmode_ibox]           = 0x00,                 // 0=Normal Mode,
@@ -199,9 +191,6 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 //                            Size is given as bytes;  16 means 8 modules 
 // s88_size2            Byte  Anzahl der Bytes auf dem S88-Strang 2
 // s88_size3            Byte  Anzahl der Bytes auf dem S88-Strang 3
-
-// invert_accessory     Bit   if 1: Invertiere bei Lenz-Protokoll rot-grï¿½n
-//                                  bei accessory commands
 
 // startmode_ibox       Byte  0: = Standard Start Mode (=p50-Mode)
 //                            1: = P50X Mode

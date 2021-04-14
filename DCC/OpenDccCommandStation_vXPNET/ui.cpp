@@ -202,7 +202,7 @@ static void ui_ShowTurnoutPos (uint8_t page) // page 0 : W0+W1, page 1 : W2+W3 .
 {
   for (uint8_t turnout = page<<1;turnout<(page+1)<<1;turnout++) {
     lcd.print("W");
-    lcd.print(turnout);
+    lcd.print(turnout+1); // wisseladressen vanaf 1 tellen op de display, zoals JMRI
     if ((app_Turnouts >> turnout) & 0x1) // func is active
         lcd.write(0x4); // speciaal teken wissel recht
     else lcd.write(0x5); // speciaal teken wissel gebogen
