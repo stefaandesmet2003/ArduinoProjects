@@ -27,8 +27,7 @@ enum {DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM } deco
 uint8_t decoderSoftwareMode;
 
 //factory defaults
-static CVPair FactoryDefaultCVs [] =
-{
+static CVPair FactoryDefaultCVs [] = {
   {CV_ACCESSORY_DECODER_ADDRESS_LSB, 1},
   {CV_ACCESSORY_DECODER_ADDRESS_MSB, 0},
   {CV_VERSION_ID, VersionId},
@@ -57,8 +56,7 @@ int8_t ledTimer;
 /******************************************************************/
 static void keyHandler (uint8_t keyEvent);
 
-static void init_keys (void)
-{
+static void init_keys (void) {
     keys[0].Pin = PIN_PROGKEY;
     keys[0].State = UP;
     keys[1].Pin = PIN_KEY2;
@@ -70,57 +68,44 @@ static void init_keys (void)
     // keys[0].Lastmillis = 0; //init overbodig
 } // init_keys
 
-static void detect_keys (void)
-{
+static void detect_keys (void) {
   int i;
-  for (i=0;i<NUMBER_OF_KEYS;i++)
-  {
-    switch(keys[i].State)
-    {
+  for (i=0;i<NUMBER_OF_KEYS;i++) {
+    switch(keys[i].State) {
       case UP : 
-        if (digitalRead(keys[i].Pin) == LOW )
-        {
+        if (digitalRead(keys[i].Pin) == LOW ) {
           keys[i].LastMillis = millis();
           keys[i].State = DEBOUNCING_DOWN;
         }
         break;
       case DEBOUNCING_DOWN :
         if (digitalRead(keys[i].Pin) != LOW )
-        {
           keys[i].State = UP;
-        }
-        else if ( (millis() - keys[i].LastMillis) > DEBOUNCE_DELAY )
-        {
+        else if ( (millis() - keys[i].LastMillis) > DEBOUNCE_DELAY ) {
           keys[i].State = DOWN;
           keyHandler ((i<<2) | KEYEVENT_DOWN); // gebruik index in de keys[] array als keycode
         }
         break;
       case DOWN :
-        if (digitalRead(keys[i].Pin) != LOW )
-        {
+        if (digitalRead(keys[i].Pin) != LOW ) {
           keys[i].State = DEBOUNCING_UP;
           keys[i].LastMillis = millis();
         }
-        else if ( (millis() - keys[i].LastMillis) > LONGPRESS_DELAY )
-        {
+        else if ( (millis() - keys[i].LastMillis) > LONGPRESS_DELAY ) {
           keys[i].State = LONG_DOWN;
           keyHandler ((i<<2) | KEYEVENT_DOWN | KEYEVENT_LONGDOWN );
         }
         break;
       case LONG_DOWN :
-        if (digitalRead(keys[i].Pin) != LOW )
-        {
+        if (digitalRead(keys[i].Pin) != LOW ) {
           keys[i].State = DEBOUNCING_UP;
           keys[i].LastMillis = millis();
         }
         break;
       case DEBOUNCING_UP :
         if (digitalRead(keys[i].Pin) == LOW )
-        {
           keys[i].LastMillis = millis();
-        }
-        else if ( (millis() - keys[i].LastMillis) > DEBOUNCE_DELAY )
-        {
+        else if ( (millis() - keys[i].LastMillis) > DEBOUNCE_DELAY ) {
           keys[i].State = UP;
           keyHandler ((i<<2) | KEYEVENT_UP);
         }
@@ -129,56 +114,54 @@ static void detect_keys (void)
   }
 } // detect_keys
 
-static void keyHandler (uint8_t keyEvent)
-{
+static void keyHandler (uint8_t keyEvent) {
     // debug info
     #ifdef DEBUG
-      switch (keyEvent & 0x3)
-      {
-          case KEYEVENT_UP :
-              Serial_print_s("key up");
-              break;
-          case KEYEVENT_DOWN :
-              Serial_print_s("key down");
-              break;
-          case KEYEVENT_LONGDOWN :
-              Serial_print_s("long key down");
-              break;
+      switch (keyEvent & 0x3) {
+        case KEYEVENT_UP :
+          Serial_print_s("key up");
+          break;
+        case KEYEVENT_DOWN :
+          Serial_print_s("key down");
+          break;
+        case KEYEVENT_LONGDOWN :
+          Serial_print_s("long key down");
+          break;
       }
       Serial_print_s (" on key : ");
       Serial_println_u(keyEvent>>2);
     #endif // DEBUG
     
-    if (keyEvent & KEYEVENT_LONGDOWN)
-    {
-        if (decoderState != DECODER_PROGRAM)
-        {
-            decoderState = DECODER_PROGRAM;
-            ledTimer = Timer_oscillate(PIN_PROGLED, LED_SLOW_FLASH, HIGH, -1); //forever
-        }
+    if (keyEvent & KEYEVENT_LONGDOWN) {
+      if (decoderState != DECODER_PROGRAM) {
+        decoderState = DECODER_PROGRAM;
+        ledTimer = Timer_oscillate(PIN_PROGLED, LED_SLOW_FLASH, HIGH, -1); //forever
+      }
     }
-    else if (keyEvent & KEYEVENT_DOWN)
-    {
-        if (decoderState == DECODER_PROGRAM)
-        {
-            decoderState = DECODER_INIT;
-            Timer_stop (ledTimer); //stop de slow flashing led
-        }
-        else
-        {
-            // we gebruiken de knoppen om wissels te bedienen
-            turnout_ManualToggle (keyEvent >> 2);
-        }
+    else if (keyEvent & KEYEVENT_DOWN) {
+      if (decoderState == DECODER_PROGRAM) {
+        decoderState = DECODER_INIT;
+        Timer_stop (ledTimer); //stop de slow flashing led
+      }
+      else {
+        // we gebruiken de knoppen om wissels te bedienen
+        turnout_ManualToggle (keyEvent >> 2);
+      }
     }
     else // key up
     {
     }
-    
+    #ifdef DEBUG
+      Serial_print_s ("decoderState = ");
+      if (decoderState == DECODER_INIT) Serial_println_s("DECODER_INIT");
+      else if (decoderState == DECODER_RUNNING) Serial_println_s("DECODER_RUNNING");
+      else if (decoderState == DECODER_PROGRAM) Serial_println_s("DECODER_PROGRAM");
+      else Serial_println_s("factory reset");
+    #endif
 } // keyHandler
 
 // 0 = DONE, 1 = NOT DONE (eeprom not ready)
-uint8_t accessory_FactoryResetCV( void )
-{
+static uint8_t accessory_FactoryResetCV() {
   int i;
   uint8_t swMode; // we gebruiken hier een read uit eeprom, niet de global var
   
@@ -186,12 +169,9 @@ uint8_t accessory_FactoryResetCV( void )
     return 1;
   // factory reset de algemene CV's (die niet afhangen van de software mode
   for (i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++)
-  {
     DCC_setCV( FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
-  }
   swMode = DCC_getCV(CV_SoftwareMode);
-  switch(swMode)
-  {
+  switch(swMode) {
     case SOFTWAREMODE_TURNOUT_DECODER :
       turnout_FactoryResetCV();
       break;
@@ -204,9 +184,7 @@ uint8_t accessory_FactoryResetCV( void )
       turnout_FactoryResetCV();
       break;
   }
-  
   return 0;
-  
 } // accessory_FactoryResetCV
 
 void setup() {
@@ -249,14 +227,10 @@ void setup() {
   Timer_init(); // init timer lib
 } // setup
 
-void loop()
-{
-  switch (decoderState)
-  {
+void loop() {
+  switch (decoderState) {
     case DECODER_FACTORY_RESET : 
-      if (accessory_FactoryResetCV () == 0)
-      {
-        // factory reset gelukt --> DECODER_INIT
+      if (accessory_FactoryResetCV () == 0) { // factory reset gelukt --> DECODER_INIT
         decoderState = DECODER_INIT;
       }
       break;
@@ -266,8 +240,7 @@ void loop()
         Serial_println_u(getMyAddr());
       #endif
       decoderSoftwareMode = DCC_getCV(CV_SoftwareMode);
-      switch (decoderSoftwareMode)
-      {
+      switch (decoderSoftwareMode) {
         case SOFTWAREMODE_TURNOUT_DECODER :
           turnout_Init ();
           break;
@@ -326,27 +299,43 @@ void notifyCVAck(void) {
 } // notifyCVAck
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate)
-{
+void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate) {
+  if (decoderState == DECODER_PROGRAM) {
+    // take the decoderAddress & program it as our own
+    // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
+    EEPROM_update((int) CV_ACCESSORY_DECODER_ADDRESS_LSB, decoderAddress & 0x3F);
+    EEPROM_update((int) CV_ACCESSORY_DECODER_ADDRESS_MSB, (decoderAddress >> 6) & 0x7);
+    #ifdef DEBUG
+      Serial_print_s("CV1/CV9 rewritten, my address is now :");
+      Serial_println_s(getMyAddr());
+    #endif
+    return;
+  }
+
   if (decoderSoftwareMode == SOFTWAREMODE_TURNOUT_DECODER)
     turnout_Handler (decoderAddress, outputId, activate);
-  else if (decoderSoftwareMode == SOFTWAREMODE_LIGHT_DECODER) // TODO
-    Serial_println_s("unsupported software mode!");
-  else
-    Serial_println_s("unsupported software mode!");
+  else if (decoderSoftwareMode == SOFTWAREMODE_LIGHT_DECODER) {// TODO
+    #ifdef DEBUG
+      Serial_println_s("unsupported software mode!");
+    #endif
+  }
+  else {
+    #ifdef DEBUG
+      Serial_println_s("unsupported software mode!");
+    #endif
     //goto safe mode??
+  }
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect)
-{
+void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
   #ifdef DEBUG
     Serial_print_s("notifyDccSigState: unsupported for now :");
-    Serial_print_u(Addr);
+    Serial_print_u(decoderAddress);
     Serial_print_s(',');
-    Serial_print_u(OutputIndex);
+    Serial_print_u(signalId);
     Serial_print_s(',');
-    Serial_println_ub(state, HEX);
+    Serial_println_u(signalAspect);
   #endif
 } // notifyDccSigState
 
@@ -365,16 +354,16 @@ uint8_t notifyCVWrite(uint16_t CV, uint8_t Value) {
     EEPROM_update((int) CV, Value);
     Timer_oscillate(PIN_PROGLED, LED_FAST_FLASH, HIGH, 3); // 3 led flashes ter bevestiging van een CV write
   }
-  return EEPROM_read((int) CV) ;
+  return EEPROM_read((int) CV);
   
 } // notifyCVWrite
 
 // 0 = ongeldige schrijfactie gevraagd naar CV
 // 0 = lezen naar niet-geïmplementeerde CV's : todo SDS!
 // 1 = geldige actie
-uint8_t notifyCVValid(uint16_t CV, uint8_t Writable){
+uint8_t notifyCVValid(uint16_t CV, uint8_t Writable) {
   // write-request naar CV_MANUFACTURER_ID triggert een factory reset
-  if((CV == CV_MANUFACTURER_ID )  && Writable)
+  if((CV == CV_MANUFACTURER_ID)  && Writable)
     decoderState = DECODER_FACTORY_RESET;
 
   uint8_t Valid = 1;
@@ -382,9 +371,9 @@ uint8_t notifyCVValid(uint16_t CV, uint8_t Writable){
   if(CV > E2END)
     Valid = 0;
 
-  if(Writable && ((CV ==CV_VERSION_ID) || (CV == CV_MANUFACTURER_ID )))
+  if(Writable && ((CV ==CV_VERSION_ID) || (CV == CV_MANUFACTURER_ID)))
     Valid = 0;
   // TODO : uitbreiden!! (ook afhankelijk van swMode CV33)
 
-  return Valid ;  
+  return Valid;  
 } // notifyCVValid

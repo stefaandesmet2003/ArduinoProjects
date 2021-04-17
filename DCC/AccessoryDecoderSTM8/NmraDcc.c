@@ -66,8 +66,7 @@ typedef enum {
   WAIT_END_BIT
 } DccRxWaitState;
 
-typedef struct DccRx_t
-{
+typedef struct {
   DccRxWaitState  State;
   uint8_t         DataReady;
   uint8_t         BitCount;
@@ -213,7 +212,7 @@ static uint8_t validCV(uint16_t CV, uint8_t Writable) {
   */
 } // validCV
 
-static uint8_t writeCV( uint16_t CV, uint8_t Value) {
+static uint8_t writeCV(uint16_t CV, uint8_t Value) {
   return notifyCVWrite(CV, Value);
 
   // a default implementatie when the callback is not implemented -> not used for STM8
@@ -432,7 +431,7 @@ static void processMultiFunctionMessage( uint16_t Addr, uint8_t Cmd, uint8_t Dat
 #endif // NMRA_DCC_PROCESS_MULTIFUNCTION
 
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
-void processServiceModeOperation( DCC_MSG * pDccMsg )
+static void processServiceModeOperation( DCC_MSG * pDccMsg )
 {
   uint16_t CVAddr ;
   uint8_t Value ;

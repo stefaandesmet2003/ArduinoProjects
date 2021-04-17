@@ -7,7 +7,7 @@
 extern Timer timer;
 int8_t timerId;
 
-extern NmraDcc  Dcc ;
+extern NmraDcc  Dcc;
 uint8_t pulse_duration[4];
 uint8_t decoderOutputs[8] = {PIN_OUTPUT0,PIN_OUTPUT1,PIN_OUTPUT2,PIN_OUTPUT3,
                              PIN_OUTPUT4,PIN_OUTPUT5,PIN_OUTPUT6,PIN_OUTPUT7}; // deze global zou beter in accessoryDecoder.ino staan zeker?
@@ -17,8 +17,7 @@ uint16_t getMyAddr(void); // uit nmraDcc.cpp --> in de Dcc class steken?
 //void turnout_TimerCallback (void); // voorlopig laten we de timer library het werk doen
 uint8_t turnoutPositions[4]; // 0 = rechtdoor, 1 = afslaan; todo : aanpassen als er DCC commando's binnenkomen
 
-void turnout_Init( void )
-{
+void turnout_Init() {
   int i;
 
   pulse_duration[0] = Dcc.getCV (CV_TimeOnOutput1);
@@ -30,73 +29,70 @@ void turnout_Init( void )
   for (i=0;i<8;i++)
     pinMode(decoderOutputs[i], OUTPUT);
   // TODO : if saved state, herstel deze state uit de CV's
-  
 } // turnout_Init
 
 
-// OutputAddr : 0..7
-// State = 1 : activeer output, 0 = deactiveer output (voorlopig gebeurt dit automatisch door de handler)
-// FLAGS_MY_ADDRESS_ONLY : afhankelijk daarvan enkel own address, 
-// in deze config enkel op MY_ADDRESS reageren!!
-void turnout_Handler( uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, uint8_t State)
-{
-  uint8_t pairedOutputAddr = OutputAddr ^ 0x1; // laagste bit flippen
-  Serial.print("turnout_Handler: ") ;
-  Serial.print(Addr,DEC) ;
-  Serial.print(',');
-  Serial.print(BoardAddr,DEC) ;
-  Serial.print(',');
-  Serial.print(OutputAddr,DEC) ;
-  Serial.print(',');
-  Serial.println(State, HEX) ;
-  /* voorlopig uit, nog checken of dit klopt en niet met Addr+1 of Addr-1 of zo
-  if !(getMyAddr() == Addr)
-  {
+// OutputId : 0..7
+// activate = true : activate output, 0 = deactivate output (voorlopig gebeurt dit automatisch door de handler)
+// FLAGS_MY_ADDRESS_ONLY : not used for now, so we filter here
+void turnout_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
+  uint8_t pairedOutputId = outputId ^ 0x1; // laagste bit flippen
+  #ifdef DEBUG
+    Serial.print("turnout_Handler: ");
+    Serial.print(decoderAddress);
+    Serial.print(',');
+    Serial.print(outputId);
+    Serial.print(',');
+    Serial.println(activate);
+  #endif
+
+  // filter own address or not? remove filter if decoder needs to respond to multiple addresses
+  // alternatively set FLAGS_MY_ADDRESS_ONLY, to enable filtering by nmradcc lib
+  if ((getMyAddr() != decoderAddress) && (decoderAddress != 511)) { // 511 = broadcast
     return;
   }
-  */
-  if (State)
-  {
-    Serial.print("[");
-    Serial.print (millis());
-    Serial.print("] : ");
-    Serial.print(decoderOutputs[pairedOutputAddr]);
-    Serial.println(" = LOW");
-    Serial.print("[");
-    Serial.print (millis());
-    Serial.print("] : ");
-    Serial.print(decoderOutputs[OutputAddr]);
-    Serial.println(" = HIGH");
-    digitalWrite(decoderOutputs[pairedOutputAddr], LOW); // eerste de andere coil deactiveren!
-    digitalWrite(decoderOutputs[OutputAddr], HIGH);
-    timerId = timer.pulseImmediate(decoderOutputs[OutputAddr], pulse_duration[OutputAddr>>1] * 50L, HIGH);
+
+  if (activate) {
+    #ifdef DEBUG
+      Serial.print("[");
+      Serial.print (millis());
+      Serial.print("] : ");
+      Serial.print(decoderOutputs[pairedOutputId]);
+      Serial.println(" = LOW");
+      Serial.print("[");
+      Serial.print (millis());
+      Serial.print("] : ");
+      Serial.print(decoderOutputs[outputId]);
+      Serial.println(" = HIGH");
+    #endif
+    digitalWrite(decoderOutputs[pairedOutputId], LOW); // eerste de andere coil deactiveren!
+    digitalWrite(decoderOutputs[outputId], HIGH);
+    timerId = timer.pulseImmediate(decoderOutputs[outputId], pulse_duration[outputId>>1] * 50L, HIGH);
     timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 1); // 1 led flashes ter bevestiging van een turnout commando
 
   }
-  else
-  {
-    /* voorlopig gaan we de off commands negeren, want jmri stuurt die te snel */
+  else {
+    // voorlopig gaan we de off commands negeren, want jmri stuurt die te snel na de on
+    // digitalWrite(decoderOutputs[outputId], LOW);
     /*
-    Serial.print("[");
-    Serial.print (millis());
-    Serial.print("] : ");
-    Serial.print(decoderOutputs[OutputAddr]);
-    Serial.println(" = LOW");
-    digitalWrite(decoderOutputs[OutputAddr], LOW);
+    #ifdef DEBUG
+      Serial.print("[");
+      Serial.print (millis());
+      Serial.print("] : ");
+      Serial.print(decoderOutputs[outputId]);
+      Serial.println(" = LOW");
+    #endif
     */
   }
-  
 } // turnout_Handler
 
 // 0 = OK, 1 = NOK
-uint8_t turnout_FactoryResetCV ( void )
-{
+uint8_t turnout_FactoryResetCV () {
   int i;
   if (!Dcc.isSetCVReady())
     return 1;
     
-  for (i=0; i < 4; i++)
-  {
+  for (i=0; i < 4; i++) {
     Dcc.setCV( CV_TimeOnOutput1+i, DEFAULT_TIMEONOUTPUT);
   }
   return 0;
@@ -104,13 +100,11 @@ uint8_t turnout_FactoryResetCV ( void )
 } // turnout_FactoryResetCV 
 
 // turnoutId = 0..3, manuele bediening met de knoppen
-void turnout_ManualToggle (uint8_t turnoutId)
-{
+void turnout_ManualToggle (uint8_t turnoutId) {
+  #ifdef DEBUG
     Serial.print ("manual toggle : ");
     Serial.println(turnoutPositions[turnoutId]);
+  #endif 
     turnoutPositions[turnoutId] = (!turnoutPositions[turnoutId]) & 0x1;
-    turnout_Handler(getMyAddr(),0,(turnoutId << 1) + turnoutPositions[turnoutId],1);
+    turnout_Handler(getMyAddr(),(turnoutId << 1) + turnoutPositions[turnoutId],true);
 } // turnout_ManualToggle
-
-
-

@@ -5,9 +5,14 @@
 - PB4 doesn't have an internal weak pull-up -> pinMode(INPUT_PULLUP) has no effect. confirmed in datasheet.  
 --> weirdly enough datasheet says there is no external interrupt on PB4. But it works, fortunately.  
 - OUTPUT_ADDRESS_MODE : removed from code (not used)  
+- reprogramming own decoder address on main track (learning mode):  
+--> activate programming mode (long key press) and send a DCC turnout command.  
+--> The DCC decoderAddress is taken as the new accessory decoder address  
+--> flag MY_ADDRESS_ONLY in nmradcc lib is not used to permit receiving DCC packets for all accessory addresses. In 'normal' mode, the decoder address is filtered by turnout_decoder.c, and only own address packets are executed.
 
 ## tested
 - basic accessory decoder packets : OK  
+- reprogramming decoder address on main track
 - programming track : reading & writing CV's : OK with decoder powered from DC  
 - programming fails (PROG SHORT at power-up) when decoder is powered from DCC
 --> inrush current on 470uF smoothing capacitor is detected as a short circuit on the programming track  
@@ -26,6 +31,8 @@ Alternatively remove progkey :
 
 - use flag MY_ADDRESS_ONLY ? For now decoder address is filtered by turnout_decoder.c (to be copied in avr version!)
 - getMyAddr -> simplify to avoid reading eeprom on every DCC packet  
+- test other decoder types included in lib (mobile decoder etc)
+- replace the timer/event bullshit code
 
 ## other topics
 see Accessory Decoder (AVR version)

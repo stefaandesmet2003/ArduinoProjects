@@ -1,3 +1,9 @@
+/*
+ * for test : connect signal head to pins 3->8 (8=VCC)
+ * bug: CV programming werkt nog niet (DECODER_PROGRAM todo)
+ * opgelet CV programming heeft een ack circuit nodig, anders werkt programming niet!
+ * 
+ */
 #include "NmraDcc.h"
 
 #define VersionId (0x1)
@@ -41,8 +47,6 @@ static CVPair FactoryDefaultCVs [] =
   {CV_29_CONFIG,0x80}
 };
 
-uint16_t getMyAddr(void); // uit nmraDcc.cpp --> in de Dcc class steken?
-
 
 // timer interrupt used for 1ms interrupt
 ISR (TIMER2_COMPA_vect) {
@@ -85,7 +89,7 @@ ISR (TIMER2_COMPA_vect) {
 static uint8_t accessory_FactoryResetCV() {
   // factory reset de algemene CV's (die niet afhangen van de software mode)
   for (int i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++) {
-    Dcc.setCV( FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
+    Dcc.setCV(FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
   }
   /*
   swMode = Dcc.getCV(CV_SoftwareMode);
@@ -118,8 +122,8 @@ static void head_init(uint8_t aspectId) {
   digitalWrite(5,HIGH);
   digitalWrite(6,HIGH);
   digitalWrite(7,HIGH);
-
-  if (aspectId == 0) {
+  // defaults voor JMRI infrabel-2013
+  if (aspectId == 0) { // stop - rood
     head.outputs[0].pin = 5; // rood
     head.outputs[0].ledOn = 0;
     head.outputs[0].ledOff = 8;
@@ -128,7 +132,23 @@ static void head_init(uint8_t aspectId) {
     head.outputs[0].fTotalCycles = 1;
     head.outputs[0].fCycle = 0;
   }
-  else if (aspectId == 1) {
+  else if (aspectId == 1) { // approach - dubbel geel
+    head.outputs[0].pin = 6; // geel
+    head.outputs[0].ledOn = 0;
+    head.outputs[0].ledOff = 8;
+    head.outputs[0].fOnCycle = 0;
+    head.outputs[0].fOffCycle = 1;
+    head.outputs[0].fTotalCycles = 1;
+    head.outputs[0].fCycle = 0;
+    head.outputs[1].pin = 3; // geel
+    head.outputs[1].ledOn = 0;
+    head.outputs[1].ledOff = 8;
+    head.outputs[1].fOnCycle = 0;
+    head.outputs[1].fOffCycle = 1;
+    head.outputs[1].fTotalCycles = 1;
+    head.outputs[1].fCycle = 0;
+  }
+  else if (aspectId == 2) { // clear - groen
     head.outputs[0].pin = 4; // groen
     head.outputs[0].ledOn = 0;
     head.outputs[0].ledOff = 8;
@@ -137,39 +157,58 @@ static void head_init(uint8_t aspectId) {
     head.outputs[0].fTotalCycles = 1;
     head.outputs[0].fCycle = 0;
   }
-  else if (aspectId == 2) { // dubbel geel
-    head.outputs[0].pin = 6;
+  else if (aspectId == 3) { // restricting - rood wit
+    head.outputs[0].pin = 7; // wit
+    head.outputs[0].ledOn = 0;
+    head.outputs[0].ledOff = 1;
+    head.outputs[0].fOnCycle = 0;
+    head.outputs[0].fOffCycle = 1;
+    head.outputs[0].fTotalCycles = 1;
+    head.outputs[0].fCycle = 0;
+    head.outputs[1].pin = 5; // rood
+    head.outputs[1].ledOn = 3;
+    head.outputs[1].ledOff = 10;
+    head.outputs[1].fOnCycle = 0;
+    head.outputs[1].fOffCycle = 1;
+    head.outputs[1].fTotalCycles = 1;
+    head.outputs[1].fCycle = 0;  
+  }
+  else if (aspectId == 4) { // advanced approach - geel-groen vertikaal
+    head.outputs[0].pin = 6; // geel
     head.outputs[0].ledOn = 0;
     head.outputs[0].ledOff = 8;
     head.outputs[0].fOnCycle = 0;
     head.outputs[0].fOffCycle = 1;
     head.outputs[0].fTotalCycles = 1;
     head.outputs[0].fCycle = 0;
-    head.outputs[1].pin = 3;
+    head.outputs[1].pin = 4; // groen
     head.outputs[1].ledOn = 0;
     head.outputs[1].ledOff = 8;
     head.outputs[1].fOnCycle = 0;
     head.outputs[1].fOffCycle = 1;
     head.outputs[1].fTotalCycles = 1;
-    head.outputs[1].fCycle = 0;
-  }
-  else if (aspectId == 3) { // rood wit
-    head.outputs[0].pin = 7; // wit
-    head.outputs[0].ledOn = 0;
-    head.outputs[0].ledOff = 1;
-    head.outputs[0].fOnCycle = 0;
-    head.outputs[0].fOffCycle = 4;
-    head.outputs[0].fTotalCycles = 8;
-    head.outputs[0].fCycle = 0;
-    head.outputs[1].pin = 5; // rood
-    head.outputs[1].ledOn = 3;
-    head.outputs[1].ledOff = 10;
-    head.outputs[1].fOnCycle = 0;
-    head.outputs[1].fOffCycle = 4;
-    head.outputs[1].fTotalCycles = 8;
     head.outputs[1].fCycle = 0;  
   }
-  else if (aspectId == 4) { // dubbel geel knipperend
+  else if (aspectId == 5) { // slow approach - geel-groen horizontaal
+    head.outputs[0].pin = 3; // geel
+    head.outputs[0].ledOn = 0;
+    head.outputs[0].ledOff = 8;
+    head.outputs[0].fOnCycle = 0;
+    head.outputs[0].fOffCycle = 1;
+    head.outputs[0].fTotalCycles = 1;
+    head.outputs[0].fCycle = 0;
+    head.outputs[1].pin = 4; // groen
+    head.outputs[1].ledOn = 0;
+    head.outputs[1].ledOff = 8;
+    head.outputs[1].fOnCycle = 0;
+    head.outputs[1].fOffCycle = 1;
+    head.outputs[1].fTotalCycles = 1;
+    head.outputs[1].fCycle = 0;  
+  }
+  else if (aspectId == 8) { // unlit - alles uit
+  }
+  // nog wat fantasietjes
+  else if (aspectId == 6) { // dubbel geel knipperend
     head.outputs[2].pin = 6; // geel midden
     head.outputs[2].ledOn = 1;
     head.outputs[2].ledOff = 10;
@@ -184,6 +223,22 @@ static void head_init(uint8_t aspectId) {
     head.outputs[3].fOffCycle = 2;
     head.outputs[3].fTotalCycles = 4;
     head.outputs[3].fCycle = 0;  
+  }
+  else if (aspectId == 7) { // rood wit knipperend
+    head.outputs[0].pin = 7; // wit
+    head.outputs[0].ledOn = 0;
+    head.outputs[0].ledOff = 1;
+    head.outputs[0].fOnCycle = 0;
+    head.outputs[0].fOffCycle = 4;
+    head.outputs[0].fTotalCycles = 8;
+    head.outputs[0].fCycle = 0;
+    head.outputs[1].pin = 5; // rood
+    head.outputs[1].ledOn = 3;
+    head.outputs[1].ledOff = 10;
+    head.outputs[1].fOnCycle = 0;
+    head.outputs[1].fOffCycle = 4;
+    head.outputs[1].fTotalCycles = 8;
+    head.outputs[1].fCycle = 0;  
   }
   else  {// alles uit
   }
@@ -273,15 +328,15 @@ void setup()
 
   // Configure the DCC CV Programing ACK pin for an output
   /*
-  pinMode( PIN_ACKOUT, OUTPUT );
-  digitalWrite( PIN_ACKOUT, LOW );
+  pinMode(PIN_ACKOUT, OUTPUT);
+  digitalWrite(PIN_ACKOUT, LOW);
   */  
   
   // Setup which External Interrupt, the Pin it's associated with that we're using and enable the Pull-Up 
   Dcc.pin(0, PIN_DCCIN, 1);
   
   // Call the main DCC Init function to enable the DCC Receiver
-  Dcc.init( FLAGS_DCC_ACCESSORY_DECODER, 0 );
+  Dcc.init(FLAGS_DCC_ACCESSORY_DECODER, 0);
 
   /*
   // progled, progkey
@@ -344,22 +399,22 @@ void loop()
 // Calling this function should cause an increased 60ma current drain on the power supply for 6ms to ACK a CV Read 
 void notifyCVAck(void)
 {
-  Serial.println("notifyCVAck") ;
+  Serial.println("notifyCVAck");
   /*
-  digitalWrite( PIN_ACKOUT, HIGH );
-  delay( 6 );  
-  digitalWrite( PIN_ACKOUT, LOW );
+  digitalWrite(PIN_ACKOUT, HIGH);
+  delay(6);  
+  digitalWrite(PIN_ACKOUT, LOW);
   */
 }
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState( uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, uint8_t State)
+void notifyDccAccState(uint16_t Addr, uint16_t BoardAddr, uint8_t OutputAddr, uint8_t State)
 {
   Serial.println("notifyDccAccState - turnout packet received, not handled for now");
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState( uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect)
+void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect)
 {
   Serial.print("notifyDccSigState: ");
   Serial.print(decoderAddress,DEC);
@@ -372,7 +427,8 @@ void notifyDccSigState( uint16_t decoderAddress, uint8_t signalId, uint8_t signa
 } // notifyDccSigState
 
 // enkel CV's schrijven als decoder niet 'live' is (INIT, FACTORY_RESET, PROGRAM)
-uint8_t notifyCVWrite( uint16_t CV, uint8_t Value) {
+// TODO : bug : signal decoder heeft momenteel geen manier om in DECODER_PROGRAM mode te geraken, dus kunnen we geen CV's schrijven!
+uint8_t notifyCVWrite(uint16_t CV, uint8_t Value) {
   // sds : for debug
     Serial.print ("CV Write ");
     Serial.print(CV,DEC);
@@ -385,39 +441,39 @@ uint8_t notifyCVWrite( uint16_t CV, uint8_t Value) {
   
   if (decoderState != DECODER_RUNNING)
   {
-    if( eeprom_read_byte( (uint8_t*) CV ) != Value )
+    if(eeprom_read_byte((uint8_t*) CV) != Value)
     {
-      eeprom_write_byte( (uint8_t*) CV, Value ) ;
+      eeprom_write_byte((uint8_t*) CV, Value);
   
-      if( notifyCVChange )
-        notifyCVChange( CV, Value) ;
+      if(notifyCVChange)
+        notifyCVChange(CV, Value);
     }
     /*
     timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     */
   }
 
-  return eeprom_read_byte( (uint8_t*) CV ) ;
+  return eeprom_read_byte((uint8_t*) CV);
   
 } // notifyCVWrite
 
 // 0 = ongeldige schrijfactie gevraagd naar CV
 // 0 = lezen naar niet-geïmplementeerde CV's : todo SDS!
 // 1 = geldige actie
-uint8_t notifyCVValid( uint16_t CV, uint8_t Writable )
+uint8_t notifyCVValid(uint16_t CV, uint8_t Writable)
 {
   // write-request naar CV_MANUFACTURER_ID triggert een factory reset
-  if( (CV == CV_MANUFACTURER_ID )  && Writable )
+  if((CV == CV_MANUFACTURER_ID)  && Writable)
     decoderState = DECODER_FACTORY_RESET;
 
-  uint8_t Valid = 1 ;
+  uint8_t Valid = 1;
 
-  if( CV > E2END )
-    Valid = 0 ;
+  if(CV > E2END)
+    Valid = 0;
 
-  if( Writable && ( ( CV ==CV_VERSION_ID ) || (CV == CV_MANUFACTURER_ID ) ) )
-    Valid = 0 ;
+  if(Writable && ((CV ==CV_VERSION_ID) || (CV == CV_MANUFACTURER_ID)))
+    Valid = 0;
   // TODO : uitbreiden!! (ook afhankelijk van swMode CV33)
 
-  return Valid ;  
+  return Valid;  
 } // notifyCVValid
