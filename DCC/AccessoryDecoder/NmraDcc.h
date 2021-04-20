@@ -61,18 +61,19 @@ typedef struct {
 // VERSION_ID -> define in your sketch, and write to CV_VERSION_ID
 
 // Standard CV Addresses
-#define CV_ACCESSORY_DECODER_ADDRESS_LSB       1
-#define CV_ACCESSORY_DECODER_ADDRESS_MSB       9
+#define CV_ACCESSORY_DECODER_ADDRESS_LSB       	1
+#define CV_ACCESSORY_DECODER_ADDRESS_MSB       	9
 
-#define CV_MULTIFUNCTION_PRIMARY_ADDRESS       1
-#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB 17
-#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB 18
+#define CV_MULTIFUNCTION_PRIMARY_ADDRESS       	1
+#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB 	17
+#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB 	18
 
-#define CV_VERSION_ID                          7
-#define CV_MANUFACTURER_ID                     8
-#define CV_29_CONFIG                          29
+#define CV_VERSION_ID                          	7
+#define CV_MANUFACTURER_ID                     	8
+#define CV_DECODER_CONFIGURATION               	29
+#define CV_RAILCOM_CONFIGURATION								28
 
-#define MAXCV                                 E2END     // the upper limit of the CV value currently defined to max memory.
+#define MAXCV                                 	E2END     // the upper limit of the CV value currently defined to max memory.
 
 typedef enum {
 	FN_0_4 = 1,
@@ -133,27 +134,25 @@ class NmraDcc {
   uint8_t getCV (uint16_t CV);
   uint8_t setCV (uint16_t CV, uint8_t Value);
 	bool isSetCVReady ();
-	
-
 };
 // SDS TODO2021 : deze vieze functie wordt blijkbaar door turnoutdecoder gebruikt en ino, en zat niet in de dcc class haha
-uint16_t getMyAddr(void);
-
+uint16_t getMyAddr();
 
 extern void notifyDccReset(uint8_t hardReset) __attribute__ ((weak));
-extern void notifyDccIdle(void) __attribute__ ((weak));
-extern void notifyDccSpeed(uint16_t Addr, uint8_t Speed, uint8_t ForwardDir, uint8_t MaxSpeed) __attribute__ ((weak));
+extern void notifyDccIdle() __attribute__ ((weak));
+extern void notifyDccSpeed(uint16_t decoderAddress, uint8_t speed, uint8_t ForwardDir, uint8_t MaxSpeed) __attribute__ ((weak));
 extern void notifyDccFunc( uint16_t Addr, FN_GROUP FuncGrp, uint8_t FuncState) __attribute__ ((weak));
 
 extern void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate) __attribute__ ((weak));
 extern void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) __attribute__ ((weak));
 
-extern void notifyDccMsg(DCC_MSG * Msg) __attribute__ ((weak));
+extern void notifyDccMsg(DCC_MSG * msg) __attribute__ ((weak));
+extern void	notifyDccNop(uint16_t decoderAddress) __attribute__ ((weak)); // RCN-213 NOP packet for accessories
 
-extern uint8_t notifyCVValid(uint16_t CV, uint8_t Writable) __attribute__ ((weak));
-extern uint8_t notifyCVWrite( uint16_t CV, uint8_t Value) __attribute__ ((weak));
-extern void    notifyCVAck(void) __attribute__ ((weak));
-extern uint8_t notifyCVRead(uint16_t CV) __attribute__ ((weak));
-extern uint8_t notifyIsSetCVReady(void) __attribute__ ((weak));
-extern void    notifyCVChange( uint16_t CV, uint8_t Value) __attribute__ ((weak));
+extern bool			notifyCVValid(uint16_t cv, bool writable) __attribute__ ((weak));
+extern uint8_t 	notifyCVWrite( uint16_t cv, uint8_t cvValue) __attribute__ ((weak));
+extern void    	notifyCVAck() __attribute__ ((weak));
+extern uint8_t 	notifyCVRead(uint16_t cv) __attribute__ ((weak));
+extern bool 		notifyIsSetCVReady() __attribute__ ((weak));
+extern void    	notifyCVChange(uint16_t cv, uint8_t cvValue) __attribute__ ((weak));
 #endif // __NMRADCC_H__

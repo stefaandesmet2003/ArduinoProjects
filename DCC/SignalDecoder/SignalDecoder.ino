@@ -44,7 +44,7 @@ static CVPair FactoryDefaultCVs [] =
   {CV_ACCESSORY_DECODER_ADDRESS_MSB, 0},
   {CV_VERSION_ID, VersionId},
   {CV_MANUFACTURER_ID, MAN_ID_DIY},
-  {CV_29_CONFIG,0x80}
+  {CV_DECODER_CONFIGURATION,0x80}
 };
 
 
@@ -336,6 +336,7 @@ void setup()
   Dcc.pin(0, PIN_DCCIN, 1);
   
   // Call the main DCC Init function to enable the DCC Receiver
+  // geen filtering FLAGS_MY_ADDRESS_ONLY !!
   Dcc.init(FLAGS_DCC_ACCESSORY_DECODER, 0);
 
   /*
@@ -422,6 +423,14 @@ void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signal
   Serial.print(signalId,DEC);
   Serial.print(',');
   Serial.println(signalAspect, DEC);
+
+  // TODO : particular case of emergency off (RCN-213)
+  if ((decoderAddress == 511) && (signalId == 3) && (signalAspect == 0)) {
+    // set all 4 signal heads to aspect=0
+    // timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 1); // 1 led flashes ter bevestiging van een turnout commando
+  return;
+  }
+
   // voorlopig signalId ignored, 0..3 heads TODO
   head_init(signalAspect);
 } // notifyDccSigState

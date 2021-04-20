@@ -2,6 +2,8 @@
 #ifndef AccessoryDecoder_h
 #define AccessoryDecoder_h
 
+#define DEBUG // adds debug prints on serial
+
 // common definitions for alle accessory decoder types
 
 // Uncomment to print all DCC Packets
@@ -9,7 +11,6 @@
 
 //SDS manufacturer CV's
 #define CV_SoftwareMode   33
-#define CV_SafeMode       34
                
 // values for CV33
 #define SOFTWAREMODE_TURNOUT_DECODER    0
@@ -49,11 +50,9 @@
 #define LED_SLOW_FLASH  1000
 #define LED_FAST_FLASH  200
 
-struct CVPair
-{
+typedef struct {
   uint16_t  CV;
   uint8_t   Value;
-};
-
+} CVPair;
 
 #endif //AccessoryDecoder_h

@@ -2,12 +2,10 @@
 #ifndef AccessoryDecoder_h
 #define AccessoryDecoder_h
 
-// debug prints on serial
-//#define DEBUG
+//#define DEBUG // adds debug prints on serial
 
 //SDS manufacturer CV's
 #define CV_SoftwareMode   33
-#define CV_SafeMode       34
                
 // values for CV33
 #define SOFTWAREMODE_TURNOUT_DECODER    0

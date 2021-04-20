@@ -19,8 +19,7 @@ uint32_t app_GetFuncs (uint16_t locAddr);
 void app_SetFunc (uint16_t locAddr, uint8_t func, uint8_t onOff); // 1 bit per func, 0=uit, 1=aan
 void app_GetLocName (uint16_t locAddr, char *locName);
 
-bool app_ToggleAccessory (uint16_t turnoutAddr);
-
+bool app_ToggleAccessory (uint16_t turnoutAddr, bool activate); // activate permits to control on/off from key press
 void app_TestCVRead();
 uint8_t app_GetProgResults (uint16_t &cv, uint8_t &cvdata);
 

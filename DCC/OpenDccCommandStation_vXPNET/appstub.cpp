@@ -155,7 +155,7 @@ uint32_t app_Turnouts = 0xFFFFFFFF; // alle wissels rechtdoor, 1 bit per turnout
 // voorlopig turnoutAddr 0..31
 
 
-bool app_ToggleAccessory (uint16_t turnoutAddr)
+bool app_ToggleAccessory (uint16_t turnoutAddr, bool activate)
 {
   bool retval;
   // een 1-bit in app_Turnouts betekent dat de wissel rechtdoor staat
@@ -166,15 +166,20 @@ bool app_ToggleAccessory (uint16_t turnoutAddr)
   if (!organizer_ready())
     return (APP_INTERNALERR0R);
   
-  retval = do_accessory(turnoutAddr,coil,1);
-  if (!retval) {
-    app_Turnouts ^= (1 << turnoutAddr);
-
-    // notify andere xp clients dat we de wissel verzet hebben!
-    unsigned char tx_message[3];
-    tx_message[0] = 0x42;
-    turnout_getInfo(turnoutAddr,&tx_message[1]);
-    xp_send_message(0x20, tx_message); // feedback broadcast
+  if (activate) {
+    retval = do_accessory(turnoutAddr,coil,activate); // retval==0 means OK
+    if (retval==0) { // only notify the 'on' command, not the 'off'
+      app_Turnouts ^= (1 << turnoutAddr);
+  
+      // notify andere xp clients dat we de wissel verzet hebben!
+      unsigned char tx_message[3];
+      tx_message[0] = 0x42;
+      turnout_getInfo(turnoutAddr,&tx_message[1]);
+      xp_send_message(0x20, tx_message); // feedback broadcast
+    }
+  }
+  else {
+    retval = do_accessory(turnoutAddr,coil^0x1,activate); // retval==0 means OK
   }
 
   return (retval);

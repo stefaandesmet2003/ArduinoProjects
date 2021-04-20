@@ -66,6 +66,10 @@ works with PcInterface (connection with JMRI)
 --> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
 --> timing for short detection is too tight  
 - CS blijft fast clock msgs sturen tijdens programming, is dat ok?
+- accessory screen (for decoupler rails & lights)  
+--> keys have toggle on/off function on the decoder outputs  
+- turnout screen : key-up event should send 'off' turnout command (for test with accessory decoder with pulseDuration==0)
+--> test various activation times for the turnouts based on how long key is pressed
 
 # PcInterface
 a sketch that implements a LI101 PC Interface  
@@ -82,6 +86,9 @@ i.e. never make it to the RxBuffer = less work for xpc_Run()
 keeps working under constant polling from JMRI, especially during programming  
 issue with occasional RX_ERRORS solved; xpnet command is now copied to rs485c with global ints disabled to garantee transmission in 1 slot.
 
+## todo
+- version STM8, requires AltSoftSerial -> port to STM8 TODO
+
 # Accessory Decoder
 working version of a turnout decoder  
 2 versions : atmega328 & STM8  
@@ -95,6 +102,7 @@ the basic version uses 8 inputs on atmega328 and sends the status over xpressnet
 - configuration using variables stored in eeprom
 Lenz uses a DCC interface to program the configuration as CV variables.  
 Feedback decoder is not connected to DCC on the track, but probably the easiest way, the DCC input only requires a fast opto & few resistors
+- STM8 version -> requires xpnet STM8 version (rs485c to be ported)
 
 # Throttle
 initial version with static xpnet address = 3.  

@@ -90,7 +90,7 @@ typedef struct
 static DccRx_t DccRx;
 static DCC_PROCESSOR_STATE DccProcState;
 
-void ExternalInterruptHandler(void)
+void ExternalInterruptHandler()
 {
   OCR0B = TCNT0 + DCC_BIT_SAMPLE_PERIOD;
 
@@ -119,22 +119,18 @@ ISR(TIMER0_COMPB_vect)
 
   DccRx.BitCount++;
 
-  switch(DccRx.State)
-  {
+  switch(DccRx.State) {
   case WAIT_PREAMBLE:
-    if(DccBitVal)
-    {
-      if(DccRx.BitCount > 10)
+    if (DccBitVal) {
+      if (DccRx.BitCount > 10)
         DccRx.State = WAIT_START_BIT;
     }
     else
       DccRx.BitCount = 0;
-
     break;
 
   case WAIT_START_BIT:
-    if(!DccBitVal)
-    {
+    if (!DccBitVal) {
       DccRx.State = WAIT_DATA;
       DccRx.PacketBuf.Size = 0;
       DccRx.PacketBuf.PreambleBits = 0;
@@ -151,18 +147,15 @@ ISR(TIMER0_COMPB_vect)
 
   case WAIT_DATA:
     DccRx.TempByte = (DccRx.TempByte << 1);
-    if(DccBitVal)
+    if (DccBitVal)
       DccRx.TempByte |= 1;
 
-    if(DccRx.BitCount == 8)
-    {
-      if(DccRx.PacketBuf.Size == MAX_DCC_MESSAGE_LEN) // Packet is too long - abort
-      {
+    if (DccRx.BitCount == 8) {
+      if (DccRx.PacketBuf.Size == MAX_DCC_MESSAGE_LEN) { // Packet is too long - abort
         DccRx.State = WAIT_PREAMBLE;
         DccRx.BitCount = 0;
       }
-      else
-      {
+      else {
         DccRx.State = WAIT_END_BIT;
         DccRx.PacketBuf.Data[ DccRx.PacketBuf.Size++ ] = DccRx.TempByte;
       }
@@ -170,101 +163,96 @@ ISR(TIMER0_COMPB_vect)
     break;
 
   case WAIT_END_BIT:
-    if(DccBitVal) // End of packet?
-    {
+    if (DccBitVal) { // End of packet?
       DccRx.State = WAIT_PREAMBLE;
       DccRx.PacketCopy = DccRx.PacketBuf;
       DccRx.DataReady = 1;
     }
     else  // Get next Byte
     DccRx.State = WAIT_DATA;
-
     DccRx.BitCount = 0;
     DccRx.TempByte = 0;
   }
-}
+} // ISR(TIMER0_COMPB_vect)
 
 /*****************************************************************************/
 /***  LOCAL FUNCTIONS  *******************************************************/
 /*****************************************************************************/
 // for prog track, implement a 60ms current pulse
 // for main track, this should be railcom: TODO
-static void ackCV(void) {
+static void ackCV() {
   if (notifyCVAck)
     notifyCVAck();
 } // ackCV
 
-static uint8_t readCV(uint16_t CV) {
-  uint8_t Value;
+static uint8_t readCV(uint16_t cv) {
+  uint8_t cvValue;
 
   if (notifyCVRead)
-    return notifyCVRead(CV);
-// hieronder is een default implementatie, aangezien de callback niet ge�mplementeerd is
+    return notifyCVRead(cv);
 
-  Value = eeprom_read_byte((uint8_t*) CV);
-  return Value;
-}
+  // and below a default implementation, when callback is not implemented
+  cvValue = eeprom_read_byte((uint8_t*) cv);
+  return cvValue;
+} // readCV
 
-static uint8_t validCV(uint16_t CV, uint8_t Writable) {
+// writable = true: function returns true if the CV can be written/modified
+// writable = false : function returns true if the CV can be read
+static bool validCV(uint16_t cv, bool writable) {
   if (notifyCVValid)
-    return notifyCVValid(CV, Writable);
+    return notifyCVValid(cv, writable);
     
-// hieronder is een default implementatie, aangezien de callback niet ge�mplementeerd is
+  // and below a default implementation, when callback is not implemented
+  bool isValidCV = true;
 
-  uint8_t Valid = 1;
+  if (cv > MAXCV)
+    isValidCV = false;
+  if (writable && ((cv ==CV_VERSION_ID) || (cv == CV_MANUFACTURER_ID)))
+    isValidCV = false;
 
-  if(CV > E2END)
-    Valid = 0;
-
-  if(Writable && ((CV ==CV_VERSION_ID) || (CV == CV_MANUFACTURER_ID)))
-    Valid = 0;
-
-  return Valid;
+  return isValidCV;
 } // validCV
 
 
-static uint8_t writeCV(uint16_t CV, uint8_t Value) {
+static uint8_t writeCV(uint16_t cv, uint8_t cvValue) {
   if (notifyCVWrite)
-    return notifyCVWrite(CV, Value);
+    return notifyCVWrite(cv, cvValue);
 
-    // hieronder is een default implementatie, aangezien de callback niet ge�mplementeerd is
-    // TODO : aanpassen, zodat bepaalde CVs enkel in programming mode kunnen geschreven worden!!!
-
-  if(eeprom_read_byte((uint8_t*) CV) != Value)
-  {
-    eeprom_write_byte((uint8_t*) CV, Value);
-
-    if(notifyCVChange)
-      notifyCVChange(CV, Value);
+  // and below a default implementation, when callback is not implemented
+  if (eeprom_read_byte((uint8_t*) cv) != cvValue) {
+    eeprom_write_byte((uint8_t*) cv, cvValue);
+    if (notifyCVChange)
+      notifyCVChange(cv, cvValue);
   }
 
-  return eeprom_read_byte((uint8_t*) CV);
+  return eeprom_read_byte((uint8_t*) cv);
 } // writeCV
 
 
 // SDS : TODO 2021 : deze code doet ook gewoon ackCV (60mA stroompuls) in POM, dat mag toch niet?
 // dat is toch enkel voor programming track ??
+// nog checken want processDirectOpsOperation wordt ook vanuit processServiceModeOperation en processMultiFunctionMessage gecalled!!!
 // ack in POM moet via railcom
-static void processDirectOpsOperation(uint8_t Cmd, uint16_t CVAddr, uint8_t Value)
+static void processDirectOpsOperation(uint8_t Cmd, uint16_t cv, uint8_t cvValue)
 {
   // is it a Byte Operation
-  if(Cmd & 0x04)
+  if (Cmd & 0x04)
   {
     // Perform the Write Operation
-    if(Cmd & 0x08)
+    if (Cmd & 0x08)
     {
-      if(validCV(CVAddr, 1))
+      if (validCV(cv, true))
       {
-        if(writeCV(CVAddr, Value) == Value)
+        if (writeCV(cv, cvValue) == cvValue)
           ackCV();
       }
     }
 
     else  // Perform the Verify Operation
     {  
-      if(validCV(CVAddr, 0))
+      if (validCV(cv, false))
       {
-        if(readCV(CVAddr) == Value)
+        if (readCV(cv) == cvValue)
           ackCV();
       }
     }
@@ -272,24 +260,24 @@ static void processDirectOpsOperation(uint8_t Cmd, uint16_t CVAddr, uint8_t Valu
   // Perform the Bit-Wise Operation
   else
   {
-    uint8_t BitMask = (1 << (Value & 0x07));
-    uint8_t BitValue = Value & 0x08;
-    uint8_t BitWrite = Value & 0x10;
+    uint8_t BitMask = (1 << (cvValue & 0x07));
+    uint8_t BitValue = cvValue & 0x08;
+    uint8_t BitWrite = cvValue & 0x10;
 
-    uint8_t tempValue = readCV(CVAddr);  // Read the Current CV Value
+    uint8_t tempValue = readCV(cv);  // Read the Current CV value
 
     // Perform the Bit Write Operation
-    if(BitWrite)
+    if (BitWrite)
     {
-      if(validCV(CVAddr, 1))
+      if (validCV(cv, true))
       {
-        if(BitValue)
+        if (BitValue)
           tempValue |= BitMask;     // Turn the Bit On
 
         else
           tempValue &= ~BitMask;  // Turn the Bit Off
 
-        if(writeCV(CVAddr, tempValue) == tempValue)
+        if (writeCV(cv, tempValue) == tempValue)
           ackCV();
       }
     }
@@ -297,16 +285,16 @@ static void processDirectOpsOperation(uint8_t Cmd, uint16_t CVAddr, uint8_t Valu
     // Perform the Bit Verify Operation
     else
     {
-      if(validCV(CVAddr, 0))
+      if (validCV(cv, false))
       {
-        if(BitValue) 
+        if (BitValue) 
         {
-          if(tempValue & BitMask)
+          if (tempValue & BitMask)
             ackCV();
         }
         else
         {
-          if(!(tempValue & BitMask) )
+          if (!(tempValue & BitMask) )
             ackCV();
         }
       }
@@ -318,27 +306,27 @@ static void processDirectOpsOperation(uint8_t Cmd, uint16_t CVAddr, uint8_t Valu
 static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data1, uint8_t Data2)
 {
   uint8_t  speed;
-  uint16_t CVAddr;
+  uint16_t cv;
 
   uint8_t  CmdMasked = Cmd & 0b11100000;
 
   // If we are an Accessory Decoder
-  if(DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER)
+  if (DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER)
   {
     // and this isn't an Ops Mode Write or we are NOT faking the Multifunction Ops mode address in CV 33+34 or
     // it's not our fake address, then return
-    if((CmdMasked != 0b11100000) || (DccProcState.OpsModeAddressBaseCV == 0))
+    if ((CmdMasked != 0b11100000) || (DccProcState.OpsModeAddressBaseCV == 0))
       return;
 
     uint16_t FakeOpsAddr = readCV(DccProcState.OpsModeAddressBaseCV) | (readCV(DccProcState.OpsModeAddressBaseCV + 1) << 8);
     uint16_t OpsAddr = Addr & 0x3FFF;
 
-    if(OpsAddr != FakeOpsAddr)
+    if (OpsAddr != FakeOpsAddr)
       return;
   }
 
   // We are looking for FLAGS_MY_ADDRESS_ONLY but it does not match and it is not a Broadcast Address then return
-  else if((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != getMyAddr()) && (Addr != 0)) 
+  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != getMyAddr()) && (Addr != 0)) 
     return;
 
   switch(CmdMasked)
@@ -347,8 +335,8 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
     switch(Cmd & 0b00001110)
     {
     case 0b00000000:  
-      if(notifyDccReset && (Cmd & 0b00000001)) // Hard Reset
-        if(notifyDccReset)
+      if (notifyDccReset && (Cmd & 0b00000001)) // Hard Reset
+        if (notifyDccReset)
           notifyDccReset(1);
       break;
 
@@ -448,9 +436,9 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
     break;
 
   case 0b11100000:  // CV Access
-    CVAddr = (((Cmd & 0x03) << 8) | Data1) + 1;
+    cv = (((Cmd & 0x03) << 8) | Data1) + 1;
 
-    processDirectOpsOperation(Cmd, CVAddr, Data2);
+    processDirectOpsOperation(Cmd, cv, Data2);
     break;
   }
 } // processMultiFunctionMessage
@@ -459,73 +447,61 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
 static void processServiceModeOperation(DCC_MSG * pDccMsg)
 {
-  uint16_t CVAddr;
-  uint8_t Value;
+  uint16_t cv;
+  uint8_t cvValue;
 
-  if(pDccMsg->Size == 3) // 3 Byte Packets are for Address Only, Register and Paged Mode
-  {
+  if (pDccMsg->Size == 3) { // 3 Byte Packets are for Address Only, Register and Paged Mode
     uint8_t RegisterAddr;
 
     RegisterAddr = pDccMsg->Data[0] & 0x07;
-    Value = pDccMsg->Data[1];
+    cvValue = pDccMsg->Data[1];
 
-    if(RegisterAddr == 5)
-    {
-      DccProcState.PageRegister = Value;
+    if (RegisterAddr == 5) {
+      DccProcState.PageRegister = cvValue;
       ackCV();
     }
 
-    else
-    {
-      if(RegisterAddr == 4)
-        CVAddr = CV_29_CONFIG;
+    else {
+      if (RegisterAddr == 4)
+        cv = CV_DECODER_CONFIGURATION;
 
-      else if((RegisterAddr <= 3) && (DccProcState.PageRegister > 0))
-        CVAddr = ((DccProcState.PageRegister - 1) * 4) + RegisterAddr + 1;
-
+      else if ((RegisterAddr <= 3) && (DccProcState.PageRegister > 0))
+        cv = ((DccProcState.PageRegister - 1) * 4) + RegisterAddr + 1;
       else
-        CVAddr = RegisterAddr + 1;
+        cv = RegisterAddr + 1;
 
-      if(pDccMsg->Data[0] & 0x08) // Perform the Write Operation
-      {
-        if(validCV(CVAddr, 1))
-        {
-          if(writeCV(CVAddr, Value) == Value)
+      if (pDccMsg->Data[0] & 0x08) { // Perform the Write Operation
+        if (validCV(cv, true)) {
+          if (writeCV(cv, cvValue) == cvValue)
             ackCV();
         }
       }
 
-      else  // Perform the Verify Operation
-      {  
-        if(validCV(CVAddr, 0))
-        {
-          if(readCV(CVAddr) == Value)
+      else { // Perform the Verify Operation
+        if (validCV(cv, false)) {
+          if (readCV(cv) == cvValue)
             ackCV();
         }
       }
     }
   }
 
-  else if(pDccMsg->Size == 4) // 4 Byte Packets are for Direct Byte & Bit Mode
-  {
-    CVAddr = (((pDccMsg->Data[0] & 0x03) << 8) | pDccMsg->Data[1]) + 1;
-    Value = pDccMsg->Data[2];
-
-    processDirectOpsOperation(pDccMsg->Data[0] & 0b00001100, CVAddr, Value);
+  else if (pDccMsg->Size == 4) { // 4 Byte Packets are for Direct Byte & Bit Mode
+    cv = (((pDccMsg->Data[0] & 0x03) << 8) | pDccMsg->Data[1]) + 1;
+    cvValue = pDccMsg->Data[2];
+    processDirectOpsOperation(pDccMsg->Data[0] & 0b00001100, cv, cvValue);
   }
 }
 #endif // NMRA_DCC_PROCESS_SERVICEMODE
 
-static void resetServiceModeTimer(bool inServiceMode)
-{
+static void resetServiceModeTimer(bool inServiceMode) {
   // Set the Service Mode
   DccProcState.inServiceMode = inServiceMode;
   DccProcState.LastServiceModeMillis = inServiceMode ? millis() : 0;
 } // resetServiceModeTimer
 
 // TODO 2021: hernoem naar setServiceMode true/false of zoiets
-static void clearDccProcState(bool inServiceMode)
-{
+static void clearDccProcState(bool inServiceMode) {
   resetServiceModeTimer(inServiceMode);
 
   // Set the Page Register to it's default of 1 only on the first Reset
@@ -536,99 +512,100 @@ static void clearDccProcState(bool inServiceMode)
   memset(&DccProcState.LastMsg, 0, sizeof(DCC_MSG));
 } // clearDccProcState
 
-static void execDccProcessor(DCC_MSG * pDccMsg)
-{
-  if((pDccMsg->Data[0] == 0) && (pDccMsg->Data[1] == 0))
-  {
+static void execDccProcessor(DCC_MSG * pDccMsg) {
+  if ((pDccMsg->Data[0] == 0) && (pDccMsg->Data[1] == 0)) {
     if (notifyDccReset)
       notifyDccReset(0);
 
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
     // If this is the first Reset then perform some one-shot actions as we maybe about to enter service mode
-    if(DccProcState.inServiceMode)
+    if (DccProcState.inServiceMode)
       resetServiceModeTimer(1);
     else
       clearDccProcState(1);
 #endif
   }
 
-  else
-  {
+  else {
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
-    if(DccProcState.inServiceMode && (pDccMsg->Data[0] >= 112) && (pDccMsg->Data[0] < 128))
-    {
+    if (DccProcState.inServiceMode && (pDccMsg->Data[0] >= 112) && (pDccMsg->Data[0] < 128)) {
       resetServiceModeTimer(1);
-      if(memcmp(pDccMsg, &DccProcState.LastMsg, sizeof(DCC_MSG)))
-      {
+      if (memcmp(pDccMsg, &DccProcState.LastMsg, sizeof(DCC_MSG))) {
         DccProcState.DuplicateCount = 0;
         memcpy(&DccProcState.LastMsg, pDccMsg, sizeof(DCC_MSG));
       }
-      // Wait until you see 2 identical packets before acting on a Service Mode Packet 
-      else
-      {
+      else { // Wait until you see 2 identical packets before acting on a Service Mode Packet 
         DccProcState.DuplicateCount++;
         if (DccProcState.DuplicateCount == 1) //SDS : je hoeft het maar 1 keer uit voeren, ook al stuurt het commandstation 5x hetzelfde
           processServiceModeOperation(pDccMsg);
       }
     }
 
-    else // SDS : not service mode
-    {
-      if(DccProcState.inServiceMode)
+    else { // SDS : not service mode
+      if (DccProcState.inServiceMode)
         clearDccProcState(0);	
 #endif
-
       // Idle Packet
-      if((pDccMsg->Data[0] == 0b11111111) && (pDccMsg->Data[1] == 0))
-      {
+      if ((pDccMsg->Data[0] == 0b11111111) && (pDccMsg->Data[1] == 0)) {
         if (notifyDccIdle)
-          notifyDccIdle(); //SDS : eventueel te gebruiken om bus activiteit te tonen met een led?
+          notifyDccIdle();
       }
 
 #ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
       // Multi Function Decoders (7-bit address)
-      else if(pDccMsg->Data[0] < 128)
+      else if (pDccMsg->Data[0] < 128)
         processMultiFunctionMessage(pDccMsg->Data[0], pDccMsg->Data[1], pDccMsg->Data[2], pDccMsg->Data[3]);  
 
       // Basic Accessory Decoders (9-bit) & Extended Accessory Decoders (11-bit)
-      else if(pDccMsg->Data[0] < 192)
+      else if (pDccMsg->Data[0] < 192)
 #else
-      else if((pDccMsg->Data[0] >= 128) && (pDccMsg->Data[0] < 192)) {
+      else if ((pDccMsg->Data[0] >= 128) && (pDccMsg->Data[0] < 192)) {
 #endif
-        if(DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER)
-        {
+        if (DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER) {
           uint16_t DecoderAddress; // SDS: 9-bit accessory decoder address 0..511
           uint8_t  OutputId; // SDS : 3bits output 0..7
           DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
 
           // If we're filtering was it my board address or a broadcast address
-          if((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != getMyAddr()) && (DecoderAddress != 511))
+          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != getMyAddr()) && (DecoderAddress != 511))
             return;
 
           OutputId = pDccMsg->Data[1] & 0b00000111;
           // geen idee wat dit is -> weg ermee
           //Address = (((DecoderAddress - 1) << 2) | OutputIndex) + 1;
-          if(pDccMsg->Data[1] & 0b10000000) {
+          if (pDccMsg->Data[1] & 0b10000000) { // basic accessory packet
             if (notifyDccAccState)
               notifyDccAccState(DecoderAddress, OutputId, pDccMsg->Data[1] & 0b00001000);
-        }
+          }
 
-          else  { // SDS 2021 : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
+          else { // not basic accessory packet
             // dit staat in de extended packet formats spec, maar toch hier, handig
             // zo hebben we NMRA_DCC_PROCESS_MULTIFUNCTION niet nodig (enkel locdecoder stuff)?
             // of zit POM voor accessories daar ook onder? JA
-            // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
-            uint8_t signalId = OutputId >> 1;
-            if (notifyDccSigState)
-              notifyDccSigState(DecoderAddress, signalId, pDccMsg->Data[2] & 0x1F);
+            // RCN-213 : voorziet ook een NOP packet, we gaan dat voorlopig hier enkel capteren
+            // voor als we ooit railcom implementeren
+            if (pDccMsg->Data[1] & 0b00001000) { // NOP packet
+              // pDccMsg->Data[1] & 0x1 is T-bit, to indicate basic/extended accessory, not sure if we need this in the callback
+              if (notifyDccNop) {
+                notifyDccNop(DecoderAddress);
+              } 
+            }
+            else { // extended accessory packet
+              // NMRA-DCC : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
+              // RCN-213 :  laat nu wel 8 bits signal aspect toe
+              // en zelfde packet ook voor basic accessories waarbij pDccMsg->Data[2] de schakeltijd is voor de output (§2.3)
+              // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
+              uint8_t signalId = OutputId >> 1;
+              if (notifyDccSigState)
+                notifyDccSigState(DecoderAddress, signalId, pDccMsg->Data[2]);
+            }
           }
         }
       }
 
 #ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
       // Multi Function Decoders (14-bit address)
-      else if(pDccMsg->Data[0] < 232)
-      {
+      else if (pDccMsg->Data[0] < 232) {
         uint16_t Address;
         Address = (pDccMsg->Data[0] << 8) | pDccMsg->Data[1];
         processMultiFunctionMessage(Address, pDccMsg->Data[2], pDccMsg->Data[3], pDccMsg->Data[4]);  
@@ -656,7 +633,7 @@ void NmraDcc::pin(uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup)
   pinMode(ExtIntPinNum, INPUT);
   if (EnablePullup)
     digitalWrite(ExtIntPinNum, HIGH);
-}
+} // NmraDcc::pin
 
 void NmraDcc::init(uint8_t Flags, uint8_t OpsModeAddressBaseCV) {
   // Clear all the static member variables
@@ -675,16 +652,16 @@ void NmraDcc::init(uint8_t Flags, uint8_t OpsModeAddressBaseCV) {
   clearDccProcState(0);
 } // NmraDcc::init
 
-uint8_t NmraDcc::getCV(uint16_t CV) {
-  return readCV(CV);
+uint8_t NmraDcc::getCV(uint16_t cv) {
+  return readCV(cv);
 }
 
-uint8_t NmraDcc::setCV(uint16_t CV, uint8_t Value) {
-  return writeCV(CV,Value);
+uint8_t NmraDcc::setCV(uint16_t cv, uint8_t cvValue) {
+  return writeCV(cv,cvValue);
 }
 
-bool NmraDcc::isSetCVReady(void) {
-  if(notifyIsSetCVReady)
+bool NmraDcc::isSetCVReady() {
+  if (notifyIsSetCVReady)
 	  return notifyIsSetCVReady();
 	
   return eeprom_is_ready();
@@ -692,27 +669,26 @@ bool NmraDcc::isSetCVReady(void) {
 
 //SDS : te optimaliseren : voor elke DCC message wordt nu uit eeprom gelezen --> overbodig
 // is enkel nodig na een factory reset of wanneer de adresCVs worden gewijzigd in service mode
-uint16_t getMyAddr(void) {
+uint16_t getMyAddr() {
   uint16_t  Addr;
   uint8_t   CV29Value;
 
-  CV29Value = readCV(CV_29_CONFIG);
+  CV29Value = readCV(CV_DECODER_CONFIGURATION);
 
-  if(CV29Value & 0b10000000)  // Accessory Decoder? 
+  if (CV29Value & 0b10000000)  // Accessory Decoder? 
     Addr = (readCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | readCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
   else { // Multi-Function Decoder?
-    if(CV29Value & 0b00100000)  // Two Byte Address?
+    if (CV29Value & 0b00100000)  // Two Byte Address?
       Addr = (readCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | readCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
     else
       Addr = readCV(1);
   }
-
   return Addr;
 } // getMyAddr
 
 uint8_t NmraDcc::process() {
-  if(DccProcState.inServiceMode) {
-    if((millis() - DccProcState.LastServiceModeMillis) > 20L)
+  if (DccProcState.inServiceMode) {
+    if ((millis() - DccProcState.LastServiceModeMillis) > 20L)
       clearDccProcState(0);
   }
 
@@ -728,7 +704,7 @@ uint8_t NmraDcc::process() {
     for(uint8_t i = 0; i < DccRx.PacketCopy.Size; i++)
       xorValue ^= DccRx.PacketCopy.Data[i];
 
-    if(xorValue)
+    if (xorValue)
       return 0;
     else {
 			if (notifyDccMsg)
@@ -737,6 +713,5 @@ uint8_t NmraDcc::process() {
     }
     return 1;
   }
-
   return 0;  
 } // NmraDcc::process

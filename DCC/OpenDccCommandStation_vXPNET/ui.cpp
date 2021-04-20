@@ -58,6 +58,10 @@ bool ui_doHomeMenu (uint8_t key) {
   keyCode = key & KEYCODEFILTER;
   keyEvent = key & KEYEVENTFILTER;
 
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return false;
+
   bool keyHandled = false;
   if (ui_State == UISTATE_HOME_PAGE1) {
     ui_Page = 0;
@@ -86,6 +90,10 @@ bool ui_doLocMenu (uint8_t key) {
   keyEvent = key & KEYEVENTFILTER;
 
   bool keyHandled = false;
+
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return false;
   
   if ((ui_State == UISTATE_LOC_DO_SPEED) || (ui_State == UISTATE_LOC_DO_FUNCS)) {
     uint8_t func;
@@ -150,16 +158,22 @@ bool ui_doTurnoutMenu (uint8_t key)
   keyEvent = key & KEYEVENTFILTER;
   
   bool keyHandled = false;
+  bool activate;
+
+  if (keyEvent == KEYEVENT_DOWN) activate = true;
+  else activate = false; // KEYEVENT_UP & KEYEVENT_LONGDOWN
   
   if (ui_State == UISTATE_TURNOUT_PAGE1) {
       keyHandled = true;
-      if (keyCode == KEY_KEY1) {
+      if (keyEvent == KEYEVENT_LONGDOWN) // ignore long key presses
+        return (keyHandled);
+      if ((keyCode == KEY_KEY1) && (keyEvent == KEYEVENT_DOWN)) {
           if (ui_Page) ui_Page--;
           else ui_State = UISTATE_HOME_PAGE1; // back // eventueel een long event gebruiken om direct terug te keren
       }
-      else if (keyCode == KEY_KEY2) app_ToggleAccessory (ui_Page << 1); // wissel 1 = turnoutAddr 0
-      else if (keyCode == KEY_KEY3) app_ToggleAccessory ((ui_Page << 1)+1); // wissel 2 = turnoutAddr 1
-      else if (keyCode == KEY_KEY4) ui_Page++; // door de 255 pagina's scrollen, daarmee hebben we 512 wissels
+      else if (keyCode == KEY_KEY2) app_ToggleAccessory (ui_Page << 1,activate); // wissel 1 = turnoutAddr 0
+      else if (keyCode == KEY_KEY3) app_ToggleAccessory ((ui_Page << 1)+1,activate); // wissel 2 = turnoutAddr 1
+      else if ((keyCode == KEY_KEY4) && (keyEvent == KEYEVENT_DOWN)) ui_Page++; // door de 255 pagina's scrollen, daarmee hebben we 512 wissels
       else keyHandled = false;
   }
   return (keyHandled);
@@ -404,6 +418,10 @@ static bool handleSpeedKeys (key_t key) {
   
   bool keyHandled = false;
   uint8_t speedStep, curSpeed, dirBit;
+
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return true;
   
   // als we snel aan de knop draaien gaat de speed sneller vooruit
   if ((millis() - speedkeyLastMillis) > 50) speedStep = 1;
@@ -445,13 +463,13 @@ void keys_Handler (key_t key) {
   keyCode = key & KEYCODEFILTER;
   keyEvent = key & KEYEVENTFILTER;
   
-  // voorlopig de key-up events negeren
-  if (keyEvent == KEYEVENT_UP) return;
-  
-  ui_Redraw = true; // bij elke key de ui redraw vragen
+  if (keyEvent == KEYEVENT_DOWN) // voorlopig geen redraws nodig bij UP/LONGDOWN events
+    ui_Redraw = true; // bij elke key de ui redraw vragen
+
   // voorlopig events hier afhandelen
   if ((ui_State == UISTATE_EVENT_MAINSHORT) || (ui_State == UISTATE_EVENT_PROGSHORT) || (ui_State == UISTATE_EVENT_EXTSTOP)) {
-    if ((keyCode = KEY_ENTER) || (keyCode = KEY_KEY1) || (keyCode = KEY_KEY2) || (keyCode = KEY_KEY3) || (keyCode = KEY_KEY4)) {
+    if ((keyEvent == KEYEVENT_DOWN) && 
+        ((keyCode = KEY_ENTER) || (keyCode = KEY_KEY1) || (keyCode = KEY_KEY2) || (keyCode = KEY_KEY3) || (keyCode = KEY_KEY4))) {
       app_SetCSState(RUN_OKAY);
       ui_State = UISTATE_DEFAULT; // DO_LOC_SPEED
     }

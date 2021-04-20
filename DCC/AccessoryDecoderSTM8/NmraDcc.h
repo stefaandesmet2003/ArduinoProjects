@@ -61,18 +61,19 @@ typedef struct {
 // VERSION_ID -> define in your sketch, and write to CV_VERSION_ID
 
 // Standard CV Addresses
-#define CV_ACCESSORY_DECODER_ADDRESS_LSB       1
-#define CV_ACCESSORY_DECODER_ADDRESS_MSB       9
+#define CV_ACCESSORY_DECODER_ADDRESS_LSB       	1
+#define CV_ACCESSORY_DECODER_ADDRESS_MSB       	9
 
-#define CV_MULTIFUNCTION_PRIMARY_ADDRESS       1
-#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB 17
-#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB 18
+#define CV_MULTIFUNCTION_PRIMARY_ADDRESS       	1
+#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB 	17
+#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB 	18
 
-#define CV_VERSION_ID                          7
-#define CV_MANUFACTURER_ID                     8
-#define CV_29_CONFIG                          29
+#define CV_VERSION_ID                          	7
+#define CV_MANUFACTURER_ID                     	8
+#define CV_DECODER_CONFIGURATION               	29
+#define CV_RAILCOM_CONFIGURATION								28
 
-#define MAXCV                                 E2END     // the upper limit of the CV value currently defined to max memory.
+#define MAXCV                                 	E2END     // the upper limit of the CV value currently defined to max memory.
 
 typedef enum {
 	FN_0_4 = 1,
@@ -122,7 +123,7 @@ typedef enum {
 #define FLAGS_DCC_ACCESSORY_DECODER	0x80  // CV 29/541 bit 7
 
 // pin + init, remove constructor was empty anyway
-void DCC_init(uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullupEnable);
+void 		DCC_init(uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullupEnable);
 uint8_t DCC_process();
 uint8_t DCC_getCV(uint16_t CV);
 uint8_t DCC_setCV(uint16_t CV, uint8_t Value);
@@ -132,18 +133,21 @@ uint16_t getMyAddr(void);
 
 // TODO : rename DCC_resetNotify, etc
 void notifyDccReset(uint8_t hardReset);
-void notifyDccIdle(void);
-void notifyDccSpeed(uint16_t Addr, uint8_t Speed, uint8_t ForwardDir, uint8_t MaxSpeed);
+void notifyDccIdle();
+void notifyDccSpeed(uint16_t decoderAddress, uint8_t Speed, uint8_t ForwardDir, uint8_t MaxSpeed);
 void notifyDccFunc(uint16_t Addr, FN_GROUP FuncGrp, uint8_t FuncState);
 void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate);
 void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect);
 
-void    notifyDccMsg(DCC_MSG * Msg);
-uint8_t notifyCVValid(uint16_t CV, uint8_t Writable);
-uint8_t notifyCVWrite(uint16_t CV, uint8_t Value);
-void    notifyCVAck(void);
-// uint8_t notifyCVRead( uint16_t CV);
-// bool    notifyIsSetCVReady(void);
-// void    notifyCVChange( uint16_t CV, uint8_t Value);
+void notifyDccMsg(DCC_MSG * Msg);
+// not used for now
+//void notifyDccNop(uint16_t decoderAddress)); // RCN-213 NOP packet for accessories
+
+bool    notifyCVValid(uint16_t cv, uint8_t writable);
+uint8_t notifyCVWrite(uint16_t cv, uint8_t cvValue);
+void    notifyCVAck();
+// uint8_t notifyCVRead( uint16_t cv);
+// bool    notifyIsSetCVReady();
+// void    notifyCVChange(uint16_t cv, uint8_t cvValue);
 
 #endif // __NMRADCC_H__

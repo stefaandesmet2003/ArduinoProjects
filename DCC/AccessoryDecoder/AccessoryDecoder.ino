@@ -3,8 +3,6 @@
 #include "TurnoutDecoder.h"
 #include "Timer.h"
 
-#define DEBUG // adds debug prints on serial
-
 /*
 // dcc.process() verwerkt exact 1 DCC packet. Vanuit dcc.process wordt de notify functie aangeroepen, die het packet verwerkt
 // als de processing langer dan 1 DCC packet duurt, dan gaan er packetten verloren. NmraDcc heeft een buffer van 1 pakket!! (dccRx.PacketCopy)
@@ -33,14 +31,14 @@ static CVPair FactoryDefaultCVs [] = {
   {CV_ACCESSORY_DECODER_ADDRESS_MSB, 0},
   {CV_VERSION_ID, VersionId},
   {CV_MANUFACTURER_ID, MAN_ID_DIY},
-  {CV_29_CONFIG,0x80},
+  {CV_DECODER_CONFIGURATION,0x80},
   {CV_SoftwareMode, 0} 
 };
 
 
 // keyhandling
 #define DEBOUNCE_DELAY 50
-#define LONGPRESS_DELAY 1000
+#define LONGPRESS_DELAY 3000
 #define NUMBER_OF_KEYS 4
 typedef enum {UP, DEBOUNCING_DOWN, DOWN, LONG_DOWN, DEBOUNCING_UP} keyState_t;
 typedef struct {
@@ -144,12 +142,14 @@ static void keyHandler (uint8_t keyEvent) {
         decoderState = DECODER_INIT;
         timer.stop (ledTimer); //stop de slow flashing led
       }
-      else { // we gebruiken de knoppen om wissels te bedienen
-        turnout_ManualToggle (keyEvent >> 2);
+      else { // send the 'on' command to toggle turnout position
+        turnout_ManualToggle (keyEvent >> 2,true);
       }
     }
-    else { // key up
+    else { // key up -> send the 'off' command
+      turnout_ManualToggle (keyEvent >> 2,false);
     }
+
     #ifdef DEBUG
       Serial.print ("decoderState = ");
       if (decoderState == DECODER_INIT) Serial.println("DECODER_INIT");
@@ -201,8 +201,8 @@ void setup() {
   Dcc.pin(0, PIN_DCCIN, 1);
   
   // Call the main DCC Init function to enable the DCC Receiver
-  //SDS  Dcc.init( FLAGS_OUTPUT_ADDRESS_MODE | FLAGS_DCC_ACCESSORY_DECODER | FLAGS_MY_ADDRESS_ONLY, 0 );
-  Dcc.init( FLAGS_OUTPUT_ADDRESS_MODE | FLAGS_DCC_ACCESSORY_DECODER, 0 );
+  // geen filtering FLAGS_MY_ADDRESS_ONLY !!
+  Dcc.init(FLAGS_DCC_ACCESSORY_DECODER, 0);
 
   // progled, progkey
   pinMode (PIN_PROGKEY, INPUT_PULLUP);
@@ -238,8 +238,7 @@ void loop() {
       break;
     case DECODER_INIT :
       #ifdef DEBUG
-        Serial.print("my address is : ");
-        Serial.println(getMyAddr());
+        Serial.print("my address is : "); Serial.println(getMyAddr());
       #endif
       decoderSoftwareMode = Dcc.getCV(CV_SoftwareMode);
       switch (decoderSoftwareMode) {
@@ -304,6 +303,7 @@ void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate)
     // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
     eeprom_update_byte((uint8_t*) CV_ACCESSORY_DECODER_ADDRESS_LSB, decoderAddress & 0x3F);
     eeprom_update_byte((uint8_t*) CV_ACCESSORY_DECODER_ADDRESS_MSB, (decoderAddress >> 6) & 0x7);
+    timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     #ifdef DEBUG
       Serial.print("CV1/CV9 rewritten, my address is now :");
       Serial.println(getMyAddr());
@@ -337,40 +337,45 @@ void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signal
 } // notifyDccSigState
 
 // enkel CV's schrijven als decoder niet 'live' is (INIT, FACTORY_RESET, PROGRAM)
-uint8_t notifyCVWrite( uint16_t CV, uint8_t Value) {
+uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
   #ifdef DEBUG
-    Serial.print ("CV Write ");
-    Serial.print(CV);
+    Serial.print ("CVWrite ");
+    Serial.print(cv);
     Serial.print(" = ");
-    Serial.println(Value);
+    Serial.println(cvValue);
     if (decoderState == DECODER_RUNNING)
       Serial.println("no CVs written while decoder RUNNING");
   #endif
-  
-  if (decoderState != DECODER_RUNNING) {
-    eeprom_update_byte((uint8_t*) CV, Value);
-    timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
+
+  if (decoderState == DECODER_RUNNING) {
+    return eeprom_read_byte((uint8_t*) cv);
   }
-  return eeprom_read_byte( (uint8_t*) CV);
-  
+  if (cv == CV_MANUFACTURER_ID) { // writing the CV_MANUFACTURER_ID triggers a factory reset
+    decoderState = DECODER_FACTORY_RESET;
+    timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
+    return cvValue; // we pretend to write the value, but only to trigger an ackCV
+  }
+  else {
+    eeprom_update_byte((uint8_t*) cv, cvValue);
+    timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
+    return eeprom_read_byte((uint8_t*) cv);
+  }
 } // notifyCVWrite
 
 // 0 = ongeldige schrijfactie gevraagd naar CV
 // 0 = lezen naar niet-geïmplementeerde CV's : todo SDS!
 // 1 = geldige actie
-uint8_t notifyCVValid(uint16_t CV, uint8_t Writable) {
-  // write-request naar CV_MANUFACTURER_ID triggert een factory reset
-  if((CV == CV_MANUFACTURER_ID)  && Writable)
-    decoderState = DECODER_FACTORY_RESET;
+// DECODER_PROGRAM : for now we only allow CV writes while decoder is in DECODER_PROGRAM
+bool notifyCVValid(uint16_t cv, uint8_t writable) {
+  bool isValid = true;
 
-  uint8_t Valid = 1;
+  if( (cv > MAXCV) || (decoderState != DECODER_PROGRAM))
+    isValid = false;
 
-  if(CV > E2END)
-    Valid = 0;
+  // different from default, because we do allow writing CV_MANUFACTURER_ID to trigger a factory reset
+  if (writable && ((cv==CV_VERSION_ID)||(cv==CV_DECODER_CONFIGURATION)||(cv==CV_RAILCOM_CONFIGURATION)))
+    isValid = false;
 
-  if(Writable && ((CV ==CV_VERSION_ID) || (CV == CV_MANUFACTURER_ID)))
-    Valid = 0;
   // TODO : uitbreiden!! (ook afhankelijk van swMode CV33)
-
-  return Valid;  
+  return isValid;
 } // notifyCVValid

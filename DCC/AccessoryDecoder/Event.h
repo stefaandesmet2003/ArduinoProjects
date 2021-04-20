@@ -23,8 +23,6 @@
 #ifndef Event_h
 #define Event_h
 
-#include <inttypes.h>
-
 #define EVENT_NONE 0
 #define EVENT_EVERY 1
 #define EVENT_OSCILLATE 2
