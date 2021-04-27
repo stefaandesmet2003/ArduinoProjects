@@ -9,7 +9,7 @@
                
 // values for CV33
 #define SOFTWAREMODE_TURNOUT_DECODER    0
-#define SOFTWAREMODE_LIGHT_DECODER      1
+#define SOFTWAREMODE_OUTPUT_DECODER     1
 
 // hardware definitions? (of is dit afhankelijk van softwaremode?)
 // hardware-def van de turnout-decoder
@@ -48,4 +48,5 @@ typedef struct {
   uint8_t   Value;
 } CVPair;
 
+uint16_t getDecoderAddress();
 #endif //AccessoryDecoder_h

@@ -25,6 +25,7 @@ NmraDcc  Dcc;
 enum {DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM } decoderState;
 uint8_t decoderSoftwareMode;
 
+static uint16_t decoderAddress; // keep this local, other modules will use getter getDecoderAddress;
 //factory defaults
 static CVPair FactoryDefaultCVs [] = {
   {CV_ACCESSORY_DECODER_ADDRESS_LSB, 1},
@@ -53,7 +54,7 @@ Timer timer;
 int8_t ledTimer;
 
 /******************************************************************/
-/*  STATIC FUNCTIONS  *********************************************/
+/*  KEY HANDLING                                                  */
 /******************************************************************/
 static void init_keys (void) {
     keys[0].Pin = PIN_PROGKEY;
@@ -140,15 +141,12 @@ static void keyHandler (uint8_t keyEvent) {
     else if (keyEvent & KEYEVENT_DOWN) {
       if (decoderState == DECODER_PROGRAM) {
         decoderState = DECODER_INIT;
-        timer.stop (ledTimer); //stop de slow flashing led
       }
-      else { // send the 'on' command to toggle turnout position
-        turnout_ManualToggle (keyEvent >> 2,true);
-      }
+      else
+        turnout_ManualToggle (keyEvent >> 2,true); // key down -> send the 'on' command to the turnout/output
     }
-    else { // key up -> send the 'off' command
-      turnout_ManualToggle (keyEvent >> 2,false);
-    }
+    else
+      turnout_ManualToggle (keyEvent >> 2,false); // key up -> send the 'off' command
 
     #ifdef DEBUG
       Serial.print ("decoderState = ");
@@ -158,6 +156,35 @@ static void keyHandler (uint8_t keyEvent) {
       else Serial.println("factory reset");
     #endif
 } // keyHandler
+
+/******************************************************************/
+/*  OTHER LOCAL FUNCTIONS                                         */
+/******************************************************************/
+// not public, do this only here on init
+static uint16_t readDecoderAddress() {
+  uint16_t aAddress;
+  uint8_t cv29Value;
+
+  cv29Value = Dcc.getCV(CV_DECODER_CONFIGURATION);
+  if (cv29Value & 0b10000000)  // Accessory Decoder? 
+    aAddress = (Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
+  else { // Multi-Function Decoder?
+    if (cv29Value & 0b00100000)  // Two Byte Address?
+      aAddress = (Dcc.getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | Dcc.getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
+    else
+      aAddress = Dcc.getCV(1);
+  }
+  return aAddress;
+} // readDecoderAddress
+
+// not public, do this only here on CV Write
+static void writeDecoderAddress(uint16_t aAddress) {
+  // take the decoderAddress & program it as our own
+  // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
+  Dcc.setCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,aAddress & 0x3F);
+  Dcc.setCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(aAddress >> 6) & 0x7);
+  decoderAddress = aAddress; // keep copy in RAM
+} // writeDecoderAddress
 
 // 0 = DONE, 1 = NOT DONE (eeprom not ready)
 static uint8_t accessory_FactoryResetCV() {
@@ -172,10 +199,8 @@ static uint8_t accessory_FactoryResetCV() {
   swMode = Dcc.getCV(CV_SoftwareMode);
   switch(swMode) {
     case SOFTWAREMODE_TURNOUT_DECODER :
+    case SOFTWAREMODE_OUTPUT_DECODER :
       turnout_FactoryResetCV();
-      break;
-    case SOFTWAREMODE_LIGHT_DECODER :
-      //todo ! 
       break;
     default :
       // er staat een unsupported software mode in CV33 --> we gaan die terugzetten naar TURNOUT_DECODER en de TURNOUT_DECODER factory defaults zetten
@@ -237,19 +262,19 @@ void loop() {
       }
       break;
     case DECODER_INIT :
-      #ifdef DEBUG
-        Serial.print("my address is : "); Serial.println(getMyAddr());
-      #endif
+      timer.stop (ledTimer); //stop de slow flashing led
+      decoderAddress =  readDecoderAddress(); // reread from eeprom
       decoderSoftwareMode = Dcc.getCV(CV_SoftwareMode);
       switch (decoderSoftwareMode) {
         case SOFTWAREMODE_TURNOUT_DECODER :
+         case SOFTWAREMODE_OUTPUT_DECODER :
           turnout_Init ();
-          break;
-         case SOFTWAREMODE_LIGHT_DECODER :
-          // SDS : TODO!
           break;
       }
       decoderState = DECODER_RUNNING;
+      #ifdef DEBUG
+        Serial.print("my address is : "); Serial.println(getDecoderAddress());
+      #endif
       break;
     case DECODER_RUNNING :
     case DECODER_PROGRAM : 
@@ -263,11 +288,21 @@ void loop() {
   timer.update();  // run timers
 } // loop
 
+/**********************************************************************************************/
+/* external interface                                                                         */
+/**********************************************************************************************/
+uint16_t getDecoderAddress(void) {
+  return decoderAddress;
+} // getDecoderAddress
 
 /**********************************************************************************************/
-/* notify functies uit Nmra layer */
-/**********************************************************************************************///SDS added 20160824
-void notifyDccReset(uint8_t hardReset ){(void) hardReset;}
+/* notify functies uit Nmra layer                                                             */
+/**********************************************************************************************/
+void notifyDccReset(uint8_t hardReset) {
+  (void) hardReset;
+  decoderState = DECODER_INIT; // the loop() function will get the decoder to a reinitialize
+  // avr standard bootloader doesn't like a watchdog reset, so can't do a real reboot
+} // notifyDccReset
 
 //#define NOTIFY_DCC_MSG
 #ifdef  NOTIFY_DCC_MSG
@@ -297,26 +332,22 @@ void notifyCVAck(void) {
 } // notifyCVAck
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate) {
+void notifyDccAccState(uint16_t aDecoderAddress, uint8_t outputId, bool activate) {
   if (decoderState == DECODER_PROGRAM) {
     // take the decoderAddress & program it as our own
-    // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
-    eeprom_update_byte((uint8_t*) CV_ACCESSORY_DECODER_ADDRESS_LSB, decoderAddress & 0x3F);
-    eeprom_update_byte((uint8_t*) CV_ACCESSORY_DECODER_ADDRESS_MSB, (decoderAddress >> 6) & 0x7);
+    writeDecoderAddress(aDecoderAddress);
     timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     #ifdef DEBUG
       Serial.print("CV1/CV9 rewritten, my address is now :");
-      Serial.println(getMyAddr());
+      Serial.println(getDecoderAddress());
     #endif
     return;
   }
 
   if (decoderSoftwareMode == SOFTWAREMODE_TURNOUT_DECODER)
-    turnout_Handler (decoderAddress, outputId, activate);
-  else if (decoderSoftwareMode == SOFTWAREMODE_LIGHT_DECODER) // TODO
-    #ifdef DEBUG
-      Serial.println("unsupported software mode!");
-    #endif
+    turnout_Handler (aDecoderAddress, outputId, activate);
+  else if (decoderSoftwareMode == SOFTWAREMODE_OUTPUT_DECODER)
+    output_Handler (aDecoderAddress, outputId, activate);
   else
     #ifdef DEBUG
       Serial.println("unsupported software mode!");
@@ -325,10 +356,10 @@ void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate)
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
+void notifyDccSigState(uint16_t aDecoderAddress, uint8_t signalId, uint8_t signalAspect) {
   #ifdef DEBUG
     Serial.print("notifyDccSigState: unsupported for now");
-    Serial.print(decoderAddress);
+    Serial.print(aDecoderAddress);
     Serial.print(',');
     Serial.print(signalId);
     Serial.print(',');
@@ -369,6 +400,7 @@ uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
 bool notifyCVValid(uint16_t cv, uint8_t writable) {
   bool isValid = true;
 
+  // CV read/write only in programming mode
   if( (cv > MAXCV) || (decoderState != DECODER_PROGRAM))
     isValid = false;
 

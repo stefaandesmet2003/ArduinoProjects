@@ -36,9 +36,9 @@
 #define MAX_DCC_MESSAGE_LEN 6    // including XOR-Byte
 
 typedef struct {
-	uint8_t	Size;
-	uint8_t	PreambleBits;
-	uint8_t Data[MAX_DCC_MESSAGE_LEN];
+  uint8_t	Size;
+  uint8_t	PreambleBits;
+  uint8_t Data[MAX_DCC_MESSAGE_LEN];
 } DCC_MSG;
 
 //--------------------------------------------------------------------------
@@ -76,11 +76,11 @@ typedef struct {
 #define MAXCV                                 	E2END     // the upper limit of the CV value currently defined to max memory.
 
 typedef enum {
-	FN_0_4 = 1,
-	FN_5_8,
-	FN_9_12,
-	FN_13_20,
-	FN_21_28
+  FN_0_4 = 1,
+  FN_5_8,
+  FN_9_12,
+  FN_13_20,
+  FN_21_28
 } FN_GROUP;
 
 #define FN_BIT_00	0x10
@@ -128,15 +128,14 @@ class NmraDcc {
 #define FLAGS_MY_ADDRESS_ONLY				0x01	// Only process DCC Packets with My Address
 #define FLAGS_OUTPUT_ADDRESS_MODE		0x40  // CV 29/541 bit 6
 #define FLAGS_DCC_ACCESSORY_DECODER	0x80  // CV 29/541 bit 7
-	void pin (uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup); 
+  void pin (uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup); 
   void init (uint8_t Flags, uint8_t OpsModeAddressBaseCV);
   uint8_t process();
   uint8_t getCV (uint16_t CV);
   uint8_t setCV (uint16_t CV, uint8_t Value);
-	bool isSetCVReady ();
+  bool isSetCVReady ();
+  void setAddress(uint16_t decoderAddress); // only needed if FLAGS_MY_ADDRESS_ONLY flag is used
 };
-// SDS TODO2021 : deze vieze functie wordt blijkbaar door turnoutdecoder gebruikt en ino, en zat niet in de dcc class haha
-uint16_t getMyAddr();
 
 extern void notifyDccReset(uint8_t hardReset) __attribute__ ((weak));
 extern void notifyDccIdle() __attribute__ ((weak));
@@ -149,8 +148,8 @@ extern void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t
 extern void notifyDccMsg(DCC_MSG * msg) __attribute__ ((weak));
 extern void	notifyDccNop(uint16_t decoderAddress) __attribute__ ((weak)); // RCN-213 NOP packet for accessories
 
-extern bool			notifyCVValid(uint16_t cv, bool writable) __attribute__ ((weak));
-extern uint8_t 	notifyCVWrite( uint16_t cv, uint8_t cvValue) __attribute__ ((weak));
+extern bool     notifyCVValid(uint16_t cv, bool writable) __attribute__ ((weak));
+extern uint8_t  notifyCVWrite( uint16_t cv, uint8_t cvValue) __attribute__ ((weak));
 extern void    	notifyCVAck() __attribute__ ((weak));
 extern uint8_t 	notifyCVRead(uint16_t cv) __attribute__ ((weak));
 extern bool 		notifyIsSetCVReady() __attribute__ ((weak));

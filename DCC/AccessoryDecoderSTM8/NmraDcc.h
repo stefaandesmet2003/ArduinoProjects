@@ -128,8 +128,7 @@ uint8_t DCC_process();
 uint8_t DCC_getCV(uint16_t CV);
 uint8_t DCC_setCV(uint16_t CV, uint8_t Value);
 bool    DCC_isSetCVReady(void);
-// SDS TODO2021 : deze vieze functie wordt blijkbaar door turnoutdecoder gebruikt en ino, en zat niet in de dcc class haha
-uint16_t getMyAddr(void);
+void 		DCC_setAddress(uint16_t decoderAddress); // only needed if FLAGS_MY_ADDRESS_ONLY flag is used
 
 // TODO : rename DCC_resetNotify, etc
 void notifyDccReset(uint8_t hardReset);

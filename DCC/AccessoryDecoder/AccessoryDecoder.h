@@ -14,7 +14,7 @@
                
 // values for CV33
 #define SOFTWAREMODE_TURNOUT_DECODER    0
-#define SOFTWAREMODE_LIGHT_DECODER      1
+#define SOFTWAREMODE_OUTPUT_DECODER     1
 
 // hardware definitions? (of is dit afhankelijk van softwaremode?)
 // hardware-def van de turnout-decoder
@@ -44,6 +44,7 @@
 #define KEY_KEY2            (0x1 << 2)
 #define KEY_KEY3            (0x2 << 2)
 #define KEY_KEY4            (0x3 << 2)
+// TODO : beetje vies want deze KEY_xxx worden rechtstreeks als outputId gebruikt ook ...
 //other keys here 
 
 // led flash modes
@@ -54,5 +55,7 @@ typedef struct {
   uint16_t  CV;
   uint8_t   Value;
 } CVPair;
+
+uint16_t getDecoderAddress();
 
 #endif //AccessoryDecoder_h

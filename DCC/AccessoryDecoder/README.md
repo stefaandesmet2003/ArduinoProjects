@@ -42,20 +42,21 @@ CVs correspond with NMRA spec S-9.2.2
 |7  | versionNumber  | 1  | read-only |
 |33 | software mode  | 0  | |
 | 0 : turnout decoder  |
-| 1 : light decoder
+| 1 : output decoder
 In software mode = 0 :   
 | 3 | timeOnOutput1 | 5 | x50ms, =250ms default coil activation time  |
 | 4 | timeOnOutput2 | 5 | x50ms, =250ms default coil activation time  |
 | 5 | timeOnOutput3 | 5 | x50ms, =250ms default coil activation time  |
 | 6 | timeOnOutput4 | 5 | x50ms, =250ms default coil activation time  |
 
+turnout decoder mode : the decoder occupies 1 dcc accessory address with 4 turnouts  
+output decoder mode : the decoder occupies 2 dcc accessory addresses with 8 on/off outputs  
+
 ## TODO
 - bug : led keeps blinking after factory reset  
 - programming on main is supported in nmradcc lib, but compiled out for now (NMRA_DCC_PROCESS_MULTIFUNCTION undefined)
-- getMyAddr -> simplify to avoid reading eeprom on every DCC packet  
 - test other decoder types included in nmradcc lib (mobile decoder etc)
 - replace the timer/event bullshit code
-
 
 - configuraties voor wisseldecoder, seindecoder etc maken  
 - code vereenvoudigen (timer.cpp en event.cpp nodig??)  

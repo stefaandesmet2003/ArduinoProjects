@@ -89,6 +89,7 @@ typedef struct
 
 static DccRx_t DccRx;
 static DCC_PROCESSOR_STATE DccProcState;
+static uint16_t dccAddress = 1; // a default
 
 void ExternalInterruptHandler()
 {
@@ -326,7 +327,7 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
   }
 
   // We are looking for FLAGS_MY_ADDRESS_ONLY but it does not match and it is not a Broadcast Address then return
-  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != getMyAddr()) && (Addr != 0)) 
+  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != dccAddress) && (Addr != 0)) 
     return;
 
   switch(CmdMasked)
@@ -567,7 +568,7 @@ static void execDccProcessor(DCC_MSG * pDccMsg) {
           DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
 
           // If we're filtering was it my board address or a broadcast address
-          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != getMyAddr()) && (DecoderAddress != 511))
+          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != dccAddress) && (DecoderAddress != 511))
             return;
 
           OutputId = pDccMsg->Data[1] & 0b00000111;
@@ -667,24 +668,10 @@ bool NmraDcc::isSetCVReady() {
   return eeprom_is_ready();
 }
 
-//SDS : te optimaliseren : voor elke DCC message wordt nu uit eeprom gelezen --> overbodig
-// is enkel nodig na een factory reset of wanneer de adresCVs worden gewijzigd in service mode
-uint16_t getMyAddr() {
-  uint16_t  Addr;
-  uint8_t   CV29Value;
-
-  CV29Value = readCV(CV_DECODER_CONFIGURATION);
-
-  if (CV29Value & 0b10000000)  // Accessory Decoder? 
-    Addr = (readCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | readCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
-  else { // Multi-Function Decoder?
-    if (CV29Value & 0b00100000)  // Two Byte Address?
-      Addr = (readCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | readCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
-    else
-      Addr = readCV(1);
-  }
-  return Addr;
-} // getMyAddr
+// only needed if FLAGS_MY_ADDRESS_ONLY flag is used
+void NmraDcc::setAddress(uint16_t decoderAddress) {
+  dccAddress = decoderAddress;
+} // setAddress
 
 uint8_t NmraDcc::process() {
   if (DccProcState.inServiceMode) {

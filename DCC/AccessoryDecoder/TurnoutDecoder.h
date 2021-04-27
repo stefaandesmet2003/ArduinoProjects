@@ -15,6 +15,9 @@
 void turnout_Init();
 void turnout_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate);
 void turnout_ManualToggle (uint8_t turnoutId, bool activate); // turnoutId = 0..3, manuele bediening met de knoppen
-uint8_t turnout_FactoryResetCV ();
+uint8_t turnout_FactoryResetCV();
+
+// SOFTWAREMODE_OUTPUT_DECODER
+void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate);
 
 #endif //TurnoutDecoder_h
