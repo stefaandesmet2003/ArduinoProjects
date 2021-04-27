@@ -337,138 +337,121 @@ void do_send_no_B(bool myout)
 #endif
 
 
-ISR(TIMER1_COMPA_vect)
-  {
+ISR(TIMER1_COMPA_vect) {
+  register unsigned char state = MY_STATE_REG & ~DOI_CNTMASK;    // take only 3 upper bits
 
-    register unsigned char state = MY_STATE_REG & ~DOI_CNTMASK;    // take only 3 upper bits
-
-    // two phases: phase 0: just repeat same duration, but invert output.
-    //             phase 1: create new bit.
-	// we use back read of PIND instead of phase
+  // two phases: phase 0: just repeat same duration, but invert output.
+  //             phase 1: create new bit.
+  // we use back read of PIND instead of phase
   //SDS : aanpassen voor atmega328 : DCC zit op PB1
-    //SDS if (!(PIND & (1<<DCC)))  //was: (doi.phase == 0)
-    if (!(PINB & 0x2))  //was: (doi.phase == 0)
-	  {
-	    if ((state == DOI_CUTOUT_2) && doi.railcom_enabled)
-          {
-            TCCR1A = (1<<COM1A1) | (1<<COM1A0)  //  set   OC1A (=DCC) on compare match
-                   | (1<<COM1B1) | (1<<COM1B0)  //  set   OC1B (=NDCC) on compare match
-                   | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
-                   | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
-            OCR1A = (F_CPU / 1000000L * 4 * PERIOD_1)
-                    - (F_CPU / 1000000L * CUTOUT_GAP);      // create extended timing: 4 * PERIOD_1 for DCC - GAP
-    		OCR1B = (F_CPU / 1000000L * 9 * PERIOD_1 / 2)   //                         4.5 * PERIOD_1 for NDCC - GAP
-                    - (F_CPU / 1000000L * CUTOUT_GAP);
-    		return;  
-    	  }
-        else
-          {
-            TCCR1A = (1<<COM1A1) | (1<<COM1A0)  //  set   OC1A (=DCC) on compare match
-                   | (1<<COM1B1) | (0<<COM1B0)  //  clear OC1B (=NDCC) on compare match
-                   | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
-                   | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
-            //was: doi.phase = 1;
-    		return;  
-    	  }
-      }
-    //was: doi.phase = 0;
-
-//     register unsigned char state = MY_STATE_REG & ~DOI_CNTMASK;    // take only 3 upper bits
-
-    if (state == DOI_IDLE) 
-      {
-        do_send(1);
-
-        if (next_message_count > 0)
-          {
-            memcpy(doi.current_dcc, next_message.dcc, sizeof(doi.current_dcc));
-            doi.bytes_in_message = next_message.size;
-            // no size checking - if (doi.cur_size > MAX_DCC_SIZE) doi.cur_size = MAX_DCC_SIZE;
-            doi.ibyte = 0;
-            doi.xor_byte = 0;
-            doi.type = next_message.type;   // remember type in case feedback is required
-
-            next_message_count--;
-    
-            if (PROG_TRACK_STATE) MY_STATE_REG = DOI_PREAMBLE+(20-3);   // long preamble if service mode
-            else 				MY_STATE_REG = DOI_PREAMBLE+(14-3);     // 14 preamble bits
-                                                                        // doi.bits_in_state = 14;  doi.state = dos_send_preamble;
-          }
-        return;
-      }
-    if (state == DOI_PREAMBLE)
-      {
-        do_send(1);
-        MY_STATE_REG--;
-        if ((MY_STATE_REG & DOI_CNTMASK) == 0)
-          {
-            MY_STATE_REG = DOI_BSTART;          // doi.state = dos_send_bstart;
-          }
-		return;
-      }
-    if (state == DOI_BSTART)
-      {
-			do_send(0);     // trennende 0
-            if (doi.bytes_in_message == 0)
-              { // message done, goto xor
-                doi.cur_byte = doi.xor_byte;
-                MY_STATE_REG = DOI_XOR+8;  // doi.state = dos_send_xor; doi.bits_in_state = 8;
-              }
-            else
-              { // get next addr or data
-                doi.bytes_in_message--;
-                doi.cur_byte = doi.current_dcc[doi.ibyte++];
-                doi.xor_byte ^= doi.cur_byte;
-              MY_STATE_REG = DOI_BYTE+8;  // doi.state = dos_send_byte; doi.bits_in_state = 8;
-              }
-            return;
-      }
-    if (state == DOI_BYTE)
-      {
-            if (doi.cur_byte & 0x80) {do_send(1);}
-            else                     {do_send(0);}
-            doi.cur_byte <<= 1;
-            MY_STATE_REG--;
-            if ((MY_STATE_REG & DOI_CNTMASK) == 0)
-              {
-              MY_STATE_REG = DOI_BSTART+8;  // doi.state = dos_send_bstart;
-              }
-            return;
-      }
-    if (state == DOI_XOR)    // ev. else absichern
-      {
-            if (doi.cur_byte & 0x80) {do_send(1);}
-            else                     {do_send(0);}
-            doi.cur_byte <<= 1;
-            MY_STATE_REG--;
-            if ((MY_STATE_REG & DOI_CNTMASK) == 0)                  // bitcounter lower 5 bits
-              {
-                MY_STATE_REG = DOI_END_BIT;  // doi.state = dos_idle;
-              }
-            return;
-     }
-    if (state == DOI_END_BIT)
-      {
-        do_send(1);
-        MY_STATE_REG = DOI_CUTOUT_1;
-        return;
-      } 
-    if (state == DOI_CUTOUT_1) 
-      {
-        if (doi.railcom_enabled) do_send_no_B(1);     // first 1 after message gets extended
-        else do_send(1);
-
-        MY_STATE_REG = DOI_CUTOUT_2;
-        return;
-      }
-    if (state == DOI_CUTOUT_2) 
-      {
-        do_send(1);
-        MY_STATE_REG = DOI_IDLE;
-        return;
-      }
-
+  //SDS if (!(PIND & (1<<DCC)))  //was: (doi.phase == 0)
+  if (!(PINB & 0x2))  //was: (doi.phase == 0)
+  {
+    if ((state == DOI_CUTOUT_2) && doi.railcom_enabled) {
+      TCCR1A = (1<<COM1A1) | (1<<COM1A0)  //  set   OC1A (=DCC) on compare match
+              | (1<<COM1B1) | (1<<COM1B0)  //  set   OC1B (=NDCC) on compare match
+              | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
+              | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
+      OCR1A = (F_CPU / 1000000L * 4 * PERIOD_1)
+            - (F_CPU / 1000000L * CUTOUT_GAP);      // create extended timing: 4 * PERIOD_1 for DCC - GAP
+      OCR1B = (F_CPU / 1000000L * 9 * PERIOD_1 / 2)   //                         4.5 * PERIOD_1 for NDCC - GAP
+            - (F_CPU / 1000000L * CUTOUT_GAP);
+      return;  
+    }
+    else {
+      TCCR1A = (1<<COM1A1) | (1<<COM1A0)  //  set   OC1A (=DCC) on compare match
+              | (1<<COM1B1) | (0<<COM1B0)  //  clear OC1B (=NDCC) on compare match
+              | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
+              | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
+      //was: doi.phase = 1;
+      return;  
+    }
   }
+  //was: doi.phase = 0;
+
+  //     register unsigned char state = MY_STATE_REG & ~DOI_CNTMASK;    // take only 3 upper bits
+
+  if (state == DOI_IDLE) {
+    do_send(1);
+
+    if (next_message_count > 0) {
+      memcpy(doi.current_dcc, next_message.dcc, sizeof(doi.current_dcc));
+      doi.bytes_in_message = next_message.size;
+      // no size checking - if (doi.cur_size > MAX_DCC_SIZE) doi.cur_size = MAX_DCC_SIZE;
+      doi.ibyte = 0;
+      doi.xor_byte = 0;
+      doi.type = next_message.type;   // remember type in case feedback is required
+
+      next_message_count--;
+
+      if (PROG_TRACK_STATE) MY_STATE_REG = DOI_PREAMBLE+(20-3);   // long preamble if service mode
+      else 				MY_STATE_REG = DOI_PREAMBLE+(14-3);     // 14 preamble bits
+                                                          // doi.bits_in_state = 14;  doi.state = dos_send_preamble;
+    }
+    return;
+  }
+  if (state == DOI_PREAMBLE) {
+    do_send(1);
+    MY_STATE_REG--;
+    if ((MY_STATE_REG & DOI_CNTMASK) == 0) {
+      MY_STATE_REG = DOI_BSTART;          // doi.state = dos_send_bstart;
+    }
+    return;
+  }
+  if (state == DOI_BSTART) {
+    do_send(0);     // trennende 0
+    if (doi.bytes_in_message == 0) { // message done, goto xor
+      doi.cur_byte = doi.xor_byte;
+      MY_STATE_REG = DOI_XOR+8;  // doi.state = dos_send_xor; doi.bits_in_state = 8;
+    }
+    else { // get next addr or data
+      doi.bytes_in_message--;
+      doi.cur_byte = doi.current_dcc[doi.ibyte++];
+      doi.xor_byte ^= doi.cur_byte;
+    MY_STATE_REG = DOI_BYTE+8;  // doi.state = dos_send_byte; doi.bits_in_state = 8;
+    }
+    return;
+  }
+  if (state == DOI_BYTE) {
+    if (doi.cur_byte & 0x80) {do_send(1);}
+    else                     {do_send(0);}
+    doi.cur_byte <<= 1;
+    MY_STATE_REG--;
+    if ((MY_STATE_REG & DOI_CNTMASK) == 0) {
+      MY_STATE_REG = DOI_BSTART+8;  // doi.state = dos_send_bstart;
+    }
+    return;
+  }
+  if (state == DOI_XOR) { // ev. else absichern
+    if (doi.cur_byte & 0x80) {do_send(1);}
+    else                     {do_send(0);}
+    doi.cur_byte <<= 1;
+    MY_STATE_REG--;
+    if ((MY_STATE_REG & DOI_CNTMASK) == 0)                  // bitcounter lower 5 bits
+      {
+        MY_STATE_REG = DOI_END_BIT;  // doi.state = dos_idle;
+      }
+    return;
+  }
+  if (state == DOI_END_BIT) {
+    do_send(1);
+    MY_STATE_REG = DOI_CUTOUT_1;
+    return;
+  } 
+  if (state == DOI_CUTOUT_1) {
+    if (doi.railcom_enabled) do_send_no_B(1);     // first 1 after message gets extended
+    else do_send(1);
+
+    MY_STATE_REG = DOI_CUTOUT_2;
+    return;
+  }
+  if (state == DOI_CUTOUT_2) {
+    do_send(1);
+    MY_STATE_REG = DOI_IDLE;
+    return;
+  }
+
+} // ISR
 
 void init_dccout(void)
   {

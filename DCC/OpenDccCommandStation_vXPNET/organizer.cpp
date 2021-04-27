@@ -372,6 +372,7 @@ static void build_nmra_basic_accessory(unsigned int turnoutAddress, unsigned cha
   new_message->dcc[1] = new_message->dcc[1] | (pairnr * 2) | (coil & 0x01);
 } // build_nmra_basic_accessory
 
+
 static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_message *new_message)
 {
   // Message: 10AAAAAA 0aaa0AA1 000sssss
@@ -384,7 +385,7 @@ static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_mess
   new_message->repeat = dcc_acc_repeat;
   new_message->type = is_acc;
   new_message->size = 3;
-  new_message->dcc[0]  = 0x80 | ((addr & 0x3C) >> 2);
+  new_message->dcc[0]  = 0x80 | ((addr & 0xFC) >> 2); // SDS : hier stond 0x3C??
   new_message->dcc[1]  = (((addr >> 8) ^ 0x07) << 4);    // shift down, invert, shift up
   new_message->dcc[1] |= ((addr & 0x03) << 1) | 0x01;
   new_message->dcc[2]  = aspect;
@@ -2333,15 +2334,24 @@ bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char
   return(retval);
 }
 // 
-// parameters: addr:     accessory decoder [0000-2047]
+// parameters: addr:     accessory decoder [0000-2047], 11-bit extended accessory DCC address
 //             aspect:   [0-31]
-bool do_extended_accessory(unsigned int addr, unsigned char aspect)
+bool do_extended_accessory(unsigned int decoderAddress, uint8_t signalAspect)
 {
   unsigned char retval;
-
-  build_nmra_extended_accessory(addr, aspect, locobuff_mes_ptr);
+  build_nmra_extended_accessory(decoderAddress, signalAspect, locobuff_mes_ptr);
   retval = put_in_queue_low(locobuff_mes_ptr);
   return(retval);
+}
+
+// SDS added, maybe replace build_nmra_extended_accessory because it's not used anymore (except unused lenz_parser)
+// decoder address : 9-bit accessory decoder DCC address
+// signalId : 2-bit head 0..3 (lower 2-bits of the 11-bit address)
+// signalAspect : 5-bits aspect
+bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
+  uint16_t decoderAddress11Bits;
+  decoderAddress11Bits = (decoderAddress << 2) + (signalId & 0x3);
+  do_extended_accessory(decoderAddress11Bits,signalAspect);
 }
 
 // SDS voor de xpnet encapsulated msgs

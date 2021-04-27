@@ -20,6 +20,7 @@ void app_SetFunc (uint16_t locAddr, uint8_t func, uint8_t onOff); // 1 bit per f
 void app_GetLocName (uint16_t locAddr, char *locName);
 
 bool app_ToggleAccessory (uint16_t turnoutAddr, bool activate); // activate permits to control on/off from key press
+bool app_DoExtendedAccessory (uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect);
 void app_TestCVRead();
 uint8_t app_GetProgResults (uint16_t &cv, uint8_t &cvdata);
 

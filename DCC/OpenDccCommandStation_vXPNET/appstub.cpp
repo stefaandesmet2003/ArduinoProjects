@@ -149,43 +149,45 @@ void app_GetLocName( uint16_t locAddr, char *locName )
 } // app_GetLocName
 
 // voorlopig hier een geheugen van de wissels
-uint32_t app_Turnouts = 0xFFFFFFFF; // alle wissels rechtdoor, 1 bit per turnoutAddr 0..31
-// turnoutAddr 0-4095, coil red/green 0/1
+uint32_t app_Turnouts = 0xFFFFFFFF; // alle wissels rechtdoor, 1 bit per turnoutAddress 0..31
+// turnoutAddress 0-4095, coil red/green 0/1
 // enkel het activate commando wordt gestuurd, de turnout decoder doet zelf de deactivate
-// voorlopig turnoutAddr 0..31
+// voorlopig turnoutAddress 0..31
 
 
-bool app_ToggleAccessory (uint16_t turnoutAddr, bool activate)
-{
+bool app_ToggleAccessory (uint16_t turnoutAddress, bool activate) {
   bool retval;
   // een 1-bit in app_Turnouts betekent dat de wissel rechtdoor staat
   // om te togglen moeten we dan coil=1 aansturen (throw)
   // bij succes, komt dan een 0-bit in app_Turnouts = wissel gebogen op display
-  uint8_t coil = ((app_Turnouts >> turnoutAddr) & 0x1);
-  
+  uint8_t coil = ((app_Turnouts >> turnoutAddress) & 0x1);
   if (!organizer_ready())
     return (APP_INTERNALERR0R);
   
   if (activate) {
-    retval = do_accessory(turnoutAddr,coil,activate); // retval==0 means OK
+    retval = do_accessory(turnoutAddress,coil,activate); // retval==0 means OK
     if (retval==0) { // only notify the 'on' command, not the 'off'
-      app_Turnouts ^= (1 << turnoutAddr);
-  
+      app_Turnouts ^= (1 << turnoutAddress);
       // notify andere xp clients dat we de wissel verzet hebben!
       unsigned char tx_message[3];
       tx_message[0] = 0x42;
-      turnout_getInfo(turnoutAddr,&tx_message[1]);
+      turnout_getInfo(turnoutAddress,&tx_message[1]);
       xp_send_message(0x20, tx_message); // feedback broadcast
     }
   }
   else {
-    retval = do_accessory(turnoutAddr,coil^0x1,activate); // retval==0 means OK
+    retval = do_accessory(turnoutAddress,coil^0x1,activate); // retval==0 means OK
   }
-
   return (retval);
-    
 } // app_ToggleAccessory
 
+bool app_DoExtendedAccessory (uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
+  bool retval;
+  if (!organizer_ready())
+    return (APP_INTERNALERR0R);
+  retval = do_signal_accessory(decoderAddress,signalId, signalAspect); // retval==0 means OK
+  return retval;
+} // app_DoExtendedAccessory
 
 void app_TestCVRead()
 {

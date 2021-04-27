@@ -27,7 +27,8 @@
 #define UISTATE_TURNOUT_PAGE1   5
 #define UISTATE_ACC_PAGE1       7
 #define UISTATE_PROG_PAGE1      8
-#define UISTATE_SETUP_PAGE1     9
+#define UISTATE_TEST_PAGE1      9
+#define UISTATE_SETUP_PAGE1     10
 
 #define UISTATE_DEFAULT        UISTATE_LOC_DO_SPEED
 
@@ -55,14 +56,14 @@ char emptyLine[] = "                    ";
 
 bool ui_doHomeMenu (uint8_t key) {
   uint8_t keyCode, keyEvent;
+  bool keyHandled = false;
+
   keyCode = key & KEYCODEFILTER;
   keyEvent = key & KEYEVENTFILTER;
-
   // ignore key up/longdown for now
   if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
     return false;
 
-  bool keyHandled = false;
   if (ui_State == UISTATE_HOME_PAGE1) {
     ui_Page = 0;
     keyHandled = true;
@@ -75,8 +76,8 @@ bool ui_doHomeMenu (uint8_t key) {
   else if (ui_State == UISTATE_HOME_PAGE2)  {
     keyHandled = true;
     if (keyCode == KEY_KEY1) ui_State = UISTATE_PROG_PAGE1;
-    else if (keyCode == KEY_KEY2) ui_State = UISTATE_SETUP_PAGE1;
-    else if (keyCode == KEY_KEY3) ui_State = UISTATE_SETUP_PAGE1; // temp,sds
+    else if (keyCode == KEY_KEY2) ui_State = UISTATE_TEST_PAGE1;
+    else if (keyCode == KEY_KEY3) ui_State = UISTATE_SETUP_PAGE1;
     else if (keyCode == KEY_KEY4) ui_State = UISTATE_HOME_PAGE1;
     else keyHandled = false;
   }
@@ -86,11 +87,10 @@ bool ui_doHomeMenu (uint8_t key) {
 
 bool ui_doLocMenu (uint8_t key) {
   uint8_t keyCode, keyEvent;
-  keyCode = key & KEYCODEFILTER;
-  keyEvent = key & KEYEVENTFILTER;
-
   bool keyHandled = false;
 
+  keyCode = key & KEYCODEFILTER;
+  keyEvent = key & KEYEVENTFILTER;
   // ignore key up/longdown for now
   if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
     return false;
@@ -151,15 +151,13 @@ bool ui_doLocMenu (uint8_t key) {
   return (keyHandled);
 } // ui_doLocMenu
 
-bool ui_doTurnoutMenu (uint8_t key)
-{
+static bool ui_doTurnoutMenu (uint8_t key) {
   uint8_t keyCode, keyEvent;
-  keyCode = key & KEYCODEFILTER;
-  keyEvent = key & KEYEVENTFILTER;
-  
   bool keyHandled = false;
   bool activate;
 
+  keyCode = key & KEYCODEFILTER;
+  keyEvent = key & KEYEVENTFILTER;
   if (keyEvent == KEYEVENT_DOWN) activate = true;
   else activate = false; // KEYEVENT_UP & KEYEVENT_LONGDOWN
   
@@ -179,19 +177,71 @@ bool ui_doTurnoutMenu (uint8_t key)
   return (keyHandled);
 } // ui_doTurnoutMenu
 
-bool ui_doAccMenu (uint8_t key)
-{
+static bool ui_doAccMenu (uint8_t key) {
   uint8_t keyCode, keyEvent;
   bool keyHandled = false;
 
   keyCode = key & KEYCODEFILTER;
   keyEvent = key & KEYEVENTFILTER;
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return false;
+
   if (ui_State == UISTATE_ACC_PAGE1) {
       ui_State = UISTATE_DEFAULT;
       keyHandled = true;
   }
   return (keyHandled);
 } // ui_doAccMenu
+
+uint8_t signalHeads[2];
+// return true = key afgehandeld
+static bool ui_doTestMenu (uint8_t key) {
+  uint8_t keyCode, keyEvent;
+  bool keyHandled = false;
+
+  if (ui_State != UISTATE_TEST_PAGE1) // key not for us
+    return false;
+
+  keyCode = key & KEYCODEFILTER;
+  keyEvent = key & KEYEVENTFILTER;
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return false;
+
+  if ((keyCode == KEY_KEY1) || (keyCode == KEY_KEY4)) {
+    ui_State = UISTATE_DEFAULT; // back // eventueel een long event gebruiken om direct terug te keren
+  }
+  else if (keyCode == KEY_KEY2) {
+    // toggle seinbeeld 0 op ext acc decoder adres 1
+    app_DoExtendedAccessory (1,0, signalHeads[0]); // (decoderAddress, signalHead,signalAspect)
+    signalHeads[0] = (signalHeads[0] + 1) % 9; // loop through aspects 0..8
+  }
+  else if (keyCode == KEY_KEY3) {
+    // toggle seinbeeld 1 op ext acc decoder adres 1
+    app_DoExtendedAccessory (1,1, signalHeads[1]); // (decoderAddress, signalHead,signalAspect)
+    signalHeads[1] = (signalHeads[1] + 1) % 9; // loop through aspects 0..8
+  }
+  return true;
+} // ui_doTestMenu
+
+static bool ui_doProgMenu (uint8_t key) {
+  uint8_t keyCode, keyEvent;
+  bool keyHandled = false;
+
+  keyCode = key & KEYCODEFILTER;
+  keyEvent = key & KEYEVENTFILTER;
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return false;
+
+  if (ui_State == UISTATE_PROG_PAGE1) {
+      ui_State = UISTATE_DEFAULT;
+      keyHandled = true;
+  }
+  return (keyHandled);
+} // ui_doProgMenu
+
 
 static void ui_ShowLocFuncs (uint8_t page) // page 0 : F0+F1, page 1 : F2+F3 ...
 {
@@ -304,11 +354,12 @@ void ui_Update () {
     clearLine(2);
     
     // lijn 4
-    lcd.setCursor(0,4);
-    if (ui_State == UISTATE_HOME_PAGE1) lcd.print("LOC   WIS  ACC   ->");
+    clearLine(3);
+    lcd.setCursor(0,3);
+    if (ui_State == UISTATE_HOME_PAGE1) lcd.print("LOC   WIS  ACC    ->");
     else if (ui_State == UISTATE_HOME_PAGE2) {
         lcd.setCursor(0,4);
-        lcd.print("PROG  SETUP       ->");
+        lcd.print("Prog  Test Setup  ->");
     }
     return;
   }
@@ -347,10 +398,8 @@ void ui_Update () {
   else if (ui_State == UISTATE_TURNOUT_PAGE1) {
     lcd.setCursor(0,0);
     lcd.print("WIS ");
-    
-    lcd.setCursor(0,1); lcd.print(emptyLine);
-    lcd.setCursor(0,2); lcd.print(emptyLine);
-    
+    clearLine(1);
+    clearLine(2);
     clearLine(3);
     lcd.setCursor (0,3); 
     lcd.print("back  ");
@@ -365,6 +414,16 @@ void ui_Update () {
     lcd.setCursor(0,2); lcd.print("scherm niet af!");
     clearLine(3);
     lcd.setCursor(0,3); lcd.print("back");
+    return;
+  }
+  else if (ui_State == UISTATE_TEST_PAGE1) {
+    for (char i=0;i<4;i++)
+      clearLine(i);
+    lcd.setCursor(0,0);
+    lcd.print("TEST ");
+    lcd.setCursor(0,1);
+    lcd.print("Test seinbeeld ");
+    lcd.setCursor(0,3); lcd.print("back   1   2");
     return;
   }
   else if (ui_State == UISTATE_PROG_PAGE1) {
@@ -463,7 +522,7 @@ void keys_Handler (key_t key) {
   keyCode = key & KEYCODEFILTER;
   keyEvent = key & KEYEVENTFILTER;
   
-  if (keyEvent == KEYEVENT_DOWN) // voorlopig geen redraws nodig bij UP/LONGDOWN events
+  if ((keyEvent == KEYEVENT_DOWN) || (keyEvent == KEYEVENT_NONE)) // voorlopig geen redraws nodig bij UP/LONGDOWN events
     ui_Redraw = true; // bij elke key de ui redraw vragen
 
   // voorlopig events hier afhandelen
@@ -476,6 +535,9 @@ void keys_Handler (key_t key) {
     return; // dus kunnen we verder niets doen zolang dit event niet is opgelost
   }
 
+  // todo : alle keys eerst naar het actieve menu page sturen, zodat je bv ook in submenus de draaiknop kan gebruiken
+  // allicht voldoende om handleSpeedKeys achteraan te zetten; de meeste menus zullen de draaiknop negeren en 'unhandled' (false) returnen
+
   // draaiknop hier afhandelen (voorlopig)
   if ((keyCode == KEY_ROTUP) || (keyCode == KEY_ROTDOWN) || (keyCode == KEY_ENTER)) keyHandled = handleSpeedKeys (key);
   if (keyHandled) return;
@@ -487,6 +549,10 @@ void keys_Handler (key_t key) {
   keyHandled = ui_doTurnoutMenu (key);
   if (keyHandled) return;
   keyHandled = ui_doAccMenu (key);
+  if (keyHandled) return;
+  keyHandled = ui_doTestMenu (key);
+  if (keyHandled) return;
+  keyHandled = ui_doProgMenu (key);
   if (keyHandled) return;
   
   if (!keyHandled)
