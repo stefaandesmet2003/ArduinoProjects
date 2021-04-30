@@ -89,7 +89,7 @@ typedef struct
 static DccRx_t DccRx;
 static DCC_PROCESSOR_STATE DccProcState;
 static DCC_MSG Msg;
-static uint16_t dccAddress = 1; // a default
+static uint16_t dccFilterAddress = 1; // a default
 
 
 /*****************************************************************************/
@@ -170,6 +170,7 @@ INTERRUPT_HANDLER(TIM2_UPD_OVF_BRK_IRQHandler, ITC_IRQ_TIM2_OVF) {
   }
 
 } // TIM2_UPD_OVF_BRK_IRQHandler
+
 
 /*****************************************************************************/
 /***  LOCAL FUNCTIONS  *******************************************************/
@@ -317,7 +318,7 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
   }
 
   // We are looking for FLAGS_MY_ADDRESS_ONLY but it does not match and it is not a Broadcast Address then return
-  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != dccAddress) && (Addr != 0)) 
+  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != dccFilterAddress) && (Addr != 0)) 
     return;
 
   switch(CmdMasked)
@@ -546,7 +547,7 @@ static void execDccProcessor(DCC_MSG * pDccMsg) {
           DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
 
           // If we're filtering was it my board address or a broadcast address
-          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != dccAddress) && (DecoderAddress != 511))
+          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != dccFilterAddress) && (DecoderAddress != 511))
             return;
 
           OutputId = pDccMsg->Data[1] & 0b00000111;
@@ -600,16 +601,19 @@ void DCC_init (uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullup
   // Clear all the static member variables
   memset(&DccRx, 0, sizeof(DccRx));
 
-  // setup external interrupt on PB4 = fixed pin for dcc input
+  // setup external interrupt on PA2 = fixed pin for dcc input
   if (ExtIntPinPullupEnable)
     pinMode (PIN_DCCIN, INPUT_PULLUP);
   else
     pinMode (PIN_DCCIN, INPUT);
-  attachInterrupt(1,ExternalInterruptHandler, 0); // mode is not implemented in sduino, but we did the config manually
+  // attachInterrupt to port A here!! (DCC versie PA2)
+  attachInterrupt(0,ExternalInterruptHandler, 0); // mode is not implemented in sduino, but we did the config manually
 
   disableInterrupts(); // EXTI->CR1 kan je maar schrijven onder disabled interrupts (CCR=3); manual nog eens goed lezen, maar zo lijkt het wel te werken
-  EXTI->CR1 = 0x04; // set rising interrupt for all pins on port B
-  GPIOB->CR2 = 0x10; // enable ext interrupt on pin PB4
+  //EXTI->CR1 = 0x04; // set rising interrupt for all pins on port B
+  //GPIOB->CR2 = 0x10; // enable ext interrupt on pin PB4
+  EXTI->CR1 = 0x01; // set rising interrupt for all pins on port A
+  GPIOA->CR2 = 0x04; // enable ext interrupt on pin PA2
   enableInterrupts();
 
   // configure timer2
@@ -631,28 +635,24 @@ void DCC_init (uint8_t Flags, uint8_t OpsModeAddressBaseCV, bool ExtIntPinPullup
   DccProcState.Flags = Flags;
   DccProcState.OpsModeAddressBaseCV = OpsModeAddressBaseCV;
   clearDccProcState(0);    
-
 } // DCC_init
 
-uint8_t DCC_getCV(uint16_t cv)
-{
+uint8_t DCC_getCV(uint16_t cv) {
   return readCV(cv);
 }
 
-uint8_t DCC_setCV(uint16_t cv, uint8_t cvValue)
-{
+uint8_t DCC_setCV(uint16_t cv, uint8_t cvValue) {
   return writeCV(cv,cvValue);
 }
 
-bool DCC_isSetCVReady()
-{
+bool DCC_isSetCVReady() {
   return true; // STM8 eeprom is always ready for read
 }
 
 // only needed if FLAGS_MY_ADDRESS_ONLY flag is used
-void DCC_setAddress(uint16_t decoderAddress) {
-  dccAddress = decoderAddress;
-} // setAddress
+void DCC_setFilterAddress(uint16_t dccAddress) {
+  dccFilterAddress = dccAddress;
+} // setFilterAddress
 
 uint8_t DCC_process() {
   if (DccProcState.inServiceMode) {
@@ -681,3 +681,27 @@ uint8_t DCC_process() {
   }
   return 0;  
 } // DCC_process
+
+// helper functions to handle the CV address reading/writing
+uint16_t DCC_readDccAddress() {
+  uint16_t dccAddress;
+  uint8_t cv29Value;
+
+  cv29Value = DCC_getCV(CV_DECODER_CONFIGURATION);
+  if (cv29Value & 0b10000000)  // Accessory Decoder? 
+    dccAddress = (DCC_getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | DCC_getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
+  else { // Multi-Function Decoder?
+    if (cv29Value & 0b00100000)  // Two Byte Address?
+      dccAddress = (DCC_getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | DCC_getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
+    else
+      dccAddress = DCC_getCV(1);
+  }
+  return dccAddress;
+} // DCC_readDccAddress
+
+void DCC_writeDccAddress(uint16_t dccAddress) {
+  // take the decoderAddress & program it as our own
+  // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
+  DCC_setCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,dccAddress & 0x3F);
+  DCC_setCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(dccAddress >> 6) & 0x7);
+} // DCC_writeDccAddress

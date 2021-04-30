@@ -32,13 +32,13 @@
 
 #include "Arduino.h"
 
-#define PIN_DCCIN   				PB4  // fixed DCC-IN pin for STM8 to make our life easier
+#define PIN_DCCIN   				PA2  // fixed DCC-IN pin for STM8 to make our life easier
 #define MAX_DCC_MESSAGE_LEN 6    // including XOR-Byte
 
 typedef struct {
-	uint8_t	Size;
-	uint8_t	PreambleBits;
-	uint8_t Data[MAX_DCC_MESSAGE_LEN];
+  uint8_t	Size;
+  uint8_t	PreambleBits;
+  uint8_t Data[MAX_DCC_MESSAGE_LEN];
 } DCC_MSG;
 
 //--------------------------------------------------------------------------
@@ -76,11 +76,11 @@ typedef struct {
 #define MAXCV                                 	E2END     // the upper limit of the CV value currently defined to max memory.
 
 typedef enum {
-	FN_0_4 = 1,
-	FN_5_8,
-	FN_9_12,
-	FN_13_20,
-	FN_21_28
+  FN_0_4 = 1,
+  FN_5_8,
+  FN_9_12,
+  FN_13_20,
+  FN_21_28
 } FN_GROUP;
 
 #define FN_BIT_00	0x10
@@ -129,6 +129,9 @@ uint8_t DCC_getCV(uint16_t CV);
 uint8_t DCC_setCV(uint16_t CV, uint8_t Value);
 bool    DCC_isSetCVReady(void);
 void 		DCC_setAddress(uint16_t decoderAddress); // only needed if FLAGS_MY_ADDRESS_ONLY flag is used
+void    DCC_setFilterAddress(uint16_t dccAddress); // let the lib filter this particular dcc address, only needed if FLAGS_MY_ADDRESS_ONLY flag is used
+uint16_t DCC_readDccAddress(); // read from CV's
+void    DCC_writeDccAddress(uint16_t dccAddress); // write to CV's
 
 // TODO : rename DCC_resetNotify, etc
 void notifyDccReset(uint8_t hardReset);

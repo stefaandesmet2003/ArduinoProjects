@@ -120,15 +120,16 @@ void turnout_ManualToggle (uint8_t turnoutId, bool activate) {
 // this is how JMRI controls lights (light on = 'coil' 0 (even outputId), light off = 'coil' 1 (odd outputId)
 void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
   uint8_t physicalOutput;
+/*  
   #ifdef DEBUG
     Serial_print_s("output_Handler: ");
     Serial_print_u(decoderAddress);
-    Serial.print_s(",");
+    Serial_print_s(",");
     Serial_print_u(outputId);
     Serial_print_s(",");
     Serial_println_u(activate);
   #endif
-
+*/
   // not using FLAGS_MY_ADDRESS_ONLY in nmradcc lib
   // so we get all basic accessory packets here, 
   // and need to filter the decoderAddresses we are interested in

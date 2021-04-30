@@ -141,13 +141,11 @@ static void keyHandler (uint8_t keyEvent) {
       if (decoderState == DECODER_PROGRAM) {
         decoderState = DECODER_INIT;
       }
-      else { // send the 'on' command to toggle turnout position
-        turnout_ManualToggle (keyEvent >> 2,true);
-      }
+      else 
+        turnout_ManualToggle (keyEvent >> 2,true); // key down -> send the 'on' command to the turnout/output
     }
-    else { // key up -> send the 'off' command
-      turnout_ManualToggle (keyEvent >> 2,false);
-    }
+    else
+      turnout_ManualToggle (keyEvent >> 2,false); // key up -> send the 'off' command
     #ifdef DEBUG
       Serial_print_s ("decoderState = ");
       if (decoderState == DECODER_INIT) Serial_println_s("DECODER_INIT");
@@ -160,39 +158,11 @@ static void keyHandler (uint8_t keyEvent) {
 /******************************************************************/
 /*  OTHER LOCAL FUNCTIONS                                         */
 /******************************************************************/
-// not public, do this only here on init
-static uint16_t readDecoderAddress() {
-  uint16_t aAddress;
-  uint8_t cv29Value;
-
-  cv29Value = DCC_getCV(CV_DECODER_CONFIGURATION);
-  if (cv29Value & 0b10000000)  // Accessory Decoder? 
-    aAddress = (DCC_getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | DCC_getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
-  else { // Multi-Function Decoder?
-    if (cv29Value & 0b00100000)  // Two Byte Address?
-      aAddress = (DCC_getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | DCC_getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
-    else
-      aAddress = DCC_getCV(1);
-  }
-  return aAddress;
-} // readDecoderAddress
-
-// not public, do this only here on CV Write
-static void writeDecoderAddress(uint16_t aAddress) {
-  // take the decoderAddress & program it as our own
-  // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
-  DCC_setCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,aAddress & 0x3F);
-  DCC_setCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(aAddress >> 6) & 0x7);
-  decoderAddress = aAddress; // keep copy in RAM
-} // writeDecoderAddress
 
 // 0 = DONE, 1 = NOT DONE (eeprom not ready)
 static uint8_t accessory_FactoryResetCV() {
   int i;
   uint8_t swMode; // we gebruiken hier een read uit eeprom, niet de global var
-  
-  if (!DCC_isSetCVReady())
-    return 1;
   // factory reset de algemene CV's (die niet afhangen van de software mode
   for (i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++)
     DCC_setCV( FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
@@ -237,11 +207,6 @@ void setup() {
   digitalWrite(PIN_PROGLED, HIGH); //LED uit
 
   // check if factory defaults are written in eeprom
-  if (!DCC_isSetCVReady()) {
-    // we kunnen geen CV's inlezen, dus weten we niet wat te doen!!
-    // goto safe mode --> alles outputs uit en wachten op progkey
-    return;
-  }
   if (DCC_getCV(CV_MANUFACTURER_ID) != MAN_ID_DIY)
     decoderState = DECODER_FACTORY_RESET;
   else
@@ -260,7 +225,7 @@ void loop() {
       break;
     case DECODER_INIT :
       Timer_stop (ledTimer); //stop de slow flashing led
-      decoderAddress =  readDecoderAddress(); // reread from eeprom
+      decoderAddress =  DCC_readDccAddress(); // reread from eeprom
       decoderSoftwareMode = DCC_getCV(CV_SoftwareMode);
       switch (decoderSoftwareMode) {
         case SOFTWAREMODE_TURNOUT_DECODER :
@@ -297,9 +262,18 @@ uint16_t getDecoderAddress(void) {
 /* notify functies uit Nmra layer                                                             */
 /**********************************************************************************************/
 // SDCC doesn't know weak functions
-void notifyDccReset(uint8_t hardReset ){(void) hardReset;}
 void notifyDccIdle(void) {}
 void notifyDccMsg( DCC_MSG * Msg ){(void)Msg;}
+
+void notifyDccReset(uint8_t hardReset) {
+  (void) hardReset;
+  // TODO : check, want er worden dcc resets gestuurd bij start programming mode, en dan is DECODER_INIT niet ok!!
+  /*
+  decoderState = DECODER_INIT; // the loop() function will get the decoder to a reinitialize
+  // not doing a real software reset for now
+  */
+} // notifyDccReset
+
 
 // for test
 /*
@@ -330,47 +304,43 @@ void notifyCVAck(void) {
 } // notifyCVAck
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState(uint16_t aDecoderAddress, uint8_t outputId, bool activate) {
+void notifyDccAccState(uint16_t dccAddress, uint8_t outputId, bool activate) {
   if (decoderState == DECODER_PROGRAM) {
     // take the decoderAddress & program it as our own
-    writeDecoderAddress(aDecoderAddress);
+    DCC_writeDccAddress(dccAddress);
+    decoderAddress = dccAddress; // keep copy in RAM
     Timer_oscillate(PIN_PROGLED, LED_FAST_FLASH, HIGH, 3); // 3 led flashes ter bevestiging van een CV write
-
     #ifdef DEBUG
       Serial_print_s("CV1/CV9 rewritten, my address is now :");
-      Serial_println_u(getDecoderAddress());
+      Serial_println_u(DCC_readDccAddress());
     #endif
     return;
   }
 
   if (decoderSoftwareMode == SOFTWAREMODE_TURNOUT_DECODER)
-    turnout_Handler (aDecoderAddress, outputId, activate);
+    turnout_Handler (dccAddress, outputId, activate);
   else if (decoderSoftwareMode == SOFTWAREMODE_OUTPUT_DECODER) 
-    output_Handler (aDecoderAddress, outputId, activate);
+    output_Handler (dccAddress, outputId, activate);
 
   else {
-    /*
     #ifdef DEBUG
       Serial_println_s("unsupported software mode!");
     #endif
-    */
     //goto safe mode??
   }
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState(uint16_t aDecoderAddress, uint8_t signalId, uint8_t signalAspect) {
-  /*
+void notifyDccSigState(uint16_t dccAddress, uint8_t signalId, uint8_t signalAspect) {
   #ifdef DEBUG
     Serial_print_s("notifyDccSigState: unsupported for now :");
-    Serial_print_u(aDecoderAddress);
+    Serial_print_u(dccAddress);
     Serial_print_s(",");
     Serial_print_u(signalId);
     Serial_print_s(",");
     Serial_println_u(signalAspect);
   #endif
-  */
-  (void) aDecoderAddress;
+  (void) dccAddress;
   (void) signalId;
   (void) signalAspect;
   

@@ -2,7 +2,7 @@
 #ifndef AccessoryDecoder_h
 #define AccessoryDecoder_h
 
-//#define DEBUG // adds debug prints on serial
+#define DEBUG // adds debug prints on serial
 
 //SDS manufacturer CV's
 #define CV_SoftwareMode   33
@@ -13,9 +13,14 @@
 
 // hardware definitions? (of is dit afhankelijk van softwaremode?)
 // hardware-def van de turnout-decoder
-#define PIN_KEY2    PD6
-#define PIN_KEY3    PA1
-#define PIN_KEY4    PA2
+#ifdef DEBUG
+  #define PIN_KEY2    PA1 // not using KEY2/KEY3 in debug, need serial pins
+  #define PIN_KEY3    PA1 // not using KEY2/KEY3 in debug, need serial pins
+#else
+  #define PIN_KEY2    PA1 // PD5
+  #define PIN_KEY3    PD6 // PD6 is correct
+#endif
+#define PIN_KEY4    PA1
 #define PIN_OUTPUT0 PD3
 #define PIN_OUTPUT1 PD2
 #define PIN_OUTPUT2 PD1
