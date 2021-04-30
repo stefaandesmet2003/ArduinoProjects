@@ -114,12 +114,18 @@ throttle controls loc speed on loc address = 3, and shows dcc fast clock
 
 # SignalDecoder
 an extended accessory decoder implementing various signal heads  
-a working prototype on atmega328 for now  
+working on AVR & STM8
+
+## STM8 version
+- STM8 version needs a light version of the Wire library with TX only in order to fit in 8kB flash
+- PB5 pin is multiplexed as programming led & i2c SDA 
+--> during normal operation PB5 is used as SDA, and the led is off  
+--> during programming the i2c is disabled (signal heads are paused) and PB5 is used as GPIO output to drive the programming led  
+--> i2c peripheral needs a SWRST before Wire_begin, otherwise i2c doesn't work anymore. Maybe the SWRST should be part of Wire_begin()?? 
 signal heads can be controlled via JMRI over PcInterface (command station UI does not implement extended accessories)
 
 ## TODO
 - configuration over CV
-- use STM8
 
 # RAILCOM
 - todo!
