@@ -22,8 +22,12 @@ De Rx ISR gaat gewoon door, en gaat op het einde van het pakket de bitbuffer in 
 // decoder global
 NmraDcc  Dcc;
 
-enum {DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM } decoderState;
-uint8_t decoderSoftwareMode;
+typedef enum {
+  DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM 
+} decoderState_t;
+
+static decoderState_t decoderState;
+static uint8_t decoderSoftwareMode;
 
 static uint16_t decoderAddress; // keep this local, other modules will use getter getDecoderAddress;
 //factory defaults
@@ -35,7 +39,6 @@ static CVPair FactoryDefaultCVs [] = {
   {CV_DECODER_CONFIGURATION,0x80},
   {CV_SoftwareMode, 0} 
 };
-
 
 // keyhandling
 #define DEBOUNCE_DELAY 50
@@ -160,31 +163,6 @@ static void keyHandler (uint8_t keyEvent) {
 /******************************************************************/
 /*  OTHER LOCAL FUNCTIONS                                         */
 /******************************************************************/
-// not public, do this only here on init
-static uint16_t readDecoderAddress() {
-  uint16_t aAddress;
-  uint8_t cv29Value;
-
-  cv29Value = Dcc.getCV(CV_DECODER_CONFIGURATION);
-  if (cv29Value & 0b10000000)  // Accessory Decoder? 
-    aAddress = (Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
-  else { // Multi-Function Decoder?
-    if (cv29Value & 0b00100000)  // Two Byte Address?
-      aAddress = (Dcc.getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | Dcc.getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
-    else
-      aAddress = Dcc.getCV(1);
-  }
-  return aAddress;
-} // readDecoderAddress
-
-// not public, do this only here on CV Write
-static void writeDecoderAddress(uint16_t aAddress) {
-  // take the decoderAddress & program it as our own
-  // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
-  Dcc.setCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,aAddress & 0x3F);
-  Dcc.setCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(aAddress >> 6) & 0x7);
-  decoderAddress = aAddress; // keep copy in RAM
-} // writeDecoderAddress
 
 // 0 = DONE, 1 = NOT DONE (eeprom not ready)
 static uint8_t accessory_FactoryResetCV() {
@@ -263,7 +241,7 @@ void loop() {
       break;
     case DECODER_INIT :
       timer.stop (ledTimer); //stop de slow flashing led
-      decoderAddress =  readDecoderAddress(); // reread from eeprom
+      decoderAddress =  Dcc.readDccAddress(); // reread from eeprom
       decoderSoftwareMode = Dcc.getCV(CV_SoftwareMode);
       switch (decoderSoftwareMode) {
         case SOFTWAREMODE_TURNOUT_DECODER :
@@ -332,10 +310,11 @@ void notifyCVAck(void) {
 } // notifyCVAck
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState(uint16_t aDecoderAddress, uint8_t outputId, bool activate) {
+void notifyDccAccState(uint16_t dccAddress, uint8_t outputId, bool activate) {
   if (decoderState == DECODER_PROGRAM) {
     // take the decoderAddress & program it as our own
-    writeDecoderAddress(aDecoderAddress);
+    Dcc.writeDccAddress(dccAddress);
+    decoderAddress = dccAddress; // keep copy in RAM
     timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     #ifdef DEBUG
       Serial.print("CV1/CV9 rewritten, my address is now :");
@@ -345,21 +324,22 @@ void notifyDccAccState(uint16_t aDecoderAddress, uint8_t outputId, bool activate
   }
 
   if (decoderSoftwareMode == SOFTWAREMODE_TURNOUT_DECODER)
-    turnout_Handler (aDecoderAddress, outputId, activate);
+    turnout_Handler (dccAddress, outputId, activate);
   else if (decoderSoftwareMode == SOFTWAREMODE_OUTPUT_DECODER)
-    output_Handler (aDecoderAddress, outputId, activate);
-  else
+    output_Handler (dccAddress, outputId, activate);
+  else {
     #ifdef DEBUG
       Serial.println("unsupported software mode!");
     #endif
     //goto safe mode??
+  }
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState(uint16_t aDecoderAddress, uint8_t signalId, uint8_t signalAspect) {
+void notifyDccSigState(uint16_t dccAddress, uint8_t signalId, uint8_t signalAspect) {
   #ifdef DEBUG
     Serial.print("notifyDccSigState: unsupported for now");
-    Serial.print(aDecoderAddress);
+    Serial.print(dccAddress);
     Serial.print(',');
     Serial.print(signalId);
     Serial.print(',');

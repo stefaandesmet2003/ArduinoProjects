@@ -89,7 +89,7 @@ typedef struct
 
 static DccRx_t DccRx;
 static DCC_PROCESSOR_STATE DccProcState;
-static uint16_t dccAddress = 1; // a default
+static uint16_t dccFilterAddress = 1; // a default
 
 void ExternalInterruptHandler()
 {
@@ -327,7 +327,7 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
   }
 
   // We are looking for FLAGS_MY_ADDRESS_ONLY but it does not match and it is not a Broadcast Address then return
-  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != dccAddress) && (Addr != 0)) 
+  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != dccFilterAddress) && (Addr != 0)) 
     return;
 
   switch(CmdMasked)
@@ -568,7 +568,7 @@ static void execDccProcessor(DCC_MSG * pDccMsg) {
           DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
 
           // If we're filtering was it my board address or a broadcast address
-          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != dccAddress) && (DecoderAddress != 511))
+          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != dccFilterAddress) && (DecoderAddress != 511))
             return;
 
           OutputId = pDccMsg->Data[1] & 0b00000111;
@@ -668,10 +668,11 @@ bool NmraDcc::isSetCVReady() {
   return eeprom_is_ready();
 }
 
+// let the lib filter this particular dcc address
 // only needed if FLAGS_MY_ADDRESS_ONLY flag is used
-void NmraDcc::setAddress(uint16_t decoderAddress) {
-  dccAddress = decoderAddress;
-} // setAddress
+void NmraDcc::setFilterAddress(uint16_t dccAddress) {
+  dccFilterAddress = dccAddress;
+} // setFilterAddress
 
 uint8_t NmraDcc::process() {
   if (DccProcState.inServiceMode) {
@@ -702,3 +703,27 @@ uint8_t NmraDcc::process() {
   }
   return 0;  
 } // NmraDcc::process
+
+// helper functions to handle the CV address reading/writing
+uint16_t NmraDcc::readDccAddress() {
+  uint16_t dccAddress;
+  uint8_t cv29Value;
+
+  cv29Value = getCV(CV_DECODER_CONFIGURATION);
+  if (cv29Value & 0b10000000)  // Accessory Decoder? 
+    dccAddress = (getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
+  else { // Multi-Function Decoder?
+    if (cv29Value & 0b00100000)  // Two Byte Address?
+      dccAddress = (getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
+    else
+      dccAddress = getCV(1);
+  }
+  return dccAddress;
+} // NmraDcc::readDccAddress
+
+void NmraDcc::writeDccAddress(uint16_t dccAddress) {
+  // take the decoderAddress & program it as our own
+  // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
+  setCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,dccAddress & 0x3F);
+  setCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(dccAddress >> 6) & 0x7);
+} // NmraDcc::writeDccAddress

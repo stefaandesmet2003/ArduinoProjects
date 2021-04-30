@@ -134,7 +134,9 @@ class NmraDcc {
   uint8_t getCV (uint16_t CV);
   uint8_t setCV (uint16_t CV, uint8_t Value);
   bool isSetCVReady ();
-  void setAddress(uint16_t decoderAddress); // only needed if FLAGS_MY_ADDRESS_ONLY flag is used
+  void setFilterAddress(uint16_t dccAddress); // let the lib filter this particular dcc address, only needed if FLAGS_MY_ADDRESS_ONLY flag is used
+  uint16_t readDccAddress(); // read from CV's
+  void writeDccAddress(uint16_t dccAddress); // write to CV's
 };
 
 extern void notifyDccReset(uint8_t hardReset) __attribute__ ((weak));
