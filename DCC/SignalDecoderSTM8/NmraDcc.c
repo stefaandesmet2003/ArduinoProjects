@@ -21,7 +21,6 @@
 //			      and build DCC Mobile and Stationary Decoders
 //------------------------------------------------------------------------
 #include "NmraDcc.h"
-#include "EEPROM.h"
 
 //------------------------------------------------------------------------
 // DCC Receive Routine
@@ -182,15 +181,14 @@ static void ackCV() {
 } // ackCV
 
 static uint8_t readCV(uint16_t cv) {
-  uint8_t cvValue;
   // STM8 SDCC doesn't know weak functions, and we are happy with the default
-  /*
-  if (notifyCVRead)
-    return notifyCVRead(cv);
-  */
+  return notifyCVRead(cv);
   // a default implementatie when the callback is not implemented
+  /*
+  uint8_t cvValue;
   cvValue = EEPROM_read((int) cv);
   return cvValue;
+  */
 } // readCV
 
 static bool validCV(uint16_t cv, bool writable) {

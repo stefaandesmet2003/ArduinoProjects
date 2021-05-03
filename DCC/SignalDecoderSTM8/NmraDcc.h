@@ -148,7 +148,7 @@ void notifyDccMsg(DCC_MSG * Msg);
 bool    notifyCVValid(uint16_t cv, uint8_t writable);
 uint8_t notifyCVWrite(uint16_t cv, uint8_t cvValue);
 void    notifyCVAck();
-// uint8_t notifyCVRead( uint16_t cv);
+uint8_t notifyCVRead(uint16_t cv);
 // bool    notifyIsSetCVReady();
 // void    notifyCVChange(uint16_t cv, uint8_t cvValue);
 

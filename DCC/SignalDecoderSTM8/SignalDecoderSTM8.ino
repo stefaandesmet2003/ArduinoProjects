@@ -7,7 +7,7 @@
  */
 #include "NmraDcc.h"
 #include "SignalDecoderSTM8.h"
-#include <EEPROM.h>
+//#include <EEPROM.h> // need to save flash and only used what's required
 #include "Wire_tx.h"
 #include "Timer.h"
 
@@ -95,6 +95,49 @@ key_t keys[NUMBER_OF_KEYS];
 
 // timers
 int8_t ledTimer; 
+
+/******************************************************************/
+/*  EEPROM -> need to save flash for now                          */
+/******************************************************************/
+#define E2END		(FLASH_DATA_BLOCKS_NUMBER * FLASH_BLOCK_SIZE - 1)
+#define EEPROM_read(N)	(*((uint8_t*)((uint16_t)FLASH_DATA_START_PHYSICAL_ADDRESS)+(N)))
+
+static void eeprom_unlock(void)
+{
+	// it might be easier to just unlock it, independed of the status
+	if (!(FLASH->IAPSR & FLASH_FLAG_DUL)) // eeprom is not unlocked
+	{
+		// EEPROM still locked. Unlock first.
+		FLASH->DUKR = FLASH_RASS_KEY2;
+		FLASH->DUKR = FLASH_RASS_KEY1;
+	}
+}
+
+static void eeprom_lock(void)
+{
+	// re-lock the EEPROM again.
+	FLASH->IAPSR &= FLASH_FLAG_DUL;
+}
+
+static void EEPROM_update( int idx, uint8_t val )
+{
+	// make sure not to write data beyond the end of the EEPROM area
+	// (this could accidentally hit the option byte area)
+	if (idx >= (E2END+1)) return;
+	idx += (uint16_t)FLASH_DATA_START_PHYSICAL_ADDRESS;
+
+	if (*((uint8_t*)idx) != val)
+	{
+		eeprom_unlock();
+		if (FLASH->IAPSR & FLASH_FLAG_DUL)
+		{
+			// write only after a successful unlock.
+			*((uint8_t*)idx) = val;
+			// re-lock the EEPROM again.
+			FLASH->IAPSR &= FLASH_FLAG_DUL;
+		}
+	}
+}
 
 /******************************************************************/
 /*  SIGNAL DECODER                                                */
@@ -634,6 +677,11 @@ void notifyDccSigState(uint16_t dccAddress, uint8_t signalId, uint8_t signalAspe
   }
   head_init(signalId,signalAspect);
 } // notifyDccSigState
+
+uint8_t notifyCVRead(uint16_t cv) {
+  return (EEPROM_read((int) cv));
+} // readCV
+
 
 // enkel CV's schrijven als decoder niet 'live' is (INIT, FACTORY_RESET, PROGRAM)
 uint8_t notifyCVWrite(uint16_t cv, uint8_t cvValue) {
