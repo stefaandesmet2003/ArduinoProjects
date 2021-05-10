@@ -965,14 +965,18 @@ void loop() {
       logDroppie = false; // reset the flag
     }
 
-    // TEMP : log van de shower sensor enkel als het licht brandt
-    if (isShowerOnline && curSensorDataShower.lightLevel > 15) {
-      logString = String(actualTime) + "," + String(currentMillis - curSensorDataShower.lastSeenMillis) + "," + 
-                  String(curSensorDataShower.dhtHumidity) + "," + String(curSensorDataShower.dhtTemperature);
-      File logFile = SPIFFS.open("/shower.csv", "a"); // Write the time and the current outdoor temperature to the csv file
+    // log shower sensor (temp/hum, rest interesseert ons voorlopig niet)
+    logString = String(actualTime) + "," + String(currentMillis - curSensorDataShower.lastSeenMillis) + 
+                "," + String(curSensorDataShower.dhtHumidity) + 
+                "," + String(curSensorDataShower.dhtTemperature);
+    if (shower_loglocal) {
+      File logFile = SPIFFS.open("/shower.csv", "a");
       logFile.print(logString);
       logFile.println();
       logFile.close();
+    }
+    if (shower_logcloud) {
+      cloudlog_log(shower_cloudurl, logString);
     }
   }
 

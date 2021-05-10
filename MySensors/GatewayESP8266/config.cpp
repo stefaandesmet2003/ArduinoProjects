@@ -25,6 +25,10 @@ bool droppie_loglocal;
 bool droppie_logcloud;
 String droppie_cloudurl;
 
+bool shower_loglocal;
+bool shower_logcloud;
+String shower_cloudurl;
+
 String cloud_user, cloud_pass;
 
 int config_load() {
@@ -95,6 +99,15 @@ int config_load() {
     }
     else if (key == "droppie_cloudurl") {
       droppie_cloudurl = val;
+    }
+    else if (key == "shower_loglocal") {
+      shower_loglocal = (val.toInt()!=0)?true:false;
+    }
+    else if (key == "shower_logcloud") {
+      shower_logcloud = (val.toInt()!=0)?true:false;
+    }
+    else if (key == "shower_cloudurl") {
+      shower_cloudurl = val;
     }
     else if (key == "cloud_user") {
       cloud_user = val;

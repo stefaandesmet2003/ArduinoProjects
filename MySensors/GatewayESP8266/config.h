@@ -23,6 +23,9 @@ extern String tempie_cloudurl;
 extern bool droppie_loglocal;
 extern bool droppie_logcloud;
 extern String droppie_cloudurl;
+extern bool shower_loglocal;
+extern bool shower_logcloud;
+extern String shower_cloudurl;
 extern String cloud_user, cloud_pass;
 
 // return 0 = OK, -1 = ERROR!
