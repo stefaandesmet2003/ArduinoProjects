@@ -35,7 +35,7 @@ uses MySensors, but without NodeManager framework
 #define RELAY_OFF   HIGH
 
 #define DEBOUNCE_TIME   100 // for the local control button
-#define FAN_HIGH_AUTO_LOW_DELAY   15*60*1000 // after 15 minutes, fan switches back to low speed
+#define FAN_HIGH_AUTO_LOW_DELAY   (900000) //15*60*1000 // after 15 minutes, fan switches back to low speed
 
 // MySensors config
 // MY_NODE_ID needs to be defined before #include
