@@ -11,6 +11,10 @@
 - programming mode : 3-second longpress the progkey until the led starts blinking slowly
 - CV programming : reading/writing CV only in programming mode
 --> 3 fast led flashes after a CV write operation
+- writing any value to CV8 (manufacturer ID) triggers a factory reset
+--> the actual value is not stored, CV8 is read-only  
+--> Note! after a factory reset, the decoder reinitializes and is no longer in programming mode!  
+
 - added NOP packet (RCN-213) to nmradcc lib, not sure yet what to do with it
 --> CommandStation is not sending this packet anyway for now  
 
@@ -49,16 +53,14 @@ In software mode = 0 :
 | 5 | timeOnOutput3 | 5 | x50ms, =250ms default coil activation time  |
 | 6 | timeOnOutput4 | 5 | x50ms, =250ms default coil activation time  |
 
-turnout decoder mode : the decoder occupies 1 dcc accessory address with 4 turnouts  
+turnout decoder mode (factory default) : the decoder occupies 1 dcc accessory address with 4 turnouts  
 output decoder mode : the decoder occupies 2 dcc accessory addresses with 8 on/off outputs  
 
 ## TODO
-- bug : led keeps blinking after factory reset  
 - programming on main is supported in nmradcc lib, but compiled out for now (NMRA_DCC_PROCESS_MULTIFUNCTION undefined)
 - test other decoder types included in nmradcc lib (mobile decoder etc)
 - replace the timer/event bullshit code
 
-- configuraties voor wisseldecoder, seindecoder etc maken  
 - code vereenvoudigen (timer.cpp en event.cpp nodig??)  
 - dcc clock in dcc-rx ?
 - Serial prints opkuisen

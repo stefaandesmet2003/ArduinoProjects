@@ -1,10 +1,3 @@
-/*
- * for test : connect signal head to pins 3->8 (8=VCC) AVR
- * for test : connect signal head to pins D3 -> C5 (D3=VCC) STM8
- * bug: CV programming werkt nog niet (DECODER_PROGRAM todo)
- * opgelet CV programming heeft een ack circuit nodig, anders werkt programming niet!
- * 
- */
 #include "NmraDcc.h"
 #include "SignalDecoderSTM8.h"
 //#include <EEPROM.h> // need to save flash and only used what's required
@@ -27,32 +20,69 @@ static CVPair FactoryDefaultCVs [] = {
   {CV_ACCESSORY_DECODER_ADDRESS_MSB, 0},
   {CV_VERSION_ID, VersionId},
   {CV_MANUFACTURER_ID, MAN_ID_DIY},
-  {CV_DECODER_CONFIGURATION,0x80}
+  {CV_DECODER_CONFIGURATION,0xA0} // extended accessory decoder (bit5)!
+};
+
+// starts at eeprom address INDEX_TABLE_START_ADDRESS
+uint8_t const cvIndexTableDefaults[] = {
+  0x80,0x81,0x82,0x83,0x84,0x85,0x88,0x86,0x87, // head 0
+  0xA0,0xA1,0xA2,0xA3,0xA4,0xA5,0xA8, // head 1
+  0xC0,0xC1,0xC2,0xC3,0xC4,0xC5,0xC8, // head 2
+  0xE0,0xE1,0xE2,0xE3,0xE4,0xE5,0xE8, // head 3
+};
+// starts at eeprom address ASPECT_TABLE_START_ADDRESS
+// behalve bij aspect rood-wit is de 80% brightness niet echt nodig, 
+// 100% geeft geen constante i2c accesses naar de expander, dus is een oplossing voor eventuele flickering
+// bij voeding door STLINK is wel meer flickering mogelijk
+uint8_t const cvAspectTableDefaults[] = {
+  // head 0 : 1=wit,2=geelV,3=rood,4=groen,5=geelH
+  0x23,0x1,0,0,0,0,0,0,0,0,         // rood 80%
+  0x22,0x1,0x25,0x1,0,0,0,0,0,0,    // dubbel geel 80%
+  0x24,0x1,0,0,0,0,0,0,0,0,         // groen 80%
+  0xE1,0x1,0x23,0x1,0,0,0,0,0,0,    // wit 10%, rood 80%
+  0x24,0x1,0x22,0x1,0,0,0,0,0,0,    // ge-gr vertikaal 80%
+  0x24,0x1,0x25,0x1,0,0,0,0,0,0,    // ge-gr horizontaal 80%
+  0,0,0,0,0,0,0,0,0,0,              // alles uit
+  0x22,0x12,0x25,0x12,0,0,0,0,0,0,  // dubbel geel 80%, knipperend 0.5s
+  0xE1,0x24,0x23,0x64,0,0,0,0,0,0,  // rood-wit, afwisselend knipperend 1s
+  // head 1 : 6=wit,7=geelV,8=rood,9=groen,10=geelH
+  0x28,0x1,0,0,0,0,0,0,0,0,         // rood 80%
+  0x27,0x1,0x2A,0x1,0,0,0,0,0,0,    // dubbel geel 80%
+  0x29,0x1,0,0,0,0,0,0,0,0,         // groen 80%
+  0xE6,0x1,0x28,0x1,0,0,0,0,0,0,    // wit 10%, rood 80%
+  0x29,0x1,0x27,0x1,0,0,0,0,0,0,    // ge-gr vertikaal 80%
+  0x29,0x1,0x2A,0x1,0,0,0,0,0,0,    // ge-gr horizontaal 80%
+  0,0,0,0,0,0,0,0,0,0,              // alles uit
+  // head 2 : 11=wit,12=geelV,13=rood,14=groen,15=geelH
+  0x2D,0x1,0,0,0,0,0,0,0,0,         // rood 80%
+  0x2C,0x1,0x2F,0x1,0,0,0,0,0,0,    // dubbel geel 80%
+  0x2E,0x1,0,0,0,0,0,0,0,0,         // groen 80%
+  0xEB,0x1,0x2D,0x1,0,0,0,0,0,0,    // wit 10%, rood 80%
+  0x2E,0x1,0x2C,0x1,0,0,0,0,0,0,    // ge-gr vertikaal 80%
+  0x2E,0x1,0x2F,0x1,0,0,0,0,0,0,    // ge-gr horizontaal 80%
+  0,0,0,0,0,0,0,0,0,0,              // alles uit
+  // head 3 : 16=wit,17=geelV,18=rood,19=groen,20=geelH (niet beschikbaar op stm8!!)
+  0x32,0x1,0,0,0,0,0,0,0,0,         // rood 80%
+  0x31,0x1,0x34,0x1,0,0,0,0,0,0,    // dubbel geel 80%
+  0x33,0x1,0,0,0,0,0,0,0,0,         // groen 80%
+  0xF0,0x1,0x32,0x1,0,0,0,0,0,0,    // wit 10%, rood 80%
+  0x33,0x1,0x31,0x1,0,0,0,0,0,0,    // ge-gr vertikaal 80%
+  0x33,0x1,0x34,0x1,0,0,0,0,0,0,    // ge-gr horizontaal 80%
+  0,0,0,0,0,0,0,0,0,0,              // alles uit
 };
 
 // signal decoder
-// outputs used : D3..D12,A2..A3 + 8 io expander
-#define NUM_HEADS             2
-#define NUM_OUTPUTS_PER_HEAD  3
+// outputs used : 11 on STM8 + 8 io expander
+#define NUM_HEADS             4
+#define NUM_OUTPUTS_PER_HEAD  3    // max 5 supported by CV configuration, but we can use less to save RAM
 #define NUM_OUTPUTS           19
-
 #define PIN_UNUSED            0xFF
 
-// temp for test
-// built-in I/O -> head 0
-// deze pins gaan door de pinLUT, dus PIN_0_YELLOW wordt digitalWrite(pinLUT[PIN_0_YELLOW]) = digitalWrite(3)
-#define PIN_0_WHITE   0
-#define PIN_0_ORANGE  1
-#define PIN_0_RED     2
-#define PIN_0_GREEN   3
-#define PIN_0_YELLOW  4
-
-// expander -> head 1
-#define PIN_1_WHITE   10  
-#define PIN_1_ORANGE  11   // P0 op de expander volgens pinLUT
-#define PIN_1_RED     12
-#define PIN_1_GREEN   13
-#define PIN_1_YELLOW  14
+// CV(eeprom) configuration
+#define INDEX_TABLE_START_ADDRESS       33
+#define INDEX_TABLE_SIZE                40
+#define ASPECT_TABLE_START_ADDRESS (INDEX_TABLE_START_ADDRESS + INDEX_TABLE_SIZE) // 65
+#define ASPECT_BLOCK_SIZE               10
 
 typedef struct {
   uint8_t pin;
@@ -80,6 +110,9 @@ static bool ioUpdate = false; // minimize i2c accesses for minimal flickering
 // for example 8 built-in pins, 8 I/O expander pins on 0x26 (A0=0,A1=1,A2=1)
 // headPin (used for the heads definitions) is the index in this pinLUT array
 static uint8_t pinLUT[NUM_OUTPUTS] = {PD3,PD2,PD1,PC7,PC6,PC5,PC4,PC3,PD4,PD5,PD6,0xB0,0xB1,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7};
+
+// convert a brightness value in the head definition CVs to a ledOn/ledOff value (0..10)
+static uint8_t brightnessLUT[8][2] = {{0,10},{2,10},{4,10},{6,10},{8,10},{0,3},{0,2},{0,1}};
 
 // keyhandling -> only progkey for signal decoder
 #define DEBOUNCE_DELAY 50
@@ -210,6 +243,63 @@ static void myPinMode(uint8_t headPin,uint8_t pinValue) {
   }
 } // myPinMode
 
+static void setAspectDefinitionFromEeprom (uint8_t head, uint8_t aspect) {
+  uint8_t idx;
+  uint16_t cvAddress;
+  uint8_t cvValue, cvHead, cvAspect;
+  uint8_t outputPin;
+  uint8_t brightness;
+  uint8_t blinkTimeOn, blinkTimeOff, blinkInverse;
+  uint8_t idxOutput = 0;
+
+  if ((head >= NUM_HEADS) || (aspect > 31))
+    return;
+
+  // 1. find matching signal head/aspect in the index table
+  idx = 0;
+  while (idx < INDEX_TABLE_SIZE) {
+    cvValue = EEPROM_read(INDEX_TABLE_START_ADDRESS + idx);
+    if (cvValue & 0x80) { // line in index table is in use
+      cvHead = (cvValue >> 5) & 0x3;
+      cvAspect = cvValue & 0x1F;
+      if ((cvHead == head) && (cvAspect == aspect)) // index found
+        break;
+    }
+    idx++;
+  }
+  if (idx >= INDEX_TABLE_SIZE) { // reached end of index table -> no item found
+    #ifdef DEBUG
+      Serial_println_s("no aspect definition found");
+    #endif
+    return;
+  } 
+  // 2. get the lamp definitions from eeprom
+  cvAddress = ASPECT_TABLE_START_ADDRESS + ASPECT_BLOCK_SIZE*idx;
+  for (uint8_t i=0;i<NUM_OUTPUTS_PER_HEAD;i++) {
+    cvValue = EEPROM_read(cvAddress++); // output definition byte
+    outputPin = cvValue & 0x1F;
+    brightness = (cvValue >> 5) & 0x7;
+    cvValue = EEPROM_read(cvAddress++); // blinking definition byte
+    blinkTimeOn = cvValue & 0x7;
+    blinkTimeOff = (cvValue >> 3) & 0x7;
+    blinkInverse = cvValue & 0x40; //bit6
+    if (outputPin) {
+      heads[head].outputs[idxOutput].pin = outputPin - 1;
+      heads[head].outputs[idxOutput].ledOn = brightnessLUT[brightness][0];
+      heads[head].outputs[idxOutput].ledOff = brightnessLUT[brightness][1];
+      heads[head].outputs[idxOutput].fCycle = 0;
+      heads[head].outputs[idxOutput].fOnCycle = 0;
+      heads[head].outputs[idxOutput].fOffCycle = blinkTimeOn;
+      heads[head].outputs[idxOutput].fTotalCycles = blinkTimeOn + blinkTimeOff;
+      if (blinkInverse) {
+        heads[head].outputs[idxOutput].fOnCycle+= blinkTimeOff;
+        heads[head].outputs[idxOutput].fOffCycle+= blinkTimeOff; 
+      }
+      idxOutput++;
+    }
+  }
+} // setAspectDefinitionFromEeprom
+
 static void signal_init() {
   pinMode (PIN_PROGLED, INPUT); // vreemd genoeg is dit niet strikt noodzakelijk
 
@@ -268,153 +358,7 @@ static void head_init(uint8_t headId, uint8_t aspectId) {
     myDigitalWrite(heads[headId].outputs[output].pin,HIGH);
     heads[headId].outputs[output].pin = PIN_UNUSED;
   }
-
-  // test implmementation of various heads
-  // 2 identieke heads, maar op verschillende output sets
-  // head 0 : pins 1..5
-  // head 1 : pins 9..13 (I/O expander)
-  
-  disableInterrupts();
-  // defaults voor JMRI infrabel-2013
-  if (aspectId == 0) { // stop - rood
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_RED; // rood
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_RED; // rood
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 10;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-  }
-  else if (aspectId == 1) { // approach - dubbel geel
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 10;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_YELLOW; // geel
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_YELLOW; // geel
-    heads[headId].outputs[1].ledOn = 0;
-    heads[headId].outputs[1].ledOff = 10;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;
-  }
-  else if (aspectId == 2) { // clear - groen
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_GREEN; // groen
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_GREEN; // groen
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 10;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-  }
-  else if (aspectId == 3) { // restricting - rood wit
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_WHITE; // wit
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_WHITE; // wit
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 1;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_RED; // rood
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_RED; // rood
-    heads[headId].outputs[1].ledOn = 2;
-    heads[headId].outputs[1].ledOff = 9;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 4) { // advanced approach - geel-groen vertikaal
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 10;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_GREEN; // groen
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_GREEN; // groen
-    heads[headId].outputs[1].ledOn = 0;
-    heads[headId].outputs[1].ledOff = 10;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 5) { // slow approach - geel-groen horizontaal
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_YELLOW; // geel
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_YELLOW; // geel
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 10;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_GREEN; // groen
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_GREEN; // groen
-    heads[headId].outputs[1].ledOn = 0;
-    heads[headId].outputs[1].ledOff = 10;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 8) { // unlit - alles uit
-  }
-  // nog wat fantasietjes
-  else if (aspectId == 6) { // dubbel geel knipperend
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel midden
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel midden
-    heads[headId].outputs[0].ledOn = 1;
-    heads[headId].outputs[0].ledOff = 9;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 2;
-    heads[headId].outputs[0].fTotalCycles = 4;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_YELLOW; // geel boven
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_YELLOW; // geel boven
-    heads[headId].outputs[1].ledOn = 1;
-    heads[headId].outputs[1].ledOff = 9;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 2;
-    heads[headId].outputs[1].fTotalCycles = 4;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-/*  
-  else if (aspectId == 7) { // rood wit knipperend
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_WHITE; // wit
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_WHITE; // wit
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 1;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 4;
-    heads[headId].outputs[0].fTotalCycles = 8;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_RED; // rood
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_RED; // rood
-    heads[headId].outputs[1].ledOn = 2;
-    heads[headId].outputs[1].ledOff = 10;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 4;
-    heads[headId].outputs[1].fTotalCycles = 8;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-*/  
-  else  {// alles uit
-  }
-  heads[headId].ms = 0;
-  heads[headId].bCycle = 0;
-
-  enableInterrupts();
+  setAspectDefinitionFromEeprom(headId, aspectId);
 } // head_init
 
 /******************************************************************/
@@ -473,6 +417,7 @@ static void detect_keys (void) {
   }
 } // detect_keys
 
+static uint8_t testAspect = 0;
 static void keyHandler (uint8_t keyEvent) {
   if (keyEvent & KEYEVENT_LONGDOWN) {
     if (decoderState != DECODER_PROGRAM) {
@@ -487,6 +432,12 @@ static void keyHandler (uint8_t keyEvent) {
     }
     else {
       // TODO manual test of signal heads? lamp test?
+      head_init(0,testAspect);
+      head_init(1,testAspect);
+      head_init(2,testAspect);
+      head_init(3,testAspect);
+      testAspect++;
+      if (testAspect > 8) testAspect = 0; // cycle between aspects 0..8 for test 
     }
   }
 } // keyHandler
@@ -501,12 +452,15 @@ static uint8_t accessory_FactoryResetCV() {
   for (int i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++) {
     DCC_setCV(FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
   }
-
-  swMode = DCC_getCV(CV_SoftwareMode);
-  switch(swMode)
-  {
-    // TODO for signal decoder
+  
+  // reset default index & aspect definition tables
+  for (int i=0;i<sizeof(cvIndexTableDefaults);i++) {
+    EEPROM_update(INDEX_TABLE_START_ADDRESS + i, cvIndexTableDefaults[i]);
   }
+  for (int i=0;i<sizeof(cvAspectTableDefaults);i++) {
+    EEPROM_update(ASPECT_TABLE_START_ADDRESS + i, cvAspectTableDefaults[i]);
+  }
+
   return 0;
 } // accessory_FactoryResetCV
 
@@ -555,9 +509,11 @@ void loop() {
       // TODO : no software modes for now
       // decoderSoftwareMode = Dcc.getCV(CV_SoftwareMode);
       signal_init();
-      // set 2 heads for test
-      head_init(0,6); // (head,aspect) 0 = rood, 1=dubbel-geel
-      head_init(1,6); // (head,aspect) 0 = rood, 1=dubbel-geel
+      // set initial heads (all 'stop')
+      head_init(0,0);
+      head_init(1,0);
+      head_init(2,0);
+      head_init(3,0);
       decoderState = DECODER_RUNNING;
       #ifdef DEBUG
         Serial_print_s("my address is : "); 

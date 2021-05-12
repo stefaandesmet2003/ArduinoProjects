@@ -32,27 +32,16 @@ static CVPair FactoryDefaultCVs [] = {
 
 // signal decoder
 // outputs used : D3..D12,A2..A3 + 8 io expander
-#define NUM_HEADS             2
-#define NUM_OUTPUTS_PER_HEAD  3
+#define NUM_HEADS             4
+#define NUM_OUTPUTS_PER_HEAD  3    // max 5 supported by CV configuration, but we can use less to save RAM
 #define NUM_OUTPUTS           20
-
 #define PIN_UNUSED            0xFF
 
-// temp for test
-// built-in I/O -> head 0
-// deze pins gaan door de pinLUT, dus PIN_0_YELLOW wordt digitalWrite(pinLUT[PIN_0_YELLOW]) = digitalWrite(3)
-#define PIN_0_WHITE   4
-#define PIN_0_ORANGE  3
-#define PIN_0_RED     2
-#define PIN_0_GREEN   1
-#define PIN_0_YELLOW  0
-
-// expander -> head 1
-#define PIN_1_WHITE   16  // lukt niet op breadboard, dus dan maar pin aan de overkant van de chip
-#define PIN_1_ORANGE  12   // P0 op de expander volgens pinLUT
-#define PIN_1_RED     13
-#define PIN_1_GREEN   14
-#define PIN_1_YELLOW  15
+// CV(eeprom) configuration
+#define INDEX_TABLE_START_ADDRESS       33
+#define INDEX_TABLE_SIZE                40
+#define ASPECT_TABLE_START_ADDRESS (INDEX_TABLE_START_ADDRESS + INDEX_TABLE_SIZE) // 65
+#define ASPECT_BLOCK_SIZE               10
 
 typedef struct {
   uint8_t pin;
@@ -80,6 +69,9 @@ static bool ioUpdate = false; // minimize i2c accesses for minimal flickering
 // for example 8 built-in pins, 8 I/O expander pins on 0x26 (A0=0,A1=1,A2=1)
 // headPin (used for the heads definitions) is the index in this pinLUT array
 static uint8_t pinLUT[NUM_OUTPUTS] = {3,4,5,6,7,8,9,10,11,12,16,17,0xB0,0xB1,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7};
+
+// convert a brightness value in the head definition CVs to a ledOn/ledOff value (0..10)
+static uint8_t brightnessLUT[8][2] = {{0,10},{2,10},{4,10},{6,10},{8,10},{0,3},{0,2},{0,1}};
 
 // keyhandling -> only progkey for signal decoder
 #define DEBOUNCE_DELAY 50
@@ -236,6 +228,60 @@ static void myPinMode(uint8_t headPin,uint8_t pinValue) {
   }
 } // myPinMode
 
+static void setAspectDefinitionFromEeprom (uint8_t head, uint8_t aspect) {
+  uint8_t idx;
+  uint8_t cvAddress;
+  uint8_t cvValue, cvHead, cvAspect;
+  uint8_t outputPin;
+  uint8_t brightness;
+  uint8_t blinkTimeOn, blinkTimeOff, blinkInverse;
+  uint8_t idxOutput = 0;
+
+  if ((head >= NUM_HEADS) || (aspect > 31))
+    return;
+
+  // 1. find matching signal head/aspect in the index table
+  idx = 0;
+  while (idx < INDEX_TABLE_SIZE) {
+    cvValue = eeprom_read_byte(INDEX_TABLE_START_ADDRESS + idx);
+    if (cvValue & 0x80) { // line in index table is in use
+      cvHead = (cvValue >> 5) & 0x3;
+      cvAspect = cvValue & 0x1F;
+      if ((cvHead == head) && (cvAspect == aspect)) // index found
+        break;
+    }
+    idx++;
+  }
+  if (idx >= INDEX_TABLE_SIZE) { // reached end of index table -> no item found
+    Serial.println("no aspect definition found");
+    return;
+  } 
+  // 2. get the lamp definitions from eeprom
+  cvAddress = ASPECT_TABLE_START_ADDRESS + ASPECT_BLOCK_SIZE*idx;
+  for (uint8_t i=0;i<NUM_OUTPUTS_PER_HEAD;i++) {
+    cvValue = eeprom_read_byte(cvAddress++); // output definition byte
+    outputPin = cvValue & 0x1F;
+    brightness = (cvValue >> 5) & 0x7;
+    cvValue = eeprom_read_byte(cvAddress++); // blinking definition byte
+    blinkTimeOn = cvValue & 0x7;
+    blinkTimeOff = (cvValue >> 3) & 0x7;
+    blinkInverse = cvValue & 0x40; //bit6
+    if (outputPin) {
+      heads[head].outputs[idxOutput].pin = outputPin - 1;
+      heads[head].outputs[idxOutput].ledOn = brightnessLUT[brightness][0];
+      heads[head].outputs[idxOutput].ledOff = brightnessLUT[brightness][1];
+      heads[head].outputs[idxOutput].fOnCycle = 0;
+      heads[head].outputs[idxOutput].fOffCycle = blinkTimeOn;
+      heads[head].outputs[idxOutput].fTotalCycles = blinkTimeOn + blinkTimeOff;
+      if (blinkInverse) {
+        heads[head].outputs[idxOutput].fOnCycle+= blinkTimeOff;
+        heads[head].outputs[idxOutput].fOffCycle+= blinkTimeOff; 
+      }
+      idxOutput++;
+    }
+  }
+} // setAspectDefinitionFromEeprom
+
 static void signal_init() {
   Wire.begin(); // for the i2c expander
 
@@ -266,7 +312,6 @@ static void signal_init() {
   #else
     TCCR2B = (1 << CS22) | (1 << CS20);   // prescaler /128 (opgelet : niet dezelfde bits voor TIMER0!!! table 19-10 vs. 22-10)
   #endif  
-
 } // signal_init
 
 // initialize a specific aspect on a chosen signal head
@@ -277,151 +322,7 @@ static void head_init(uint8_t headId, uint8_t aspectId) {
     myDigitalWrite(heads[headId].outputs[output].pin,HIGH);
     heads[headId].outputs[output].pin = PIN_UNUSED;
   }
-
-  // test implmementation of various heads
-  // 2 identieke heads, maar op verschillende output sets
-  // head 0 : pins 1..5
-  // head 1 : pins 9..13 (I/O expander)
-  
-  cli();
-  // defaults voor JMRI infrabel-2013
-  if (aspectId == 0) { // stop - rood
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_RED; // rood
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_RED; // rood
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 8;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-  }
-  else if (aspectId == 1) { // approach - dubbel geel
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 8;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_YELLOW; // geel
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_YELLOW; // geel
-    heads[headId].outputs[1].ledOn = 0;
-    heads[headId].outputs[1].ledOff = 8;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;
-  }
-  else if (aspectId == 2) { // clear - groen
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_GREEN; // groen
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_GREEN; // groen
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 8;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-  }
-  else if (aspectId == 3) { // restricting - rood wit
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_WHITE; // wit
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_WHITE; // wit
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 1;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_RED; // rood
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_RED; // rood
-    heads[headId].outputs[1].ledOn = 2;
-    heads[headId].outputs[1].ledOff = 9;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 4) { // advanced approach - geel-groen vertikaal
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 8;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_GREEN; // groen
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_GREEN; // groen
-    heads[headId].outputs[1].ledOn = 0;
-    heads[headId].outputs[1].ledOff = 8;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 5) { // slow approach - geel-groen horizontaal
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_YELLOW; // geel
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_YELLOW; // geel
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 8;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 1;
-    heads[headId].outputs[0].fTotalCycles = 1;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_GREEN; // groen
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_GREEN; // groen
-    heads[headId].outputs[1].ledOn = 0;
-    heads[headId].outputs[1].ledOff = 8;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 1;
-    heads[headId].outputs[1].fTotalCycles = 1;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 8) { // unlit - alles uit
-  }
-  // nog wat fantasietjes
-  else if (aspectId == 6) { // dubbel geel knipperend
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel midden
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel midden
-    heads[headId].outputs[0].ledOn = 1;
-    heads[headId].outputs[0].ledOff = 9;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 2;
-    heads[headId].outputs[0].fTotalCycles = 4;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_YELLOW; // geel boven
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_YELLOW; // geel boven
-    heads[headId].outputs[1].ledOn = 1;
-    heads[headId].outputs[1].ledOff = 9;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 2;
-    heads[headId].outputs[1].fTotalCycles = 4;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else if (aspectId == 7) { // rood wit knipperend
-    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_WHITE; // wit
-    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_WHITE; // wit
-    heads[headId].outputs[0].ledOn = 0;
-    heads[headId].outputs[0].ledOff = 1;
-    heads[headId].outputs[0].fOnCycle = 0;
-    heads[headId].outputs[0].fOffCycle = 4;
-    heads[headId].outputs[0].fTotalCycles = 8;
-    heads[headId].outputs[0].fCycle = 0;
-    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_RED; // rood
-    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_RED; // rood
-    heads[headId].outputs[1].ledOn = 2;
-    heads[headId].outputs[1].ledOff = 10;
-    heads[headId].outputs[1].fOnCycle = 0;
-    heads[headId].outputs[1].fOffCycle = 4;
-    heads[headId].outputs[1].fTotalCycles = 8;
-    heads[headId].outputs[1].fCycle = 0;  
-  }
-  else  {// alles uit
-  }
-  heads[headId].ms = 0;
-  heads[headId].bCycle = 0;
-
-  sei();
+  setAspectDefinitionFromEeprom(headId, aspectId);
 } // head_init
 
 /******************************************************************/
@@ -648,3 +549,178 @@ bool notifyCVValid(uint16_t cv, uint8_t writable) {
   // TODO : uitbreiden!! (ook afhankelijk van swMode CV33)
   return isValid;
 } // notifyCVValid
+
+
+// old demo implementation 
+/*
+// temp for test
+// built-in I/O -> head 0
+// deze pins gaan door de pinLUT, dus PIN_0_YELLOW wordt digitalWrite(pinLUT[PIN_0_YELLOW]) = digitalWrite(3)
+#define PIN_0_WHITE   4
+#define PIN_0_ORANGE  3
+#define PIN_0_RED     2
+#define PIN_0_GREEN   1
+#define PIN_0_YELLOW  0
+
+// expander -> head 1
+#define PIN_1_WHITE   16  // lukt niet op breadboard, dus dan maar pin aan de overkant van de chip
+#define PIN_1_ORANGE  12   // P0 op de expander volgens pinLUT
+#define PIN_1_RED     13
+#define PIN_1_GREEN   14
+#define PIN_1_YELLOW  15
+
+// initialize a specific aspect on a chosen signal head
+// headId : 0..3, aspectId : 0..31 (according DCC)
+static void head_init(uint8_t headId, uint8_t aspectId) {
+  // reset the outputs used in the previous aspect
+  for (uint8_t output=0;output<NUM_OUTPUTS_PER_HEAD;output++) {
+    myDigitalWrite(heads[headId].outputs[output].pin,HIGH);
+    heads[headId].outputs[output].pin = PIN_UNUSED;
+  }
+
+  // test implmementation of various heads
+  // 2 identieke heads, maar op verschillende output sets
+  // head 0 : pins 1..5
+  // head 1 : pins 9..13 (I/O expander)
+  
+  cli();
+  // defaults voor JMRI infrabel-2013
+  if (aspectId == 0) { // stop - rood
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_RED; // rood
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_RED; // rood
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 8;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 1;
+    heads[headId].outputs[0].fTotalCycles = 1;
+    heads[headId].outputs[0].fCycle = 0;
+  }
+  else if (aspectId == 1) { // approach - dubbel geel
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 8;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 1;
+    heads[headId].outputs[0].fTotalCycles = 1;
+    heads[headId].outputs[0].fCycle = 0;
+    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_YELLOW; // geel
+    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_YELLOW; // geel
+    heads[headId].outputs[1].ledOn = 0;
+    heads[headId].outputs[1].ledOff = 8;
+    heads[headId].outputs[1].fOnCycle = 0;
+    heads[headId].outputs[1].fOffCycle = 1;
+    heads[headId].outputs[1].fTotalCycles = 1;
+    heads[headId].outputs[1].fCycle = 0;
+  }
+  else if (aspectId == 2) { // clear - groen
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_GREEN; // groen
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_GREEN; // groen
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 8;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 1;
+    heads[headId].outputs[0].fTotalCycles = 1;
+    heads[headId].outputs[0].fCycle = 0;
+  }
+  else if (aspectId == 3) { // restricting - rood wit
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_WHITE; // wit
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_WHITE; // wit
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 1;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 1;
+    heads[headId].outputs[0].fTotalCycles = 1;
+    heads[headId].outputs[0].fCycle = 0;
+    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_RED; // rood
+    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_RED; // rood
+    heads[headId].outputs[1].ledOn = 2;
+    heads[headId].outputs[1].ledOff = 9;
+    heads[headId].outputs[1].fOnCycle = 0;
+    heads[headId].outputs[1].fOffCycle = 1;
+    heads[headId].outputs[1].fTotalCycles = 1;
+    heads[headId].outputs[1].fCycle = 0;  
+  }
+  else if (aspectId == 4) { // advanced approach - geel-groen vertikaal
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 8;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 1;
+    heads[headId].outputs[0].fTotalCycles = 1;
+    heads[headId].outputs[0].fCycle = 0;
+    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_GREEN; // groen
+    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_GREEN; // groen
+    heads[headId].outputs[1].ledOn = 0;
+    heads[headId].outputs[1].ledOff = 8;
+    heads[headId].outputs[1].fOnCycle = 0;
+    heads[headId].outputs[1].fOffCycle = 1;
+    heads[headId].outputs[1].fTotalCycles = 1;
+    heads[headId].outputs[1].fCycle = 0;  
+  }
+  else if (aspectId == 5) { // slow approach - geel-groen horizontaal
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_YELLOW; // geel
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_YELLOW; // geel
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 8;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 1;
+    heads[headId].outputs[0].fTotalCycles = 1;
+    heads[headId].outputs[0].fCycle = 0;
+    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_GREEN; // groen
+    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_GREEN; // groen
+    heads[headId].outputs[1].ledOn = 0;
+    heads[headId].outputs[1].ledOff = 8;
+    heads[headId].outputs[1].fOnCycle = 0;
+    heads[headId].outputs[1].fOffCycle = 1;
+    heads[headId].outputs[1].fTotalCycles = 1;
+    heads[headId].outputs[1].fCycle = 0;  
+  }
+  else if (aspectId == 8) { // unlit - alles uit
+  }
+  // nog wat fantasietjes
+  else if (aspectId == 6) { // dubbel geel knipperend
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_ORANGE; // geel midden
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_ORANGE; // geel midden
+    heads[headId].outputs[0].ledOn = 1;
+    heads[headId].outputs[0].ledOff = 9;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 2;
+    heads[headId].outputs[0].fTotalCycles = 4;
+    heads[headId].outputs[0].fCycle = 0;
+    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_YELLOW; // geel boven
+    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_YELLOW; // geel boven
+    heads[headId].outputs[1].ledOn = 1;
+    heads[headId].outputs[1].ledOff = 9;
+    heads[headId].outputs[1].fOnCycle = 0;
+    heads[headId].outputs[1].fOffCycle = 2;
+    heads[headId].outputs[1].fTotalCycles = 4;
+    heads[headId].outputs[1].fCycle = 0;  
+  }
+  else if (aspectId == 7) { // rood wit knipperend
+    if (headId == 0) heads[headId].outputs[0].pin = PIN_0_WHITE; // wit
+    else if (headId == 1) heads[headId].outputs[0].pin = PIN_1_WHITE; // wit
+    heads[headId].outputs[0].ledOn = 0;
+    heads[headId].outputs[0].ledOff = 1;
+    heads[headId].outputs[0].fOnCycle = 0;
+    heads[headId].outputs[0].fOffCycle = 4;
+    heads[headId].outputs[0].fTotalCycles = 8;
+    heads[headId].outputs[0].fCycle = 0;
+    if (headId == 0) heads[headId].outputs[1].pin = PIN_0_RED; // rood
+    else if (headId == 1) heads[headId].outputs[1].pin = PIN_1_RED; // rood
+    heads[headId].outputs[1].ledOn = 2;
+    heads[headId].outputs[1].ledOff = 10;
+    heads[headId].outputs[1].fOnCycle = 0;
+    heads[headId].outputs[1].fOffCycle = 4;
+    heads[headId].outputs[1].fTotalCycles = 8;
+    heads[headId].outputs[1].fCycle = 0;  
+  }
+  else  {// alles uit
+  }
+  heads[headId].ms = 0;
+  heads[headId].bCycle = 0;
+
+  sei();
+} // head_init
+*/
