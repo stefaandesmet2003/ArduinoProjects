@@ -1,3 +1,4 @@
+// helper program om de eeprom inhoud van een signaldecoder te interpreteren
 
 #include <EEPROM.h>
 // CV(eeprom) configuration
