@@ -273,6 +273,9 @@ void handleSensorRequest()
 {
   String message;
   uint8_t nodeId = 0;
+  uint8_t sensorId, cmd, varType;
+  String varValue;
+
   if (server.args() == 1) { // answer with locally available node data
     if (server.argName(0) == "id") nodeId = server.arg(0).toInt();
   
@@ -337,14 +340,12 @@ void handleSensorRequest()
   }
 
   else { // hub passes command to the mysensors network
-    uint8_t sensorId, cmd, varType;
-    String varValue;
     for (uint8_t i=0;i<server.args();i++) {
       if (server.argName(i) == "id") nodeId = server.arg(i).toInt();
       else if (server.argName(i) == "sensorid") sensorId = server.arg(i).toInt();
       else if (server.argName(i) == "cmd") cmd = server.arg(i).toInt();
       else if (server.argName(i) == "type") varType = server.arg(i).toInt();
-      else if (server.argName(i) == "val") varValue = server.arg(i);
+      else if (server.argName(i) == "val") varValue = String(server.arg(i));
     }
     // basic check if all parameters for a valid command are passed
     // ask ack, so gateway internal state gets updated if command is correctly executed by the node
@@ -353,8 +354,9 @@ void handleSensorRequest()
         bool bVal = (bool) varValue.toInt();
         _sendRoute(build(gwMsg,nodeId,sensorId,(mysensors_command_t) cmd,varType,true).set(bVal));
       }
-      else if (varType == V_HVAC_SPEED)
+      else if (varType == V_HVAC_SPEED) {
         _sendRoute(build(gwMsg,nodeId,sensorId,(mysensors_command_t) cmd,varType,true).set(varValue)); // sent as string directly "Min","Max"
+      }
       message = "{\"resp\":\"OK\"}";
       server.send(200, "text/json", message);
     }
@@ -811,8 +813,8 @@ void receive(const MyMessage &message) {
         curSensorDataFan.fanOn = message.getBool();
       }
       else if ((sensorId == 1) && (message.getType() == V_HVAC_SPEED)) {
-        strncpy(curSensorDataFan.fanSpeed, message.getString(),7);
-        // message.getString(curSensorDataFan.fanSpeed) -> probably works too, but copies all string bytes without respecting the fanSpeed[] length
+        //strncpy(curSensorDataFan.fanSpeed, message.getString(),7); // deze lijn gaf exception error + reset; nog onderzoeken, blijkbaar mag je niet meer bytes lezen dan len(message.getString())
+        message.getString(curSensorDataFan.fanSpeed); // potentially problematic, because doesn't respect the fanSpeed[] length
       }
       else if ((sensorId == 2) && (message.getType() == V_STATUS)) {
         curSensorDataFan.alarmActive = message.getBool();

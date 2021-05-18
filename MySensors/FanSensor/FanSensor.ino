@@ -13,6 +13,10 @@
 #define MY_RADIO_RF24 // Enable and select radio type attached
 #define MY_NODE_ID 5
 
+//test
+#define MY_PASSIVE_NODE
+#define MY_PARENT_NODE_ID 0 // gateway as default parent
+
 #include <MySensors.h>
 
 /*
