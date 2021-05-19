@@ -278,8 +278,11 @@ uint16_t getDecoderAddress(void) {
 /**********************************************************************************************/
 void notifyDccReset(uint8_t hardReset) {
   (void) hardReset;
+  // TODO : check, want er worden dcc resets gestuurd bij start programming mode, en dan is DECODER_INIT niet ok!!
+  /*
   decoderState = DECODER_INIT; // the loop() function will get the decoder to a reinitialize
   // avr standard bootloader doesn't like a watchdog reset, so can't do a real reboot
+  */
 } // notifyDccReset
 
 //#define NOTIFY_DCC_MSG
