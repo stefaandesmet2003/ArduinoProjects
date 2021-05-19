@@ -18,6 +18,26 @@
 
 // hardware definitions? (of is dit afhankelijk van softwaremode?)
 // hardware-def van de turnout-decoder
+// for test with avr conversion print
+/*
+#define PIN_KEY2    12
+#define PIN_KEY3    12
+#define PIN_KEY4    12
+#define PIN_OUTPUT0 9
+#define PIN_OUTPUT1 8
+#define PIN_OUTPUT2 7
+#define PIN_OUTPUT3 6
+#define PIN_OUTPUT4 5
+#define PIN_OUTPUT5 4
+#define PIN_OUTPUT6 3
+#define PIN_OUTPUT7 A2
+//progled en progkey
+#define PIN_PROGKEY 12
+#define PIN_PROGLED 13
+#define PIN_ACKOUT  A3
+#define PIN_DCCIN   2
+*/
+
 #define PIN_KEY2    17 // A3 , omdat D13 niet werkte (moet blijkbaar met externe pulldown omwille van de LED)
 #define PIN_KEY3    12 // D12
 #define PIN_KEY4    11 // D11

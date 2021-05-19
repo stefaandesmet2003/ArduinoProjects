@@ -361,6 +361,7 @@ uint8_t notifyCVWrite(uint16_t cv, uint8_t cvValue) {
   }
   if (cv == CV_MANUFACTURER_ID) { // writing the CV_MANUFACTURER_ID triggers a factory reset
     decoderState = DECODER_FACTORY_RESET;
+    EEPROM_update((int) cv, MAN_ID_DIY); // in case of empty eeprom
     Timer_oscillate(PIN_PROGLED, LED_FAST_FLASH, HIGH, 3); // 3 led flashes ter bevestiging van een CV write
     return cvValue; // we pretend to write the value, but only to trigger an ackCV
   }
