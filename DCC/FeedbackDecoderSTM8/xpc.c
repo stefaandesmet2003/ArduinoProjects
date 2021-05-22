@@ -7,17 +7,10 @@
 // TODO : je kan zo snel naar de TxBuffer schrijven als de rs485 toelaat, zonder tijd te laten aan xpc_Run om de RxBuffer te lezen
 // --> dat geeft wel RX_ERRORS in xpc_Run, waardoor je broadcasts of replies kan missen
 
-//#define XPC_DEBUG // do serial prints on myserial software serial interface (to be initiated by app)
-#undef XPC_DEBUG
 
 #include "Arduino.h"
 #include "rs485c.h" // rx and tx serial interface, made for xpressnet
 #include "xpc.h"
-
-#ifdef XPC_DEBUG
-#include <SoftwareSerial.h>
-extern SoftwareSerial mySerial;
-#endif
 
 // xpnet definitions
 #define XPNET_BROADCAST_ADDRESS (0)
@@ -54,14 +47,15 @@ uint8_t xp_unknown[] = {0x61,0x82};                 // unknown command
 
 // fixed messages client -> Command Station
 static uint8_t xpc_AcknowledgementResponse[] = {0x20};                // 2.2.1
-static uint8_t xpc_PowerOnRequest[] = {0x21,0x81};                    // 2.2.2 Resume operations request
-static uint8_t xpc_PowerOffRequest[] = {0x21,0x80};                   // 2.2.3 (emergency off)
-static uint8_t xpc_EmergencyStopRequest[] = {0x80};                   // 2.2.4
-static uint8_t xpc_ServiceModeResultsRequest[] = {0x21,0x10};         // 2.2.x
-static uint8_t xpc_CommandStationSwVersionRequest[] = {0x21,0x21};    // 2.2.x
-static uint8_t xpc_CommandStationStatusRequest[] = {0x21,0x24};       // 2.2.x
-static uint8_t xpc_GetFastClockRequest[] = {0x01,0xF2};               // undocumented xpnet
-
+#ifndef MINIMAL_XPC
+  static uint8_t xpc_PowerOnRequest[] = {0x21,0x81};                    // 2.2.2 Resume operations request
+  static uint8_t xpc_PowerOffRequest[] = {0x21,0x80};                   // 2.2.3 (emergency off)
+  static uint8_t xpc_EmergencyStopRequest[] = {0x80};                   // 2.2.4
+  static uint8_t xpc_ServiceModeResultsRequest[] = {0x21,0x10};         // 2.2.x
+  static uint8_t xpc_CommandStationSwVersionRequest[] = {0x21,0x21};    // 2.2.x
+  static uint8_t xpc_CommandStationStatusRequest[] = {0x21,0x24};       // 2.2.x
+  static uint8_t xpc_GetFastClockRequest[] = {0x01,0xF2};               // undocumented xpnet
+#endif 
 static bool xpc_isConnectionError = false; // als we geen callbytes ontvangen van de commandStation
 static uint32_t rxLastMillis;
 
@@ -113,40 +107,31 @@ void xpc_SendMessage(uint8_t *msg)
   }    
   XP_send_byte(my_xor); // send xor
   enableInterrupts();
-  #ifdef XPC_DEBUG
-    mySerial.println("xpc_SendMessage");
-  #endif
 } // xpc_SendMessage
 
-void xpc_send_PowerOnRequest ()
-{
+#ifndef MINIMAL_XPC
+void xpc_send_PowerOnRequest () {
   xpc_SendMessage(xpc_PowerOnRequest);
 }
-void xpc_send_PowerOffRequest ()
-{
+void xpc_send_PowerOffRequest () {
   xpc_SendMessage(xpc_PowerOffRequest);
 }
-void xpc_send_EmergencyStopRequest ()
-{
+void xpc_send_EmergencyStopRequest () {
   xpc_SendMessage(xpc_EmergencyStopRequest);
 }
-void xpc_send_ServiceModeResultsRequest ()
-{
+void xpc_send_ServiceModeResultsRequest () {
   xpc_SendMessage(xpc_ServiceModeResultsRequest);
 }
-void xpc_send_CommandStationStatusRequest ()
-{
+void xpc_send_CommandStationStatusRequest () {
   xpc_SendMessage(xpc_CommandStationStatusRequest);
 } // xpc_send_CommandStationStatusRequest
 
-void xpc_send_CommandStationSwVersionRequest ()
-{
+void xpc_send_CommandStationSwVersionRequest () {
   xpc_SendMessage(xpc_CommandStationSwVersionRequest);
 } // xpc_send_CommandStationSwVersionRequest
 
 // cv : 1..1024, 1024 wordt als 0 getransmit
-void xpc_send_DirectModeCVReadRequest(uint16_t cvAddr)
-{
+void xpc_send_DirectModeCVReadRequest(uint16_t cvAddr) {
   // 0x22 0x15 CV X-Or --> oud formaat, voor CV1..256
   // 0x22 0x18 en verder voor CV1..1024
   cvAddr = cvAddr & 0x3FF; // houd 10 bits over van de cv, en 1024 wordt 0)
@@ -157,8 +142,7 @@ void xpc_send_DirectModeCVReadRequest(uint16_t cvAddr)
 } // xpc_send_DirectModeCVReadRequest
 
 // cv : 1..1024, 1024 wordt als 0 getransmit
-void xpc_send_DirectModeCVWriteRequest(uint16_t cvAddr, uint8_t cvData)
-{
+void xpc_send_DirectModeCVWriteRequest(uint16_t cvAddr, uint8_t cvData) {
   // 0x23 0x16 CV X-Or --> oud formaat, voor CV1..256
   // 0x23 0x1C en verder voor CV1..1024
   cvAddr = cvAddr & 0x3FF; // houd 10 bits over van de cv, en 1024 wordt 0)
@@ -170,8 +154,7 @@ void xpc_send_DirectModeCVWriteRequest(uint16_t cvAddr, uint8_t cvData)
 } // xpc_send_DirectModeCVWriteRequest
 
 // cv : 1..1024, (wordt hier op xpnet als cv-1 doorgestuurd)
-void xpc_send_PomCVWriteRequest(uint16_t pomAddress, uint16_t cvAddress, uint8_t cvData, uint8_t pomWriteMode)
-{
+void xpc_send_PomCVWriteRequest(uint16_t pomAddress, uint16_t cvAddress, uint8_t cvData, uint8_t pomWriteMode) {
   // 0xE6 0x30 AH AL C CV D
   tx_message[0] = 0xE6;
   tx_message[1] = 0x30;
@@ -192,8 +175,7 @@ void xpc_send_PomCVWriteRequest(uint16_t pomAddress, uint16_t cvAddress, uint8_t
 // feedbackdecoder : elk decAddr heeft 8 inputs
 // met InfoRequest kan je maar 4 bits tegelijk opvragen, nibble : 0=laagste 4 bits, 1=hoogste 4 bits
 // de applayer moet de requests organiseren om alle nodige info te bekomen dmv verschillende func calls
-void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble)
-{
+void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble) {
   // 0x42 Addr Nibble X-Or
   tx_message[0] = 0x42;
   tx_message[1] = decAddr;
@@ -201,13 +183,7 @@ void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble)
   xpc_SendMessage(tx_message);
 } // xpc_send_AccessoryDecoderInfoRequest
 
-// our own xpnet extension
-void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data) {
-  tx_message[0] = 0x72; 
-  tx_message[1] = decAddr;
-  tx_message[2] = data;
-  xpc_SendMessage(tx_message);
-} // xpc_send_AccessoryDecoderInfoNotify
+
 
 // dit commando is enkel voor schakeldecoders!
 // turnoutAddr : 0..1023 (10bits) 
@@ -373,24 +349,23 @@ void xpc_send_SetFastClock(xpcFastClock_t *newFastClock)
   xpc_SendMessage(tx_message);
 } // xpc_send_SetFastClock
 
+#endif // MINIMAL_XPC
+
+// our own xpnet extension
+void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data) {
+  tx_message[0] = 0x72; 
+  tx_message[1] = decAddr;
+  tx_message[2] = data;
+  xpc_SendMessage(tx_message);
+} // xpc_send_AccessoryDecoderInfoNotify
+
 static void xpc_parser()
 {
   xpcFastClock_t newFastClock;
 
-  #ifdef XPC_DEBUG
-  mySerial.print("parser msg ! ");
-  mySerial.print("rx_size = ");
-  mySerial.print(rx_size);
-  mySerial.print(" - rx_index = ");
-  mySerial.println(rx_index);
-  for (int i=0; i <= (rx_message[0]& 0x0F);i++) {
-    mySerial.print(rx_message[i],HEX);mySerial.print(" - ");
-  }
-  mySerial.println();
-  #endif
-
   // rx_message[0] = header byte (de callbyte is al gestript door xpc_run)
   switch(rx_message[0] >> 4) {
+    #ifndef MINIMAL_XPC
     case 0x0:
       switch(rx_message[1]) {
         case 0xF1:
@@ -444,6 +419,7 @@ static void xpc_parser()
       }
       */
       break;
+    #endif // MINIMAL_XPC
     case 0x06 :
       if (rx_message[1] == 0x00) {
         xpc_EventNotify (XPEVENT_POWER_OFF);
@@ -454,6 +430,7 @@ static void xpc_parser()
       else if (rx_message[1] == 0x02) {
         xpc_EventNotify (XPEVENT_SERVICE_MODE_ON);
       }
+      #ifndef MINIMAL_XPC
       else if (rx_message[1] == 0x10) // register mode programming results (eventueel implementeren voor pcintf module)
       {
       }
@@ -483,7 +460,9 @@ static void xpc_parser()
       else if (rx_message[1] == 0x22) { // command station status response
         //not STM8 if (xpc_CommandStationStatusResponse) xpc_CommandStationStatusResponse (rx_message[2]);
       }
+      #endif // MINIMAL_XPC
       break;
+    #ifndef MINIMAL_XPC
     case 0x0A :
     case 0x0B :
       // dit zijn V1 & V2 commando's, doen we niet
@@ -537,6 +516,7 @@ static void xpc_parser()
       {
       }
       break;
+    #endif // MINIMAL_XPC
     default :
       break;
   }
@@ -565,7 +545,8 @@ void xpc_Run(void)
 
     case XPC_WAIT_FOR_CALL:
       if (XP_rx_ready()) {
-        digitalWrite(LED_BUILTIN,!digitalRead(LED_BUILTIN)); //toggle pin13 for test
+        // niet hier, want we hebben i2c nodig
+        //digitalWrite(LED_BUILTIN,!digitalRead(LED_BUILTIN)); //toggle pin13 for test
         uint16_t callbyte = XP_rx_read(); // the call byte ?
         rxLastMillis = millis(); // rx timeout manager
         if (!(callbyte & 0x100)) return; // we heben een byte in het midden van een conversatie opgepikt; we gaan hersynchroniseren en wachten op een call byte

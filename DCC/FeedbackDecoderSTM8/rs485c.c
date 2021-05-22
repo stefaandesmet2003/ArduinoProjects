@@ -276,17 +276,13 @@ bool XP_rx_ready (void)
 // XP_rx_peek : lees een 9-bit char uit de buffer, maar laat het in de buffer staan (!= XP_rx_read)
 // there is no check whether a char is ready, this must be
 // done before calling with a call to rx_fifo_ready();
-unsigned int XP_rx_peek (void)
-{
-  return (X_RxBuffer[X_rx_read_ptr]); //sds 9 bit RX
-} // XP_rx_peek
 
 //-------------------------------------------------------------------
 // rx_fifo_read gets one char from the input fifo
 //
 // there is no check whether a char is ready, this must be
 // done before calling with a call to rx_fifo_ready();
-unsigned int XP_rx_read (void)
+uint16_t XP_rx_read (void)
 {
   unsigned int retval;
 

@@ -1,6 +1,9 @@
 #ifndef _xpc_h_
 #define _xpc_h_
 
+// #undef MINIMAL_XPC
+#define MINIMAL_XPC // voor stm8 - test
+
 typedef enum { 
   XPEVENT_POWER_OFF, XPEVENT_POWER_ON, XPEVENT_SERVICE_MODE_ON, 
   XPEVENT_MAIN_SHORT, XPEVENT_PROG_SHORT, 
@@ -33,12 +36,13 @@ void xpc_Run(void);
 // functionele xpnet intf
 void xpc_SendMessage(uint8_t *msg); // send a raw message, correctly formatted by caller (pcintf), xor will be appended
 
-void xpc_send_PowerOnRequest ();
-void xpc_send_PowerOffRequest ();
-void xpc_send_EmergencyStopRequest ();
-void xpc_send_ServiceModeResultsRequest (); // prog status/results request
-void xpc_send_CommandStationStatusRequest ();
-void xpc_send_CommandStationSwVersionRequest ();
+#ifndef MINIMAL_XPC
+  void xpc_send_PowerOnRequest ();
+  void xpc_send_PowerOffRequest ();
+  void xpc_send_EmergencyStopRequest ();
+  void xpc_send_ServiceModeResultsRequest (); // prog status/results request
+  void xpc_send_CommandStationStatusRequest ();
+  void xpc_send_CommandStationSwVersionRequest ();
 
 // cv : 1..1024, 1024 wordt als 0 getransmit
 void xpc_send_DirectModeCVReadRequest(uint16_t cvAddress);
@@ -61,11 +65,6 @@ void xpc_send_PomCVWriteRequest(uint16_t pomAddress, uint16_t cvAddress, uint8_t
 // met InfoRequest kan je maar 4 bits tegelijk opvragen, nibble : 0=laagste 4 bits, 1=hoogste 4 bits
 // de applayer moet de requests organiseren om alle nodige info te bekomen dmv verschillende func calls
 void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble);
-
-// send accessory decoder feedback to the command station
-// decAddr : 0..255
-// data : 8-bits, status of 8 inputs, signal aspect, 8outputs van een wisseldecoder?
-void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data);
 
 // dit commando is enkel voor schakeldecoders!
 // turnoutAddr : 0..1023 (10bits) 
@@ -108,13 +107,23 @@ void xpc_send_DeleteLocAddress (uint16_t locAddr);
 void xpc_send_GetFastClock ();
 void xpc_send_SetFastClock (xpcFastClock_t *newFastClock);
 
+#endif // MINIMAL_XPC
+
+// send accessory decoder feedback to the command station
+// decAddr : 0..255
+// data : 8-bits, status of 8 inputs, signal aspect, 8outputs van een wisseldecoder?
+void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data);
+
+
 /***************************************************************************************************************/
 /*** notify intf   *********************************************************************************************/
 /***************************************************************************************************************/
 
 extern void xpc_EventNotify (xpcEvent_t xpcEvent); // de xpnet broadcasts
 extern void xpc_MessageNotify (uint8_t *msg); // to notify a received message unparsed
+#ifndef MINIMAL_XPC
 extern void xpc_FastClockNotify (xpcFastClock_t *newFastClock);
+#endif
 
 // not used on STM8
 //commented for now because STM8 SDCC doesn't support the attribute weak construct
