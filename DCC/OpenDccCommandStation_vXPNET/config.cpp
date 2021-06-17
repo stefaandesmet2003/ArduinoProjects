@@ -33,20 +33,14 @@
 //            
 //-----------------------------------------------------------------
 
+#include "Arduino.h"
 #include "config.h"                // general structures and definitions
 
 //======================================================================
 // some globals used throughout OpenDCC
 const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
 
-
 //======================================================================
-
-// Die folgende (assemblerï¿½hnliche) Defintion der EEPROM-Variablen ist
-// erforderlich, um diese compilerunabhï¿½ngig auf feste Adressen zu legen.
-// Auf diese Adressen kann von auï¿½en mit den Befehl zum Lesen und Schreiben
-// von Sonderoptionen zugegriffen werden.
-
 // The following definitions (quite similar to assembler) are neccesary
 // to assign fixed addresses to variables based in EEPROM.
 // This is required to allow external access to eeprom with so called
@@ -87,13 +81,7 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
                                       #else
                                       (0 << 4) |            // Bit 4; 0 = no FAST CLOCK
                                       #endif
-                                      #if (LOCO_DATABASE == NAMED)
                                       (1 << 5) |            // Bit 5; 1 = Named Lokdaten
-                                      #elif (LOCO_DATABASE == UNNAMED)
-                                      (0 << 5) |            // Bit 5; 0 = unnamed Lokdaten
-                                      #else
-                                      #error
-                                      #endif
                                       (0 << 6) |            // Bit 6; reserved
                                       (0 << 7),             // Bit 7; reserved
     
@@ -135,4 +123,3 @@ const unsigned char opendcc_version PROGMEM = OPENDCC_VERSION;
     [eadr_reserved038]              = 0,          
     [eadr_serial_id]                = 0,                    // SDS : not longer used
 };
-

@@ -8,35 +8,11 @@
 // that is available at the world-wide-web at
 // http://www.gnu.org/licenses/gpl.txt
 //
-//-----------------------------------------------------------------
-//
-// file:      main.c
-// author:    Wolfgang Kufer
-// contact:   kufer@gmx.de
-// history:   2006-04-13 V0.1 started
-//            2006-10-24 V0.2 check jumpers
-//            2007-01-11 V0.3 clean up
-//            2008-01-16 V0.4 call to s88 only if not prog_state
-//            2008-07-19 V0.5 external stop
-//            2008-08-25 V0.6 database added
-//
-//-----------------------------------------------------------------
-//
-// purpose:   lowcost central station for dcc
-//            a replacement for Lenz, Intellibox or HSI88
-//            
-//            See CONFIG.H about more information and how to
-//            configure the system
-//
-// content:   init Atmel AVR ATmega
-//            check jumpers
-//            init states
-//            startup ISR for DCC-OUT
-//            idle-loop
 //
 //-----------------------------------------------------------------
 
 #include "config.h"                // general structures and definitions - make your changes here
+#include "hardware.h"              // hardware definitions
 #include "database.h"              // format and names
 #include "status.h"                // led, key, state
 #include "dccout.h"                // make dcc
@@ -50,7 +26,7 @@
 #endif
 
 #if (PARSER == LENZ)
-  #include "rs232.h"                 // interface to pc
+  #include "rs232.h"               // interface to pc
   #include "lenz_parser.h"         // talk to pc (same as ibox_parser.h)
 #endif
 
@@ -60,18 +36,17 @@
 #include <LiquidCrystal_I2C.h>
 #include "ui.h"
 #include "keys.h"
-LiquidCrystal_I2C lcd( 0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE );
+LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 // Create a set of new characters
-const uint8_t charBitmap[][8] = {
-   { 0x0E, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x0E, 0x0E }, // lampke aan
-   { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E, 0x0E }, // lampke uit
-   { 0x1F, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1F }, // leeg blokske
-   { 0x1F, 0x19, 0x19, 0x19, 0x19, 0x19, 0x19, 0x1F }, // half blokske
-   { 0x04, 0x0E, 0x15, 0x04, 0x04, 0x04, 0x04, 0x04 }, // wissel recht
-   { 0x0F, 0x03, 0x05, 0x09, 0x10, 0x10, 0x10, 0x10 }, // wissel schuin
-   { 0x10, 0x0, 0x6, 0x9, 0x9, 0x6, 0, 0x0 },
-   { 0x0, 0x0, 0x0, 0x6, 0x9, 0x9, 0x6, 0x0 },
-};
+const uint8_t char1[] PROGMEM = { 0x0E, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x0E, 0x0E }; // lampke aan
+const uint8_t char2[] PROGMEM = { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E, 0x0E }; // lampke uit
+const uint8_t char3[] PROGMEM = { 0x1F, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1F }; // leeg blokske
+const uint8_t char4[] PROGMEM = { 0x1F, 0x19, 0x19, 0x19, 0x19, 0x19, 0x19, 0x1F }; // half blokske
+const uint8_t char5[] PROGMEM = { 0x04, 0x0E, 0x15, 0x04, 0x04, 0x04, 0x04, 0x04 }; // wissel recht
+const uint8_t char6[] PROGMEM = { 0x0F, 0x03, 0x05, 0x09, 0x10, 0x10, 0x10, 0x10 }; // wissel schuin
+const uint8_t char7[] PROGMEM = { 0x10, 0x0, 0x6, 0x9, 0x9, 0x6, 0, 0x0 };
+const uint8_t char8[] PROGMEM = { 0x0, 0x0, 0x0, 0x6, 0x9, 0x9, 0x6, 0x0 };
+const uint8_t *const charBitmap[] PROGMEM = {char1,char2,char3,char4,char5,char6,char7,char8};
 
 /*********************************************************************************************************/
 
@@ -88,20 +63,20 @@ void init_timer2(void)
   // Clock source: System Clock / 64 -> 4us (komt overeen met TIMER2_TICK_PERIOD in config.h)
   TCCR2A = (0<< COM2A1)   // 00 = normal port mode
           | (0<< COM2A0)
-          | (0<< COM2B1)   // 00 = normal port mode
+          | (0<< COM2B1)  // 00 = normal port mode
           | (0<< COM2B0)
-          | (0<< WGM21)    // WGM = 000: normal mode
+          | (0<< WGM21)   // WGM = 000: normal mode
           | (0<< WGM20);
   TCCR2B = (0<< FOC2A)    // 0 = no forced compare match
-          | (0<< FOC2B)    // 0 = no forced compare match
-          | (0<< WGM22)    // WGM = 000: normal mode
-          | (1<<CS22)      // CS = 000: stopped
-          | (0<<CS21)      //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
-          | (0<<CS20);     //      110 = div256, 111 = div1024
+          | (0<< FOC2B)   // 0 = no forced compare match
+          | (0<< WGM22)   // WGM = 000: normal mode
+          | (1<<CS22)     // CS = 000: stopped
+          | (0<<CS21)     //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
+          | (0<<CS20);    //      110 = div256, 111 = div1024
   TCNT2=0x00;
 } // init_timer2
 
-void init_main(void) {
+void init_hardware(void) {
   // Input/Output Ports initialization
   // Port B
   pinMode(BUTTON_GREEN, INPUT); // pullup is extern 10K
@@ -140,8 +115,11 @@ void init_main(void) {
   // Analog Comparator: Off (SDS: stond hier zo, is allicht al default in arduino)
   // Analog Comparator Input Capture by Timer/Counter 1: Off
   ACSR=0x80;
+
+  // A7 as current measurement, will not exceed 1.1V
+  analogReference(INTERNAL);
   
-} // init_main
+} // init_hardware
 
 void dcc_startup_messages (void)
 {
@@ -168,8 +146,6 @@ void dcc_startup_messages (void)
   }
 } // dcc_startup_messages
 
-// Run as DCC central station, emulating Lenz LI101 or Uhlenbrock Intellibox
-// see config.h for compile switches
 static void setup_lcd()
 {
   int charBitmapSize = (sizeof(charBitmap ) / sizeof (charBitmap[0]));
@@ -180,7 +156,9 @@ static void setup_lcd()
 
   // init special characters
   for (int i = 0; i < charBitmapSize; i++) {
-    lcd.createChar ( i, (uint8_t *)charBitmap[i] );
+    uint8_t aBuffer[8];
+    memcpy_P ((void*)aBuffer,(void*)pgm_read_word(&(charBitmap[i])),8); // eerst data copiëren van flash->sram
+    lcd.createChar (i, aBuffer);
   }
 
   ui_Init ();
@@ -191,7 +169,7 @@ static void setup_lcd()
 
 void setup() {
   
-  init_main();          // all io's + globals
+  init_hardware();          // all io's + globals
   init_database();      // loco format and names
   init_dccout();        // timing engine for dcc    
 
@@ -215,10 +193,6 @@ void setup() {
                         // memory of loco speeds and types
   init_programmer();    // State Engine des Programmers
   
-  #if (S88_ENABLED == 1)
-    init_s88(READ_FROM_EEPROM);  
-  #endif
-
   if (eeprom_read_byte(eadr_OpenDCC_Version) != OPENDCC_VERSION) {
     // oops, no data loaded or wrong version! 
     // sds : todo :add something
@@ -234,22 +208,19 @@ void setup() {
 
 void loop() 
 {
-  // put your main code here, to run repeatedly:
+  // SDS TODO 2021 : zijn er time-consuming zaken die we niet willen doen tijdens programming?
+  //if (!is_prog_state())
+
   run_state();            // check short and keys
   run_organizer();        // run command organizer, depending on state,
                           // it will execute normal track operation
                           // or programming
   run_programmer();
-  #if ((XPRESSNET_ENABLED == 1) && (LOCO_DATABASE == NAMED))
+  #if (XPRESSNET_ENABLED == 1)
     run_database();                  // check transfer of loco database 
   #endif
-  #if (PARSER == LENZ) //sds 
+  #if (PARSER == LENZ)
     run_parser();                    // check commands from pc
-  #endif
-
-  #if (S88_ENABLED == 1)
-    if (!is_prog_state()) run_s88(); // s88 has busy loops, we block it when programming
-                                    // this is no longer true - but keep it blocked
   #endif
 
   #if (XPRESSNET_ENABLED == 1)

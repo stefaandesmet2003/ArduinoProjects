@@ -30,31 +30,6 @@
 //
 //            
 //--------------------------------------------------------------------------
-
-#include "config.h"                // general structures and definitions
-//sds #include "status.h"                // timerval, CHECK! hebben we deze include nu nog nodig??
-#include "database.h"
-
-
-// mega32:   2kByte SRAM, 1kByte EEPROM --> SDS : idem atmega328p
-// mega644:  4kByte SRAM, 2kByte EEPROM
-
-
-t_format dcc_default_format;            // dcc default: 0=DCC14, 2=DCC28, 3=DCC128
-                                        // this value is read from eeprom
-
-unsigned char next_search_index;        // was asked continously - this is the index for the parser
-
-unsigned char cur_database_entry;
-unsigned char total_database_entry;  // all locos with a name
-unsigned char db_message[17]; 
-unsigned char db_message_ready;
-
-
-#if (LOCO_DATABASE == NAMED)
-
-//------------------------------------------------------------------------
-//------------------------------------------------------------------------
 // Database for ADDR, FORMAT and NAME
 //------------------------------------------------------------------------
 //------------------------------------------------------------------------
@@ -62,318 +37,286 @@ unsigned char db_message_ready;
 // The default format of OpenDCC is defined in config.h (DCC_DEFAULT_FORMAT)
 // and stored in EEPROM (CV24)
 //
-// Rules: if a loco runs with the default format and no name, it is not stored.
-//        if a loco runs at a different format, the address and the format
-//        is stored in EEPROM as 16 bit value, which is defined as follows:
+// the address and the format is stored in EEPROM as 16 bit value, which is defined as follows:
 //        - upper 2 bits contain the loco format;
 //        - lower 14 bits contain the loco address.
 //        - if entry == 0x0000, the entry is void.
-//        if a name is given: loco is stored
-//  
-// Up to 64 locos may have different format (ESIZE_LOCO_FORMAT)
+// the name is stored as a 10-char string
+// Up to LOCODB_NUM_ENTRIES locos in the database
 
-// We allocate this storage to a fixed address to have access from the
-// parser with a constant offset to eeprom
-// (parser commands: read and write Special Option)
-//
-#if (EEPROM_FIXED_ADDR == 1) 
- #define EEMEM_LOCO __attribute__((section(".ee_loco")))
-#else
- #define EEMEM_LOCO EEMEM
-#endif
-//
-// please add following command to linker:
-//
-//   -Wl,--section-start=.ee_loco=0x810080
+/*
+ * TODO SDS2021 : database transmission code aanpassen, don't like
+ * - er is een func get_loco_data die op idx werkt (de global next_search_index)
+ *   en er zijn funcs die zoeken op loc address (get_loco_format / get_loco_name)
+ *  ---> maak 1 func get_loco_data ?
+ * - er is ook een vieze vlag db_message_ready die wordt gereset vanuit xpnet, en een global db_message eventueel via intf func
+ * - test ui met database entry zonder naam (bv nieuwe loc met adres 5 -> wordt in db opgeslagen met een zero string name)
+*/
 
+#include "Arduino.h"
+#include "config.h"                // general structures and definitions
+#include "database.h"
 
-#if (ESIZE_LOCO_FORMAT==64)
-t_locoentry locoentry[ESIZE_LOCO_FORMAT] EEMEM_LOCO =
-  {
-    //    addr   format       pid,  name
-    { { {   98,   DCC128 } }, { 0x1001 }, {  "BBII" } },
-    { { {   14,    DCC14 } }, { 0x3001 }, {  "V200" } },
-    { { {   28,    DCC28 } }, { 0x4002 }, {  "E94"  } },
-    { { {  123,    DCC28 } }, { 0x4006 }, {  "Taurus" } },   
-  };
+enum db_run_states { // actual state
+  IDLE,
+  DB_XMIT,
+  DB_XMIT1,
+  DB_XMIT2,
+  DB_XMIT3,
+  DB_XMIT4
+} db_run_state;
 
+t_format dcc_default_format;            // dcc default: 0=DCC14, 2=DCC28, 3=DCC128
+                                        // this value is read from eeprom
+unsigned char next_search_index;        // was asked continously - this is the index for the parser
+unsigned char cur_database_entry;
+unsigned char total_database_entry;
+unsigned char db_message[17]; 
+unsigned char db_message_ready;
 
-#else
- #warning locoformat[ESIZE_LOCO_FORMAT] is not initialized! 
-#endif
+uint32_t db_lastMillis;                 // controls min delay between xpnet messages for database transmission
+#define DB_UPDATE_PERIOD  50L           // ms, like millis()
 
+const locoentry_t locdb_defaults[] PROGMEM = {
+  //  addr format        name
+  {{ {  3, DCC128 }}, {"DIESEL\x00"} },
+  {{ {  4, DCC128 }}, {"STOOM\x00"}  },
+};
 
-// EEPROM Interface
-// EEPROM byteweise lesen -> geht schneller
-//
+// we define locodb as a pointer, and make the compiler do all offset calculations
+// locodb is an eeprom address, so we should never dereference directly!!
+static locoentry_t *locodb = (locoentry_t *) LOCODB_EEPROM_OFFSET;
+
+/****************************************************************************************************/
+/*   HELPER FUNCTIONS                                                                               */
+/****************************************************************************************************/
+// SDS : telde enkel entries met non-null 'name'
+static void calc_database_size(void) {
+  unsigned char i, j0, j1;
+
+  total_database_entry = 0;
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    j0 = eeprom_read_byte(&locodb[i].b[0]);
+    j1 = eeprom_read_byte(&locodb[i].b[1]) & 0x3F;
+    j0 = j0 | j1;
+    if (j0) total_database_entry++;
+  }
+} // calc_database_size
+
+// Note (Kufer): this message must be transmitted as CALL - like if it is transmitted from another client after a call!
+static void xmit_locoentry() {
+  locoentry_t report;
+  unsigned char i;
+
+  if (get_loco_data(&report)) {
+    // db_message[0] = 0xE0;                // see below
+    db_message[1] = 0xF1;
+    db_message[2] = report.b[1] & 0x3F;     // addr high
+    db_message[3] = report.b[0];            // addr low
+    db_message[4] = cur_database_entry;
+    db_message[5] = total_database_entry;
+    for (i=0;i<LOK_NAME_LENGTH;i++) {
+      db_message[6+i] = report.name[i];
+      if (report.name[i] == 0x0) break;
+    }
+    db_message[0] = 0xE0 + 5 + i;
+    db_message_ready = 1;        // tell xpressnet that we have a message
+  }
+} // xmit_locoentry
+
+static void rewind_database() {
+    next_search_index = 0;
+} // rewind_database
+
+/****************************************************************************************************/
+/*   EEPROM PUBLIC INTERFACE                                                                        */
+/****************************************************************************************************/
 /// get_loco_format returns the stored loco format, if loco was never
 //  used with a format different from default it is not stored.
-//
-t_format get_loco_format(unsigned int addr)
-  {
-    unsigned char stored_h, stored_l;
+t_format get_loco_format(unsigned int addr) {
+  unsigned char stored_h, stored_l;
 	unsigned char i;
 	unsigned char addr_low, addr_high;
 
 	addr_low = (unsigned char) addr;
 	addr_high = (unsigned char) (addr>>8);
 
-    for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-        if (stored_l == addr_low)
-          {
-            stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-            if ((stored_h & 0x3f) == addr_high)
-              {
-                return ((t_format)(stored_h & 0xC0) >> 6);
-              }
-          }
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+    if (stored_l == addr_low) {
+      stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+      if ((stored_h & 0x3f) == addr_high) {
+          return ((t_format)(stored_h & 0xC0) >> 6);
       }
-    return(dcc_default_format);     // not found - default format
+    }
+  }
+  return(dcc_default_format); // not found - default format
+} // get_loco_format
+
+// sds temp??
+// caller provides memory for the name string
+uint8_t get_loco_name(unsigned int addr, uint8_t *name) {
+  unsigned char stored_h, stored_l;
+	unsigned char i,j;
+	unsigned char addr_low, addr_high;
+
+	addr_low = (unsigned char) addr;
+	addr_high = (unsigned char) (addr>>8);
+
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+    if (stored_l == addr_low) {
+      stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+      if ((stored_h & 0x3f) == addr_high) {
+        for (j=0;j<LOK_NAME_LENGTH;j++){
+          name[j] = eeprom_read_byte((uint8_t*)&locodb[i].name[j]);
+          if (name[j]== 0x0) return(1);
+        }
+      }
+    }
+  }
+  // not found
+  return(0);
+}
+
+// SDS : aangepast : geen onderscheid meer tussen default format of niet, elke loc wordt opgeslagen
+// TODO SDS2021 : naar word size voor eeprom read gaan? code wordt dan eenvoudiger, maar trager
+unsigned char store_loco_format(unsigned int addr, t_format format) {
+  unsigned char i;
+  unsigned char stored_h, stored_l;
+  unsigned char my_h;
+  unsigned char addr_low, addr_high;
+
+  addr_low = (unsigned char) addr;
+  addr_high = (unsigned char) (addr>>8);
+  my_h = (format << 6) | addr_high;
+  
+  // search loco, if found: replace it
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+    if (stored_l == addr_low) {
+      stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+      if ((stored_h & 0x3f) == addr_high) { // entry with same addr found
+        eeprom_update_byte((uint8_t*)&locodb[i].b[1], my_h);   // replace format
+        return(1);
+      }
+    }
+  }
+  // if not found: search empty and store it
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+    if (stored_h == 0x00) {
+      stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+      if (stored_l == 0x00) { // empty found
+        eeprom_write_byte((uint8_t*)&locodb[i].b[1], my_h);
+        eeprom_write_byte((uint8_t*)&locodb[i].b[0], addr_low);
+        eeprom_write_byte((uint8_t*)&locodb[i].name[0], 0);      // blank name for now
+        return(1);
+      }
+    }
+  }
+  // others: error, database full!!!
+  // too many locos with extra format
+  return(0);
+} // store_loco_format
+
+// SDS delimiter stuff weggedaan, de name moet null terminated zijn
+static void write_loco_name(unsigned char index, unsigned char *locName) {
+  unsigned char i;
+  for (i=0; i<LOK_NAME_LENGTH; i++) {
+    eeprom_update_byte((uint8_t*)&locodb[index].name[i], locName[i]);
+    if (locName[i] == 0x00)
+      break;
+  }
+  eeprom_update_byte((uint8_t*)&locodb[index].name[LOK_NAME_LENGTH-1], 0x0); // make sure there is always a trailing \0
+} // write_loco_name
+
+unsigned char store_loco_name(unsigned int addr, unsigned char * locName) {
+  unsigned char i;
+  unsigned char stored_h, stored_l;
+  unsigned char addr_low, addr_high;
+
+  addr_low = (unsigned char) addr;
+  addr_high = (unsigned char) (addr>>8);
+
+  // search loco, if found: replace name
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+    if (stored_l == addr_low) {
+      stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+      if ((stored_h & 0x3f) == addr_high) {
+        write_loco_name(i, locName);
+        return(1);
+      }
+    }
   }
 
-//
-// loco found -> replace format
-// not found:  
-//
-// search loco, if found:  default: clear entry
-//                         non default: store it
-//              not found: default: exit
-//                         non default: search empty and store it
-
-
-// is it default format?
-// -> no:   search loco, if found: replace it
-//          if not found: search empty and store it
-//          if no empty found: error too many locos with extra format -> unhandled - Code 0
-// -> yes:  search loco, if found: clear entry
-
-
-unsigned char store_loco_format(unsigned int addr, t_format format)
-  {
-    unsigned char i;
-    unsigned char stored_h, stored_l;
-    unsigned char my_h;
-    unsigned char addr_low, addr_high;
-
-    addr_low = (unsigned char) addr;
-    addr_high = (unsigned char) (addr>>8);
-    my_h = (format << 6) | addr_high;
-    
-    if (format != dcc_default_format)
-      {                                         // not the default -> store it
-        // search loco, if found: replace it
-        for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-          {
-            stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-            if (stored_l == addr_low)
-              {
-                stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-                if ((stored_h & 0x3f) == addr_high)
-                  {
-                    // entry with same addr found
-                    if (stored_h == my_h) return(1);     // is already equal
-                    else
-                      {
-                        eeprom_write_byte(&locoentry[i].b[1], my_h);   // replace format
-                        return(1);
-                      }
-                  }
-              }
-          }
-             // if not found: search empty and store it
-        for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-          {
-            stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-            if (stored_h == 0x00)
-              {
-                stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-                if (stored_l == 0x00)
-                  {
-                    // empty found
-                    eeprom_write_byte(&locoentry[i].b[1], my_h);
-                    eeprom_write_byte(&locoentry[i].b[0], addr_low);
-                    eeprom_write_byte(&locoentry[i].name[0], 0);      // blank name
-                    return(1);
-                  }
-              }
-          }
-         // others: error, database full!!!
-         // too many locos with extra format
-         return(0);
-       }
-     else
-       {
-         // it is the default
-         // search loco, if found: clear entry
-        for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-          {
-            stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-            if (stored_l == addr_low)
-              {
-                stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-                if ((stored_h & 0x3F) == addr_high)
-                  {
-                    // target found -> clear entry
-                    if ( eeprom_read_byte(&locoentry[i].name[0]) ) return(1);   // default, but named!
-                    eeprom_write_byte(&locoentry[i].b[1], 0x00);
-                    eeprom_write_byte(&locoentry[i].b[0], 0x00);
-                    return(1);
-                  }
-              }
-          }
+  // if not found: search empty and store name & default dcc format
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+    if (stored_h == 0x00) {
+      stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+      if (stored_l == 0x00) { // empty found
+        addr_high = addr_high | (dcc_default_format << 6);
+        eeprom_write_byte((uint8_t*)&locodb[i].b[1], addr_high);
+        eeprom_write_byte((uint8_t*)&locodb[i].b[0], addr_low);
+        write_loco_name(i, locName);
+        return(1);
       }
-    return(1);
+    }
   }
+  // too many locos with extra format -> error
+  return(0);
+} // store_loco_name
 
-void write_loco_name(unsigned char index, unsigned char * name)
-  {
-    unsigned char i;
-    unsigned char delimiter;
+// SDS : clear only the address/format field, that invalidates the entry
+void clear_loco_database() {
+  unsigned char i;
 
-    delimiter = ' ';
-    if (name[0] == '\'') 
-      {
-        delimiter = '\'';
-        name++;
-      }
-    if (name[0] == '\"')
-      {
-        delimiter = '\"';
-        name++;
-      }
-    for (i=0; i<LOK_NAME_LENGTH; i++)
-      {
-        if (name[i] == delimiter)
-          {
-            eeprom_write_byte(&locoentry[index].name[i], 0);
-          }
-        else
-          {
-            eeprom_write_byte(&locoentry[index].name[i], name[i]);
-          }
-      }
+  for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
+    eeprom_update_byte((uint8_t*)&locodb[i].b[0], 0);
+    eeprom_update_byte((uint8_t*)&locodb[i].b[1], 0);
   }
+} // clear_loco_database
 
 
-unsigned char store_loco_name(unsigned int addr, unsigned char * name)
-  {
-    unsigned char i;
-    unsigned char stored_h, stored_l;
-    unsigned char addr_low, addr_high;
-
-    addr_low = (unsigned char) addr;
-    addr_high = (unsigned char) (addr>>8);
-
-    // search loco, if found: replace name
-    for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-        if (stored_l == addr_low)
-          {
-            stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-            if ((stored_h & 0x3f) == addr_high)
-              {
-                write_loco_name(i, name);
-                return(1);
-              }
-          }
-      }
-
-     // if not found: search empty and store name
-    for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-        if (stored_h == 0x00)
-          {
-            stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-            if (stored_l == 0x00)
-              {
-                // empty found
-                addr_high = addr_high | (dcc_default_format << 6);
-                eeprom_write_byte(&locoentry[i].b[1], addr_high);
-                eeprom_write_byte(&locoentry[i].b[0], addr_low);
-                write_loco_name(i, name);
-                return(1);
-              }
-          }
-      }
-     // ohters: error!!!
-     // too many locos with extra format
-     return(0);
+// SDS : reset defaults
+void reset_loco_database() {
+  locoentry_t dbEntry;
+  for (uint8_t i=0; i < sizeof(locdb_defaults)/sizeof(locoentry_t); i++) {
+    memcpy_P(&dbEntry,&locdb_defaults[i],sizeof(locoentry_t)); // copy flash->ram first
+    // byte per byte copy to eeprom
+    for (uint8_t j=0; j < sizeof(locoentry_t);j++)
+      eeprom_update_byte(((uint8_t*)&locodb[i])+j,*(((uint8_t*)&dbEntry) + j));
   }
-
-void clear_loco_database(void)
-  {
-    unsigned char i;
-    unsigned char stored_h, stored_l;
-
-    for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        stored_h = eeprom_read_byte(&locoentry[i].b[1]);
-        if (stored_h != 0x00)
-          {
-            eeprom_write_byte(&locoentry[i].b[1], 0);
-          }
-        stored_l = eeprom_read_byte(&locoentry[i].b[0]);
-        if (stored_l != 0x00)
-          {
-            eeprom_write_byte(&locoentry[i].b[0], 0);
-          }
-      }
-  }
+} // reset_loco_database
 
 // fills structure actual, returns true if an entry was found;
-// only named locos are reported
-// This routine is used in parallel for dump and Xmit, but is not reentry!
-unsigned char get_loco_data(t_locoentry* actual)
-  {
-    unsigned char i,j;
+// This routine is used in parallel for dump and Xmit, but is not reentrant!
+// SDS : updates 'next_search_index'
+unsigned char get_loco_data(locoentry_t* actual) {
+  unsigned char i,j;
 
-    for (i=next_search_index; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        actual->b[0] = eeprom_read_byte(&locoentry[i].b[0]);
-        actual->b[1] = eeprom_read_byte(&locoentry[i].b[1]);
-        actual->pid_b[0] = eeprom_read_byte(&locoentry[i].pid_b[0]);
-        actual->pid_b[1] = eeprom_read_byte(&locoentry[i].pid_b[1]);
-        if (actual->w.addr != 0x00)
-          {
-            if (eeprom_read_byte(&locoentry[i].name[0]))   // yes we have a name
-              {
-                next_search_index = i+1;
-                for (j=0; j<sizeof(locoentry[0].name); j++)
-                  {
-                    actual->name[j] = eeprom_read_byte(&locoentry[i].name[j]);
-                  }
-                return(1);            
-              }
-          }
+  for (i=next_search_index; i<LOCODB_NUM_ENTRIES; i++) {
+    actual->b[0] = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
+    actual->b[1] = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
+    if (actual->w.addr != 0x00) {
+      next_search_index = i+1;
+      for (j=0;j<LOK_NAME_LENGTH;j++){
+        actual->name[j] = eeprom_read_byte((uint8_t*)&locodb[i].name[j]);
+        if (actual->name[j]== 0x0) break;
       }
-    next_search_index = 0;
-    return(0);
+      return(1);            
+    }
   }
+  next_search_index = 0;
+  return(0);
+} // get_loco_data
 
-unsigned char format_to_uint8(t_format myformat)
-  {  unsigned char i;
-    switch(myformat)
-      {
-        default:
-        case DCC14:
-                i = 14; break;
-        case DCC27:
-                i = 27; break;
-        case DCC28:
-                i = 28;  break;
-        case DCC128:
-                i = 126; break;
-      }
-    return(i);
-  }
+/****************************************************************************************************/
+/*   PUBLIC INTERFACE  DATABASE BROADCAST                                                           */
+/****************************************************************************************************/
 
-
-
-// #if (XPRESSNET_ENABLED == 1)
 //=================================================================================
 //
 // run_database: multitask replacement, must be called in loop
@@ -390,381 +333,62 @@ unsigned char format_to_uint8(t_format myformat)
 //   }
 //
 //=================================================================================
-enum db_run_states
-  {                                 // actual state
-     IDLE,
-     DB_XMIT,
-     DB_XMIT1,
-     DB_XMIT2,
-     DB_XMIT3,
-     DB_XMIT4
-  } db_run_state;
 
-//SDS signed char next_database_run;   // timer variable to create a update grid;
-uint32_t next_database_run;   // timer variable to create a update grid; SDS : zelfde type als millis()
-//#define DB_UPDATE_PERIOD  50000L  //
-#define DB_UPDATE_PERIOD  50L  // SDS : in ms, zelfde eenheid als millis()
-
-void calc_database_size(void)
-  {
-    unsigned char i, j0, j1;
-
-    total_database_entry = 0;
-
-    for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        j0 = eeprom_read_byte(&locoentry[i].b[0]);
-        j1 = eeprom_read_byte(&locoentry[i].b[1]) & 0x3F;
-        j0 = j0 | j1;
-        if (j0)  // any address
-          {
-            if (eeprom_read_byte(&locoentry[i].name[0]) )  // any name
-               total_database_entry++;
-          }
-      }
-  }
-
-// Note: this message must be transmitted as CALL - like if it is transmitted from another client after a call!
-void xmit_locoentry(void)
-  {
-    t_locoentry report;
-    unsigned char i; // t_format myformat; 
-
-    if (get_loco_data(&report))
-      {
-        // db_message[0] = 0xE0;                // see below
-		db_message[1] = 0xF1;
-        db_message[2] = report.b[1] & 0x3F;     // addr high
-        db_message[3] = report.b[0];            // addr low
-        db_message[4] = cur_database_entry;
-        db_message[5] = total_database_entry;
-        for (i=0; i<sizeof(report.name); i++)
-          {
-            if (report.name[i] == 0)
-              {
-                break;
-              }
-            db_message[6+i] = report.name[i];
-          }
-        db_message[0] = 0xE0 + 5 + i;
-        db_message_ready = 1;                   // tell xpressnet that we have a message
-      }
-  }
-
-
-void run_database(void)
-  {
-    switch (db_run_state)
-      {
-        case IDLE:
-            break;
-
-        case DB_XMIT:
-            if (cur_database_entry >= total_database_entry)
-              {
-                db_run_state = IDLE; return;        // all done
-              }
-
-            xmit_locoentry();
-            cur_database_entry++;
-            next_database_run = millis() + DB_UPDATE_PERIOD;    // next wake up
-            db_run_state = DB_XMIT1;
-            break;
-
-        case DB_XMIT1:
-            if ((next_database_run - millis())>= 0)  return;
-
-            db_message_ready = 2;                   // send again as call 
-            next_database_run = millis() + DB_UPDATE_PERIOD;    // next wake up
-            db_run_state = DB_XMIT2;
-            break;
-
-        case DB_XMIT2:
-            if ((next_database_run - millis())>= 0)  return;
-
-            db_message_ready = 1;                   // send again as message 
-            next_database_run = millis() + DB_UPDATE_PERIOD;    // next wake up
-            db_run_state = DB_XMIT3;
-            break;
-
-        case DB_XMIT3:
-            if ((next_database_run - millis())>= 0)  return;
-
-            db_message_ready = 2;                   // send again as call
-            next_database_run = millis() + DB_UPDATE_PERIOD;    // next wake up
-            db_run_state = DB_XMIT4;
-            break;
-
-        case DB_XMIT4:
-            if ((next_database_run - millis())>= 0)  return;
-            db_run_state = DB_XMIT;
-            break;
-     }
-  }
-
-
-void rewind_database(void)
-  {
-    next_search_index = 0;
-  }
-
-
-void init_database(void)
-  {
+void init_database() {
     dcc_default_format = eeprom_read_byte((uint8_t*)eadr_dcc_default_format); 
     rewind_database();
+} // init_database
+
+void run_database() {
+  switch (db_run_state) {
+    case IDLE:
+      break;
+
+    case DB_XMIT:
+      if (cur_database_entry >= total_database_entry) {
+        db_run_state = IDLE;
+        return;        // all done
+      }
+      xmit_locoentry();
+      cur_database_entry++;
+      db_lastMillis = millis();
+      db_run_state = DB_XMIT1;
+      break;
+
+    case DB_XMIT1:
+      // wait for flag reset by xpnet after transmission
+      if (db_message_ready || ((millis() - db_lastMillis) < DB_UPDATE_PERIOD)) return;
+      db_message_ready = 2;  // send again as call (is done by xpnet.cpp)
+      db_lastMillis = millis();
+      db_run_state = DB_XMIT2;
+      break;
+
+    case DB_XMIT2:
+      if (db_message_ready || ((millis() - db_lastMillis) < DB_UPDATE_PERIOD)) return;
+      db_message_ready = 1; // send again as message (is done by xpnet.cpp)
+      db_lastMillis = millis();
+      db_run_state = DB_XMIT3;
+      break;
+
+    case DB_XMIT3:
+      if (db_message_ready || ((millis() - db_lastMillis) < DB_UPDATE_PERIOD)) return;
+      db_message_ready = 2;  // send again as call (is done by xpnet.cpp)
+      db_lastMillis = millis();
+      db_run_state = DB_XMIT4;
+      break;
+
+    case DB_XMIT4:
+      if (db_message_ready || ((millis() - db_lastMillis) < DB_UPDATE_PERIOD)) return;
+      db_run_state = DB_XMIT;
+      break;
   }
+} // run_database
 
-
-void do_xmit_database(void)
-  {
+// deze functie start de db broadcast transmission over xpnet
+void do_xmit_database() {
     if (db_run_state != IDLE) return;       // block reentry
     db_run_state = DB_XMIT;
     rewind_database();
     calc_database_size();
     cur_database_entry = 0;                 // restart
-  }
-
-
-#elif (LOCO_DATABASE == UNNAMED)
-
-//------------------------------------------------------------------------
-//------------------------------------------------------------------------
-// Database only for ADDR and FORMAT
-//------------------------------------------------------------------------
-//------------------------------------------------------------------------
-//
-// The default format of OpenDCC is defined in config.h (DCC_DEFAULT_FORMAT)
-// and stored in EEPROM (CV24)
-//
-// Rules: if a loco runs with the default format, it is not stored.
-//        if a loco runs at a different format, the address and the format
-//        is stored in EEPROM as 16 bit value, which is defined as follows:
-//        - upper 2 bits contain the loco format;
-//        - lower 14 bits contain the loco address.
-//        - if entry == 0x0000, the entry is void.
-//  
-// 
-// Up to 64 locos may have different format (ESIZE_LOCO_FORMAT)
-
-// We allocate this storage to a fixed address to have access from the
-// parser with a constant offset to eeprom
-// (parser commands: read and write Special Option)
-//
-#if (EEPROM_FIXED_ADDR == 1) 
- #define EEMEM_LOCO __attribute__((section(".ee_loco")))
-#else
- #define EEMEM_LOCO EEMEM
-#endif
-//
-// please add following command to linker:
-//
-//   -Wl,--section-start=.ee_loco=0x810080
-
-#if (ESIZE_LOCO_FORMAT==64)
- union
-  {
-    unsigned int w;
-    unsigned char b[sizeof(unsigned int)];
-  } locoformat[ESIZE_LOCO_FORMAT] EEMEM_LOCO =
-  {
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  {0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},{0x0000},
-  };
-
-#else
- #warning locoformat[ESIZE_LOCO_FORMAT] is not initialized! 
- union
-  {
-    unsigned int w;
-    unsigned char b[sizeof(unsigned int)];
-  } locoformat[ESIZE_LOCO_FORMAT] EEMEM_LOCO;
-#endif
-
-// EEPROM Interface
-// EEPROM byteweise lesen -> geht schneller
-//
-/// get_loco_format returns the stored loco format, if loco was never
-//  used with a format different from default it is not stored.
-//
-t_format get_loco_format(unsigned int addr)
-  {
-    unsigned char stored_h, stored_l;
-	unsigned char i;
-	unsigned char addr_low, addr_high;
-
-    eeprom_busy_wait();
-
-	addr_low = (unsigned char) addr;
-	addr_high = (unsigned char) (addr>>8);
-
-    for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-      {
-        stored_l = eeprom_read_byte(&locoformat[i].b[0]);
-        if (stored_l == addr_low)
-          {
-            stored_h = eeprom_read_byte(&locoformat[i].b[1]);
-            if ((stored_h & 0x3f) == addr_high)
-              {
-                return ((stored_h & 0xC0) >> 6);
-              }
-          }
-      }
-    return(dcc_default_format);     // not found - default format
-  }
-
-
-
-//
-// see also: http://www.mikrocontroller.net/articles/AVR-GCC-Tutorial#EEPROM
-// is it default format?
-// -> no:   search loco, if found: replace it
-//          if not found: search empty and store it
-//          if no empty found: error too many locos with extra format -> unhandled - Code 0
-// -> yes:  search loco, if found: clear entry
-
-
-unsigned char store_loco_format(unsigned int addr, t_format format)
-  {
-    unsigned char i;
-    unsigned char stored_h, stored_l;
-    unsigned char my_h;
-    unsigned char addr_low, addr_high;
-
-    my_h = (format << 6) | (unsigned char)(addr >> 8);
-    addr_low = (unsigned char) addr;
-    addr_high = (unsigned char) (addr>>8);
-
-    if (format != dcc_default_format)
-      {                                         // not the default -> store it
-        // search loco, if found: replace it
-        for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-          {
-            stored_l = eeprom_read_byte(&locoformat[i].b[0]);
-            if (stored_l == addr_low)
-              {
-                stored_h = eeprom_read_byte(&locoformat[i].b[1]);
-                if ((stored_h & 0x3f) == addr_high)
-                  {
-                    if (stored_h == my_h) return(1);     // does exist
-                    else
-                      {
-                        eeprom_write_byte(&locoformat[i].b[1], my_h);
-                        return(1);
-                      }
-                  }
-              }
-          }
-             // if not found: search empty and store it
-        for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-          {
-            stored_h = eeprom_read_byte(&locoformat[i].b[1]);
-            if (stored_h == 0x00)
-              {
-                stored_l = eeprom_read_byte(&locoformat[i].b[0]);
-                if (stored_l == 0x00)
-                  {
-                    // empty found
-                    eeprom_write_byte(&locoformat[i].b[1], my_h);
-                    eeprom_busy_wait();
-                    eeprom_write_byte(&locoformat[i].b[0], addr_low);
-                    return(1);
-                  }
-              }
-          }
-         // ohters: error!!!
-         // too many locos with extra format
-         return(0);
-       }
-     else
-       {
-         // it is the default
-         // search loco, if found: clear entry
-        for (i=0; i<ESIZE_LOCO_FORMAT; i++)
-          {
-            stored_l = eeprom_read_byte(&locoformat[i].b[0]);
-            if (stored_l == addr_low)
-              {
-                stored_h = eeprom_read_byte(&locoformat[i].b[1]);
-                if ((stored_h & 0x3F) == addr_high)
-                  {
-                    // target found -> clear entry
-                    eeprom_write_byte(&locoformat[i].b[1], 0x00);
-                    eeprom_write_byte(&locoformat[i].b[0], 0x00);
-                    return(1);
-                  }
-              }
-          }
-      }
-    return(1);
-  }
-
-void init_database(void)
-  {
-    dcc_default_format = eeprom_read_byte((void *)eadr_dcc_default_format); 
-  }
-
-void rewind_database(void)
-  {
-    next_search_index = 0;
-  }
-
-unsigned char format_to_uint8(t_format myformat)
-  {  unsigned char i;
-    switch(myformat)
-      {
-        default:
-        case DCC14:
-                i = 14; break;
-        case DCC27:
-                i = 27; break;
-        case DCC28:
-                i = 28;  break;
-        case DCC128:
-                i = 126; break;
-      }
-    return(i);
-  }
-
-
-
-
-// #define LOCO_EEPROM_TEST
-#ifdef LOCO_EEPROM_TEST
-#warning LOCO_EEPROM_TEST activated
-
-void test_loco_eeprom(void)
-  {
-     store_loco_format(1234, DCC128);
-     store_loco_format(123, DCC14);
-     store_loco_format(12, DCC28);
-     // now we should have 2 locos (123 and 1234) in EEPROM
-     PORTA = get_loco_format(1234);
-     PORTA = get_loco_format(123);
-     PORTA = get_loco_format(12);
-     PORTA = get_loco_format(5555);
-     // remap locos
-     store_loco_format(1234, DCC28);
-     store_loco_format(123, DCC14);
-     store_loco_format(12, DCC128);
-     // now we should have 2 locos (12 and 123) in EEPROM
-     PORTA = get_loco_format(1234);
-     PORTA = get_loco_format(123);
-     PORTA = get_loco_format(12);
-     
-  }
-
-#endif // LOCO_EEPROM_TEST
-
-#else
-  #warning LOCO_DATABASE undefined
-#endif // (LOCO_DATABASE == NAMED)
-
-
-
+} // do_xmit_database

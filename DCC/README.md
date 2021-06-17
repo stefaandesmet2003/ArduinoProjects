@@ -8,11 +8,13 @@
 - overview of used addresses :  
 -> 0 : CommandStation, using 'slot 0' for the local UI, this is a not-valid XPNET address  
 -> 1 : PcInterface, fixed define  
--> 3 : Throttle, fixed define for now
+-> 3 : Throttle, fixed define for now  
 -> 5 : FeedbackDecoder, configurable over CV35, for potentially multiple decoders  
 -> other addresses in range 1..31 not yet used
 
 ## Tested functionality
+-  functionality not completely retested in commit 17/06!!  
+--> this commit has a partial rework of eeprom database, and locobuffer (esp the loc stolen is simplified)  
 - loco control via local UI & JMRI, JMRI receives loc stolen message
 - turnout control via local UI & JMRI
 - turnout feedback, possibility to assign feedback decoders to provide turnout feedback  
@@ -21,22 +23,6 @@
 - track power on/off, on/off/short/external-stop notifications  
 - not all possible commands in the parser have been tested!!  
 - turnout control from local UI broadcasted over xpnet
-
-## todo
-- lok_stolen_by_pc etc -> rework locobuffer & organizer (orgz_old_lok_owner=dirty, ".manual_operated" field : can be removed? )  
-- release loco from local UI :  
-  --> not sure how JMRI can steal a loc, it keeps polling the lost loco but stops after a while  
-  --> and no way to steal it back ??  
-- loc stolen notification on local UI
-- appstub clean-up
-- modify timing for short detection on programming track at startup  
---> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
---> timing for short detection is too tight  
-- CS blijft fast clock msgs sturen tijdens programming, is dat ok?
-- accessory screen (for decoupler rails & lights)  
---> keys have toggle on/off function on the decoder outputs  
-- turnout screen : key-up event should send 'off' turnout command (for test with accessory decoder with pulseDuration==0)
---> test various activation times for the turnouts based on how long key is pressed
 
 ## Command Station CVs
 - for the moment it's not possible to read/write CommandStation CVs  
@@ -78,19 +64,45 @@
 -> default accessory addresses : 10 + 11
 -> in JMRI this translates to sensors 81 -> 96 (address X has sensors 8X+1 -> 8X+8), because JMRI counts from 1
 
+## note on DCC fast clock
+- is a DCC extension proposed by W. Kufer, CommandStation has a builtin fast clock, and sends updates as DCC packets
+- but fast clock is not part of standard xpnet, and not implemented in JRMI
+- JMRI can be fast clock generator (or master), but doesn't send fast clock updates to CommandStation
+- similarly, JMRI can synchronize with eg. loconet fast clock, but not xpnet : JMRI doesn't handle the xpnet broadcast of fast clock by the CommandStation (proprietary xpnet extension by Kufer not implemented in JMRI)
+- as a result, CommandStation & JRMI cannot synchronize fast clocks over xpnet
+
 ## todo
-- JMRI 0xE?-0x30 : juist implementeren in lenz_parser  
+- UI : add power on/off, add dcc clock time  
+- UI : rework code  
+- lok_stolen_by_pc etc -> rework locobuffer & organizer (orgz_old_lok_owner=dirty)  
+--> ongoing in commit 17/06, needs rework on UI 
+- release loco from local UI :  
+  --> not sure how JMRI can steal a loc, it keeps polling the lost loco but stops after a while  
+  --> looks like an issue in JMRI, because after a while JMRI doesn't poll loc information inquiry (the only way to know the 'loc_is_free' bit  
+  --> even if UI/throttle release the loc in locobuffer, JMRI will not reclaim the loc (needs JMRI restart)  
+- loc stolen notification on local UI
+- appstub clean-up
+- modify timing for short detection on programming track at startup  
+--> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
+--> timing for short detection is too tight  
+- CS blijft fast clock msgs sturen tijdens programming, is dat ok?
+- accessory screen (for decoupler rails & lights)  
+--> keys have toggle on/off function on the decoder outputs  
+- turnout screen : key-up event should send 'off' turnout command (for test with accessory decoder with pulseDuration==0)
+--> test various activation times for the turnouts based on how long key is pressed
+- JMRI 0xE?-0x30 : juist implementeren in xpnet_parser  
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert
 -> ok, nog checken of de POM commands nu nog goed worden uitgevoerd
 - locobuffer uitmesten (ook startup checken, DCC default format etc. nodig?)
-- lenz parser cleanup
 - fast clock lijkt iets te snel te lopen
 - CVs van CommandStation schrijven via programming?
 - add checks on feedback addresses to avoid writing beyond allocated array memory!!!
+- fast clock configuration in CommandStation (is now fixed, starts at 8:00 and speed via CV, but this can be more flexible over UI config)
 
 # CommandStation LENZ
 - configuration for command station with LENZ PC interface on uart1
-- code not up to date!
+- code not up to date! (lenz parser only partially cleaned up, not up to date with xpnet version)  
+--> maybe integrate entirely in xpnet, both code bases have already the necessary #define switches  
 
 # PcInterface
 a sketch that implements a LI101 PC Interface  
@@ -102,14 +114,15 @@ rs485c - xpc : adapted so message bytes for other slots are discarded by the ISR
 i.e. never make it to the RxBuffer = less work for xpc_Run()
 
 ## tested
-- see CommandStationXPNET  
+- see CommandStation XPNET  
 
 ## stability
 keeps working under constant polling from JMRI, especially during programming  
 issue with occasional RX_ERRORS solved; xpnet command is now copied to rs485c with global ints disabled to garantee transmission in 1 slot.
 
 ## todo
-- version STM8, requires AltSoftSerial -> port to STM8 TODO
+- version STM8, requires AltSoftSerial  
+-> port to STM8 TODO, not considered for now
 
 # Accessory decoder (AVR + STM8)
 - 2 modes : turnout decoder mode & output decoder mode (see below)  
@@ -183,6 +196,9 @@ In software mode = 0 :
 - dcc clock in dcc-rx ?
 - Serial prints opkuisen
 - nmra code opkuisen
+- safe mode : needed?  
+--> original idea was for a safe mode with all outputs 0 and fast blinking led if decoder has wrong CV settings, or a watchdog reset happens, or ...
+
 
 ## Implementation notes AVR
 
@@ -194,8 +210,8 @@ In software mode = 0 :
 - flag MY_ADDRESS_ONLY in nmradcc lib is not used to permit receiving DCC packets for all accessory addresses, including broadcast (accessory address 511). In 'normal' mode, the decoder address is filtered by turnout_decoder.c, and only own address packets are executed.
 - added NOP packet (RCN-213) to nmradcc lib, not sure yet what to do with it
 --> CommandStation is not sending this packet anyway for now  
-- hoe komt het dat millis() werkt als nmra ook de timer0 gebruikt???
---> timer scale verandert niet, enkel output compare toegevoegd  
+- nmra lib also uses avr timer0 without disturbing millis()  
+--> because timer scale/counter aren't touched, only output compare added!
 
 ## Implementation notes STM8
 
@@ -439,7 +455,10 @@ dcc address = 2, head 1
 - bedienpaneel wissels op xpnet (luistert naar feedback messages voor led-indicatie updates & knoppen voor bediening)
 - esp als XnTcp interface of volledig CS  
 --> looks problematic because esp hw-uart can't do 9-bit data
-- dcc clock
+- dcc clock receiver  
+--> dcc packet format is based on multifunction decoder feature expansion (CCC=110), with case DDDDD=00001 : not implemented in nmra lib
+--> multifunction packets are not used yet in the decoders
+--> CommandStation does send the fast clock dcc packets (organizer.cpp, build_dcc_fast_clock)
 
 
 

@@ -108,6 +108,9 @@ static void pc_ParseMessage(void) {
     case 0x2: 
       if ((pcc[1] == 0x22) || // CS power-up mode
           (pcc[1]>=0x11 && pcc[1]<=0x17)) // programming commands except 'request results'
+          // not entirely correct, we should only ack if we have detected that the CS is in programming mode (detected broadcast 'programming mode')
+          // [compare lenz_parser.cpp]
+          // but we don't track the CS state here for now; so far it works
         pc_SendMessage(pcm_ack);
       break;
     case 0xE:

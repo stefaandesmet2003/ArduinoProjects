@@ -32,7 +32,6 @@
 #ifndef __HARDWARE_H__
 #define __HARDWARE_H__
 
-#include "Arduino.h"
 //========================================================================
 // 1. Processor Definitions
 //========================================================================
@@ -137,7 +136,7 @@
 //PC4 = A4 = SDA
 //PC5 = A5 = SCL
 #define EXT_STOP        20     // in,sds A6
-// SDS, A7 is voorlopig vrij
+// SDS, A7 is voorlopig vrij -> currentSense main
 
 #define RS485Transmit    HIGH
 #define RS485Receive     LOW
@@ -157,23 +156,5 @@
 #define PROG_IS_SHORT    (digitalRead(NSHORT_PROG)==LOW)
 #define ACK_IS_DETECTED  (digitalRead(ACK_DETECTED)==HIGH)
 #define EXT_STOP_ACTIVE  (analogRead(EXT_STOP)<512)  // A6 is analog-only pin, digitalRead always returns 0!!
-
-// RTS is aktive low
-//SDS #define MY_RTS_DETECT    (!(PINB & (1<<MY_RTS)))
-#define MY_RTS_DETECT 0 //sds, nog opkuisen in rs232.cpp
-
-// S88:
-//SDS #define S88_LOAD_HIGH    PORTB |= (1<<S88_LOAD)
-//SDS #define S88_LOAD_LOW     PORTB &= ~(1<<S88_LOAD)
-//SDS #define S88_RESET_HIGH   PORTB |= (1<<S88_RESET)
-//SDS #define S88_RESET_LOW    PORTB &= ~(1<<S88_RESET)
-//SDS #define S88_CLK_HIGH     PORTB |= (1<<S88_CLK)
-//SDS #define S88_CLK_LOW      PORTB &= ~(1<<S88_CLK)
-
-//SDS #define READ_S88_D1      (PINA & (1<<S88DIN1))
-//SDS #define READ_S88_D2      (PINA & (1<<S88DIN2))
-//SDS #define READ_S88_D3      (PINA & (1<<S88DIN3))
-
-
 
 #endif   // hardware.h

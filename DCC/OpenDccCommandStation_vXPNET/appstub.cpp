@@ -1,13 +1,13 @@
 // SDS TODO 2021 : cleanup + check!
 
-#include "appstub.h"
 #include "Arduino.h"
+#include "appstub.h"
 
-// opendcc includes
 #include "config.h"
 #include "organizer.h"
 #include "status.h"
 #include "programmer.h"
+#include "database.h" // loc names
 
 // xpnet broadcast na een wisselbediening vanaf local ui
 #include "xpnet.h"
@@ -24,12 +24,7 @@ char app_CurTime[] = "12:07";
 uint8_t locSpeed; //DCC128
 uint16_t locAddr;
 uint32_t locFuncs;
-char app_LocName[] = "DIESEL"; // temp
-
-// voor de analoge appstub
-#define PWM_MINSPEED 90  // daaronder beweegt de loc niet (analoge modus)
-#define PWM_MAXSPEED 255 // wanneer gaat de rijrichtingsschakelaar tussenkomen?
-
+char app_DefaultLocName[] = "LOC?";
 
 /****************************************************************************************************/
 /****************************************************************************************************/
@@ -54,12 +49,17 @@ uint16_t app_GetNextLoc (uint16_t curLoc)
   return (curLoc + 1);
 }
 
-// slot 1 = local UI, slot 0 = PC (via lenz intf)
-// welk format gebruikt do_loco_speed ?? hangt af van de eeprom database (DCC14, DCC28, DCC128)
-// dcc_default_format == DCC28 (in config.h), tenzij anders opgeslagen in eeprom database
-// de intf gebruikt DCC128, maar wordt vertaald door organizer met 'convert_speed_to_rail'
-// moet dit overeenkomen met een decoder CV, of zal de decoder automatisch de verschillende speed formaten ondersteunen in de verschillende dcc msgs?
-// --> checken!! 
+/*
+ * do_loco_speed gebruikt altijd DCC128! (intern organizer formaat)
+ * het formaat dat op de rail wordt gezet hangt af van de loco database (eeprom) -> 06/2021 : is nu ook default DCC128
+ * en dcc_default_format == DCC128 (in config.h) voor nieuwe loc addressen
+ * met do_loco_speed_f kan je toch nog aansturen met een ander formaat, maar dan moet je eerst 'convert_speed_from_rail' :
+ * speed128 = convert_speed_from_rail(speed,format)
+ * en dan do_loco_speed_f (speed128,format)
+ * wat op rail komt moet door de decoder ondersteund worden, maar is ok voor de mijne (doen zowel DCC28 & DCC128) 
+ * dus momenteel geen nood om vanuit UI een ander formaat kunnen instellen, en do_loco_speed_f te gebruiken
+ */
+
 /*
 The optional NMRA 128 speed step mode is available for both decoders and command stations that support it. 
 Both the decoder and the command station controlling it must support this feature. 
@@ -75,11 +75,15 @@ That is why the 28 step mode is often referred to as 28/128.
 // #define DCC_SHORT_ADDR_LIMIT   112  (in config.h)
 // als locAddr > DCC_SHORT_ADDR_LIMIT, gaat de organiser DCC msgs voor long addr gebruiken
 // dus : locAddr < 112 -> short addr naar loc-decoder, > 112 --> long addr naar loc-decoder
-// dus : locSpeed moet DCC128 formaat volgen, dwz 0 = stop, 1= noodstop, 2..127 = speedsteps, msb = richting, 1=voorwaarts, 0=achterwaarts
+// dus : locSpeed in het locobuffer format (128 steps), dwz 0 = stop, 1= noodstop, 2..127 = speedsteps, msb = richting, 1=voorwaarts, 0=achterwaarts
 void app_SetSpeed (uint16_t locAddr, uint8_t locSpeed)
 {
-  if (organizer_ready())
-    do_loco_speed (LOCAL_UI_SLOT,locAddr, locSpeed);
+  unsigned char retval;
+  if (organizer_ready()) {
+    retval = do_loco_speed (LOCAL_UI_SLOT,locAddr, locSpeed);
+    if (retval & ORGZ_STOLEN)
+      xp_send_lok_stolen(orgz_old_lok_owner,locAddr);
+  }
 } // app_SetSpeed
 
 uint8_t app_GetSpeed (uint16_t locAddr)
@@ -121,31 +125,35 @@ uint32_t app_GetFuncs (uint16_t locAddr)
 // on = 1, off = 0
 void app_SetFunc (uint16_t locAddr, uint8_t func, uint8_t onOff) 
 {
+  uint8_t retval;
   if (organizer_ready()) {
     if (func ==0)
-      do_loco_func_grp0 (LOCAL_UI_SLOT,locAddr, onOff);
+      retval= do_loco_func_grp0 (LOCAL_UI_SLOT,locAddr, onOff);
     else if ((func >=1) && (func <= 4))
-      do_loco_func_grp1 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-1));
+      retval= do_loco_func_grp1 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-1));
     else if ((func >=5) && (func <= 8))
-      do_loco_func_grp2 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-5));
+      retval= do_loco_func_grp2 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-5));
     else if ((func >=9) && (func <= 12))
-      do_loco_func_grp3 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-9));
+      retval= do_loco_func_grp3 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-9));
 #if (DCC_F13_F28 == 1)        
     else if ((func >=13) && (func <= 20))
-      do_loco_func_grp4 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-13));
+      retval= do_loco_func_grp4 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-13));
     else if ((func >=21) && (func <= 28))
-      do_loco_func_grp5 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-21));
-#endif        
+      retval= do_loco_func_grp5 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-21));
+#endif
+    if (retval & ORGZ_STOLEN)
+      xp_send_lok_stolen(orgz_old_lok_owner,locAddr);
+
   }
 } // app_SetFunc
 
 // caller to provide memory for *name
-// database.cpp : store_loco_name wordt nergens gebruikt
-// waar wordt de locname bewaard? in database.cpp, en elders?
-void app_GetLocName( uint16_t locAddr, char *locName )
-{
-  //todo
-  strcpy(locName,app_LocName);
+// database.cpp : store_loco_name wordt voorlopig nergens gebruikt
+void app_GetLocName( uint16_t locAddr, char *locName) {
+  uint8_t retval;
+  retval = get_loco_name(locAddr, (uint8_t*)locName);
+  if (!retval)
+    strcpy(locName,app_DefaultLocName);
 } // app_GetLocName
 
 // voorlopig hier een geheugen van de wissels
@@ -153,7 +161,6 @@ uint32_t app_Turnouts = 0xFFFFFFFF; // alle wissels rechtdoor, 1 bit per turnout
 // turnoutAddress 0-4095, coil red/green 0/1
 // enkel het activate commando wordt gestuurd, de turnout decoder doet zelf de deactivate
 // voorlopig turnoutAddress 0..31
-
 
 bool app_ToggleAccessory (uint16_t turnoutAddress, bool activate) {
   bool retval;
@@ -172,7 +179,7 @@ bool app_ToggleAccessory (uint16_t turnoutAddress, bool activate) {
       unsigned char tx_message[3];
       tx_message[0] = 0x42;
       turnout_getInfo(turnoutAddress,&tx_message[1]);
-      xp_send_message(0x20, tx_message); // feedback broadcast
+      xp_send_message(FUTURE_ID, tx_message); // feedback broadcast
     }
   }
   else {

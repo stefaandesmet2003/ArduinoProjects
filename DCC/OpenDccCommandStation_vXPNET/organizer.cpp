@@ -111,7 +111,24 @@
 //            uses "next_message..." flags to interact with dccout
 //
 //------------------------------------------------------------------------------
+/*
+ * TODO SDS2021 : 
+ * organizer state heeft nog enkel 'halted' -> verder cleanup mogelijk?
+ * owner_changed wordt niet meer gebruikt : een owner change wordt momenteel elke keer opgevangen door naar de retval ORGZ_STOLEN te kijken
+ * dat gebeurt in xpnet (owner change na een xpnet command), en appstub (owner change na ui command)
+ * in kufer code liep er ook een check via de xpnet state machine of owner_change bits waren gezet (maar die waren enkel gelinkt aan locs die door pc waren geowned)
+ * dat is hier ook een mogelijkheid, zodat de owner change notify op 1 centrale plaats gebeurt
+ * old owner wordt nu in een global bewaard, niet per loc in de locobuffer
+ * maar dat werkt niet als er 2 owner_change bits tegelijk zijn gezet; maar da's onwaarschijnlijk
+ * 
+ * locobuffer searches : optimaliseren mogelijk?
+ * locobuffer accesses : check eeprom accesses ihb, 
+ * --> kan problematisch zijn als 2 devices met verschillend format dezelfde loc sturen 
+ * --> want dan wordt elke keer eeprom geschreven (store_loco_format) met het laatst aangestuurde format
+ * locobuffer moet static zijn, en enkel hier geschreven : ok? nog niet static, maar wordt wel enkel in organizer.cpp gewijzigd, elders enkel gelezen
+*/
 
+#include "Arduino.h"
 #include "config.h"                // general structures and definitions
 #include "database.h"
 #include "dccout.h"
@@ -144,16 +161,12 @@ locomem locobuffer[SIZE_LOCOBUFFER];
 //                       {repeat, size, type, data} 
 t_message DCC_Reset    = {1,  {{ 2,  is_void}}, {0x00, 0x00}};    // DCC-Reset-Paket
 t_message DCC_Idle     = {1,  {{ 2,  is_void}}, {0xFF, 0x00}};    // DCC-Idle-Paket
-t_message DCC_BC_Stop  = {1,  {{ 2,  is_stop}}, {0x00, 0x71}};    // Broadcast Motor off:
+t_message DCC_BC_Stop  = {1,  {{ 2,  is_stop}}, {0x00, 0x71}};    // Broadcast Motor off, SDS : EmergencyStop (=geen remvertraging)
                                                                     // 01DC000S :D=x, C=1 (ignore D)
-t_message DCC_BC_Brake = {1,  {{ 2,  is_stop}}, {0x00, 0x70}};    // Broadcast Slow down
+t_message DCC_BC_Brake = {1,  {{ 2,  is_stop}}, {0x00, 0x70}};    // Broadcast Slow down, SDS : Stop (=decoder doet ev. remvertraging)
                                                                     // if S=0: slow down
 t_organizer_state organizer_state =
 { 0,                                  // halted
-  0,                                  // lok_stolen_by_pc
-  0,                                  // lok_stolen_by_handheld
-  0,                                  // lok_operated_by_handheld
-  0,                                  // turnout_by_handheld
 };  
 
 unsigned char dcc_acc_repeat;           // dcc accessory commands are repeated this time
@@ -167,6 +180,8 @@ unsigned char dcc_func_repeat;          // dcc func commands are repeated this t
 //-------------------------------------------------------------------------------------------------
 
 //--------------------------------- routines to convert speed from and to DCC14 and DCC28
+// TODO SDS2021 : we willen heel die bazaar van intern locobuffer format (DCC128) ook intern houden in organizer
+// dus deze funcs moeten static, en moeten weg uit xpnet/lenz_parser/UI (voorlopig niet gebruikt in UI, omdat die enkel DCC128 doet for now)
 unsigned char convert_speed_to_rail(unsigned char speed128, t_format format)
 {
   unsigned char retval, myspeed, direction;
@@ -371,7 +386,6 @@ static void build_nmra_basic_accessory(unsigned int turnoutAddress, unsigned cha
   new_message->dcc[1] = new_message->dcc[1] | ((activate & 0x01) * 0x08);   // add B
   new_message->dcc[1] = new_message->dcc[1] | (pairnr * 2) | (coil & 0x01);
 } // build_nmra_basic_accessory
-
 
 static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_message *new_message)
 {
@@ -877,34 +891,6 @@ static void build_loko_14a_restricted(unsigned int nr, unsigned char res_speed, 
 
 #endif
 
-#if (RAILCOMPLUS_SUPPORT == 1)
-#warning RAILCOMPLUS_SUPPORT: internal code only, not for release
-static void build_dcc_searchid(t_unique_id* test_id,  t_message *new_message)
-  {  
-    // message 11111111 11111111 MANID UID3 UID2 UID1 UID0 XOR
-    new_message->repeat = 1;
-    new_message->type = is_stop;
-    new_message->size = 7;
-    new_message->dcc[0] = 0xFF;
-    new_message->dcc[1] = 0xFF;
-    new_message->dcc[2] = test_id->vendor;       // DIY
-    new_message->dcc[3] = test_id->byte3;       // Produkt ID
-    new_message->dcc[4] = test_id->byte2;       // Session
-    new_message->dcc[5] = test_id->byte1;       // Serial
-    new_message->dcc[6] = test_id->byte0;       // Serial
-    #if (MAX_DCC_SIZE < 7)
-        #error: MAX_DCC_SIZE too small
-    #endif
-  }
-#endif
-
-//============================================================================
-//
-// 3. Routines for turnoutbuffer
-//
-//============================================================================
-// SDS-> weg!
-
 
 
 //============================================================================
@@ -959,42 +945,19 @@ static unsigned char last_locobuffer_index(void)
 }
 
 #if (XPRESSNET_ENABLED == 1)
-// SDS TODO2021 : is dit juist als de pc ook een xpnet device is?
-unsigned char orgz_old_lok_owner;
-unsigned char check_for_stolen_loco(unsigned char slot, unsigned char index)
-{
+unsigned char orgz_old_lok_owner; // on ORGZ_STOLEN, command station will inform this xpnet device that it's loc has been stolen
+unsigned char check_for_stolen_loco (unsigned char slot, unsigned char index) {
   unsigned char retval = 0;
 
-  if (slot != 0) { // possibly stolen by handheld 
-    if (locobuffer[index].owned_by_pc)                  // stolen from pc
-    {
-      locobuffer[index].owned_by_pc = 0;
-      organizer_state.lok_stolen_by_handheld = 1;
-      locobuffer[index].owner_changed = 1;
-      locobuffer[index].slot = slot;
-      retval = (1 << ORGZ_STOLEN);
-    }
-    else if (locobuffer[index].slot != slot)            // stolen from other handheld, no global flag
-    {
-      orgz_old_lok_owner = locobuffer[index].slot;    // save for notify
-      locobuffer[index].owner_changed = 1;
-      locobuffer[index].slot = slot;
-      retval = (1 << ORGZ_STOLEN);
-    }
-    organizer_state.lok_operated_by_handheld = 1;       // global: lok has been manual operated
-    locobuffer[index].manual_operated = 1;              // local: this lok
-  }
-  else { // possibly stolen by pc
-    if (!locobuffer[index].owned_by_pc)  {
-      locobuffer[index].owned_by_pc = 1;
-      organizer_state.lok_stolen_by_pc = 1;
-      locobuffer[index].owner_changed = 1;
-      retval = (1 << ORGZ_STOLEN);
-    }
+  if (locobuffer[index].slot != slot) { // stealing from another device
+    orgz_old_lok_owner = locobuffer[index].slot;    // save for notify
+    locobuffer[index].owner_changed = 1;
+    locobuffer[index].slot = slot;
+    retval = ORGZ_STOLEN;
   }
   return(retval);
-}
-#endif
+} // check_for_stolen_loco
+#endif // XPRESSNET_ENABLED
 
 //-----------------------------------------------------------------------------------
 // find format for this addr in locobuffer
@@ -1013,7 +976,7 @@ t_format find_format_in_locobuffer(unsigned int addr)
 
 //-----------------------------------------------------------------------------------
 // find entry for this addr in locobuffer
-// return:  char: Bit 1 (LB_STOLEN)     1 Falls owner changed
+// return:  char: Bit 1 (ORGZ_STOLEN)     1 Falls owner changed
 //          lb_index is updated
 //          note: .active is not set - thus this loco is not yet in the refresh buffer
 // slot: the new owner, requesting this loco; slot = 0: Host
@@ -1035,8 +998,6 @@ static unsigned char get_entry(unsigned char slot, unsigned int addr)
         lb_index = i;
         #if (XPRESSNET_ENABLED == 1)
             locobuffer[lb_index].slot = slot;
-            if (slot == 0) locobuffer[lb_index].owned_by_pc = 1;
-            else locobuffer[lb_index].owned_by_pc = 0;
             locobuffer[lb_index].owner_changed = 0;
         #endif
         locobuffer[lb_index].address = addr;
@@ -1047,7 +1008,7 @@ static unsigned char get_entry(unsigned char slot, unsigned int addr)
         locobuffer[lb_index].f4_f1 = 0;
         locobuffer[lb_index].f8_f5 = 0;
         locobuffer[lb_index].f12_f9 = 0;
-        retval = (1 << ORGZ_NEW);
+        retval = ORGZ_NEW;
         return(retval);
       }
     }
@@ -1059,8 +1020,6 @@ static unsigned char get_entry(unsigned char slot, unsigned int addr)
       lb_index = i;
       #if (XPRESSNET_ENABLED == 1)
           locobuffer[lb_index].slot = slot;
-          if (slot == 0) locobuffer[lb_index].owned_by_pc = 1;
-          else locobuffer[lb_index].owned_by_pc = 0;
           locobuffer[lb_index].owner_changed = 0;
       #endif
 
@@ -1072,7 +1031,7 @@ static unsigned char get_entry(unsigned char slot, unsigned int addr)
       locobuffer[lb_index].f4_f1 = 0;
       locobuffer[lb_index].f8_f5 = 0;
       locobuffer[lb_index].f12_f9 = 0;
-      retval = (1 << ORGZ_NEW);
+      retval = ORGZ_NEW;
       return(retval);
     }
   }
@@ -1085,8 +1044,6 @@ static unsigned char get_entry(unsigned char slot, unsigned int addr)
   lb_index = found_i;
   #if (XPRESSNET_ENABLED == 1)
     locobuffer[lb_index].slot = slot;
-    if (slot == 0) locobuffer[lb_index].owned_by_pc = 1;
-    else locobuffer[lb_index].owned_by_pc = 0;
     locobuffer[lb_index].owner_changed = 0;
   #endif
 
@@ -1098,16 +1055,16 @@ static unsigned char get_entry(unsigned char slot, unsigned int addr)
   locobuffer[lb_index].f4_f1 = 0;
   locobuffer[lb_index].f8_f5 = 0;
   locobuffer[lb_index].f12_f9 = 0;
-  retval = (1 << ORGZ_NEW);  // okay, is probably stolen, but who cares? (it is our oldest loco)
+  retval = ORGZ_NEW;  // okay, is probably stolen, but who cares? (it is our oldest loco)
   return(retval);
 } // get_entry
 
 //-----------------------------------------------------------------------------------
 // neue Addr, neue Speed und neues Format in Locobuffer eintragen
-// return:  char: Bit 0 (LB_SLOW_DOWN)  1 falls neue Speed kleiner alte Speed
-//                                      1 falls Richtungswechsel
-//                                      0 falls neue Speed >= alte Speed.
-//                Bit 1 (LB_STOLEN)     1 Falls owner changed
+// return:  char: Bit 0 (ORGZ_SLOW_DOWN)  1 falls neue Speed kleiner alte Speed
+//                                        1 falls Richtungswechsel
+//                                        0 falls neue Speed >= alte Speed.
+//                Bit 1 (ORGZ_STOLEN)       1 Falls owner changed
 // damit kann der Caller den Befehl zum Bremsen in einer anderen queue ablegen.
 // SDS TODO2021 : store_loco_format -> weg, geen nut om daarmee de eeprom te verslijten
 unsigned char enter_speed_f_to_locobuffer(unsigned char slot, unsigned int addr,
@@ -1118,7 +1075,7 @@ unsigned char enter_speed_f_to_locobuffer(unsigned char slot, unsigned int addr,
   retval = get_entry(slot, addr);
   locobuffer[lb_index].active = 1;
 
-  if (retval & (1 << ORGZ_NEW)) {
+  if (retval & ORGZ_NEW) {
     locobuffer[lb_index].format = format;
     store_loco_format(addr, format);          // !!! unhandled, if store fails!
     locobuffer[lb_index].speed = speed;
@@ -1130,8 +1087,8 @@ unsigned char enter_speed_f_to_locobuffer(unsigned char slot, unsigned int addr,
     store_loco_format(addr, format);          // !!! unhandled, if store fails!
   }
   locobuffer[lb_index].refresh = 0;
-  if ((speed ^ locobuffer[lb_index].speed) & 0x80) retval |= (1 << ORGZ_SLOW_DOWN);      // dir changed
-  if ((speed & 0x7F) < (locobuffer[lb_index].speed & 0x7F)) retval |= (1 << ORGZ_SLOW_DOWN);   // brake
+  if ((speed ^ locobuffer[lb_index].speed) & 0x80) retval |= ORGZ_SLOW_DOWN;      // dir changed
+  if ((speed & 0x7F) < (locobuffer[lb_index].speed & 0x7F)) retval |= ORGZ_SLOW_DOWN;   // brake
   
   locobuffer[lb_index].speed = speed;
   return(retval);
@@ -1151,15 +1108,13 @@ unsigned char enter_speed_to_locobuffer(unsigned char slot, unsigned int addr,
   retval = get_entry(slot, addr);
   locobuffer[lb_index].active = 1;
       
-  if (retval & (1 << ORGZ_NEW)) {
-    locobuffer[lb_index].speed = speed;
-    return(retval);
+  // same entry -> check for slow down (dcc commands will be put in high-priority Q)
+  if (!(retval & ORGZ_NEW)) {
+    locobuffer[lb_index].refresh = 0;
+    if ((speed ^ locobuffer[lb_index].speed) & 0x80) retval |= ORGZ_SLOW_DOWN;      // dir changed
+    if ((speed & 0x7F) < (locobuffer[lb_index].speed & 0x7F)) retval |= ORGZ_SLOW_DOWN;   // brake
   }
-  // same entry
-  locobuffer[lb_index].refresh = 0;
-  if ((speed ^ locobuffer[lb_index].speed) & 0x80) retval |= (1 << ORGZ_SLOW_DOWN);      // dir changed
-  if ((speed & 0x7F) < (locobuffer[lb_index].speed & 0x7F)) retval |= (1 << ORGZ_SLOW_DOWN);   // brake
-  
+
   locobuffer[lb_index].speed = speed;
   return(retval);
 } // enter_speed_to_locobuffer
@@ -1242,12 +1197,11 @@ void delete_from_locobuffer(unsigned int addr)
 
 //--------------------------------------------------------------------------------------------
 // This routine creates DCC messages from the data stored in locobuffer
-// and returns a pointer to the message biult
+// and returns a pointer to the message built
 //
 // Notes: Address handling: 1...DCC_SHORT_ADDR_LIMIT:          DCC short address
 //                          DCC_SHORT_ADDR_LIMIT+1 ... 10239: long address
-
-// Note on speed handling:
+// SDS : i = index in locobuffer (omdat eerder al een lookup is gedaan van een locAddress)
 
 t_message * build_speed_message_from_locobuffer(unsigned char i)
 {
@@ -1255,7 +1209,6 @@ t_message * build_speed_message_from_locobuffer(unsigned char i)
 
   loco_search_ptr = &DCC_Idle;  // default = idle
   format = locobuffer[i].format;
-  //SDS added cast
   speed = convert_speed_to_rail(locobuffer[i].speed, format);
 
   switch(format)
@@ -1267,7 +1220,7 @@ t_message * build_speed_message_from_locobuffer(unsigned char i)
         build_loko_7a128s(locobuffer[i].address, speed, locobuff_mes_ptr);
       return (locobuff_mes_ptr);
       break;
-    case DCC27: // Implmentierungslï¿½cke: DCC27 wird nicht unterstï¿½tzt !!! dann halt idle ...
+    case DCC27: // Implmentierungslücke: DCC27 wird nicht unterstützt !!! dann halt idle ...
     case DCC28:
       if (locobuffer[i].address > DCC_SHORT_ADDR_LIMIT)
         build_loko_14a28s(locobuffer[i].address, speed, locobuff_mes_ptr);
@@ -1501,7 +1454,6 @@ unsigned char lp_read;            // points to next read
 unsigned char lp_write;           // points to next write
                                   // rd = wr: queue empty
                                   // rd = wr + 1: queue full
-// !!! unsigned char repeat_filled;
 
 void init_organizer(void)
 {
@@ -1511,8 +1463,6 @@ void init_organizer(void)
   lp_read = 0;
   lp_write = 0;
   organizer_state.halted = 0;
-  organizer_state.lok_stolen_by_pc = 0;
-  organizer_state.lok_stolen_by_handheld = 0;
 
   for (i=0; i<SIZE_REPEATBUFFER; i++) {
     repeatbuffer[i].repeat = 0;
@@ -1598,10 +1548,10 @@ unsigned char put_in_queue_lp(t_message *new_message)
   // check for full (with reserved entry)
   i = lp_write+1;
   if (i == SIZE_QUEUE_LP) i = 0;
-  if (i == lp_read) return(1 << ORGZ_FULL);         // totally full
+  if (i == lp_read) return(ORGZ_FULL);         // totally full
   i = i+1;
   if (i == SIZE_QUEUE_LP) i = 0;
-  if (i == lp_read) return(1 << ORGZ_FULL);         // one left -> say full, keep one extra
+  if (i == lp_read) return(ORGZ_FULL);         // one left -> say full, keep one extra
 
   return(0);
 } // put_in_queue_lp
@@ -1678,18 +1628,18 @@ unsigned char put_in_queue_hp(t_message *new_message)
   // check for full (with reserved entry)
   i = hp_write + 1;
   if (i == SIZE_QUEUE_HP) i = 0;
-  if (i == hp_read) return(1<<ORGZ_FULL);         // totally full
+  if (i == hp_read) return(ORGZ_FULL);         // totally full
   i = i + 1;
   if (i == SIZE_QUEUE_HP) i = 0;
-  if (i == hp_read) return(1<<ORGZ_FULL);         // one left -> say full, keep one extra
+  if (i == hp_read) return(ORGZ_FULL);         // one left -> say full, keep one extra
 
   return(0);
 } // put_in_queue_hp
 
 
-// Ersatz fï¿½r Organizer (temporï¿½r, spï¿½ter soll das mit run_organizer gemacht werden,
-// um Tastendruck und Kurzschluï¿½ï¿½berwachung zu haben!!!!!
-// SDS TODO2021 : wadisda?? nog nodig?
+// Ersatz für Organizer (temporär, später soll das mit run_organizer gemacht werden,
+// um Tastendruck und Kurzschlussüberwachung zu haben!!!!!
+// SDS TODO2021 : wadisda?? gebruikt in programmer.. CHECK!
 bool queue_prog_is_empty(void)
 {
   if (prog_write == prog_read) return(1);
@@ -1717,10 +1667,10 @@ unsigned char put_in_queue_prog(t_message *new_message)
   // check for full (with reserved entry)
   i = prog_write + 1;
   if (i == SIZE_QUEUE_PROG) i = 0;
-  if (i == prog_read) return(1 << ORGZ_FULL);         // totally full
+  if (i == prog_read) return(ORGZ_FULL);         // totally full
   i = i + 1;
   if (i == SIZE_QUEUE_PROG) i = 0;
-  if (i == prog_read) return(1 << ORGZ_FULL);         // one left -> say full, keep one extra
+  if (i == prog_read) return(ORGZ_FULL);         // one left -> say full, keep one extra
 
   return(0);
 }
@@ -1733,7 +1683,7 @@ unsigned char put_in_queue_low(t_message *new_message)
     case RUN_OKAY:             // DCC running
     case RUN_STOP:             // DCC Running, all Engines Emergency Stop
     case RUN_OFF:              // Output disabled (2*Taste, PC)
-    case RUN_SHORT:            // Kurzschluï¿½
+    case RUN_SHORT:            // Kurzschluss
     case RUN_PAUSE:            // DCC Running, all Engines Speed 0
       retval = put_in_queue_lp(new_message);
       break;
@@ -1971,7 +1921,7 @@ void set_next_message_and_repeat (t_message *newmsg)
 //
 // RUN_OKAY:    run all track queues and refreshes
 //
-//xRUN_STOP:    only queue_hp, only queue_lp,                  // DCC Running, all Engines Emergency Stop
+// RUN_STOP:    only queue_hp, only queue_lp,                  // DCC Running, all Engines Emergency Stop
 //              no repeatbuffer, no locobuffer        
 //
 // RUN_OFF:     only idle (we dont want to loose a command)    // Output disabled (2*Taste, PC)
@@ -2145,7 +2095,7 @@ bool organizer_ready(void)
 
 // Speed einstellen: dieses Kommando geht auch in die high priority queue falls gebremst wird;
 // immer in low priority queue, von dort wird es nach dem Ausgeben in repeatbuffer
-// ï¿½bernommen.
+// übernommen.
 // parameter: addr:   0...16383
 //            speed:  0..127 (independent from format)
 //            format: new format
@@ -2159,13 +2109,12 @@ unsigned char do_loco_speed_f(unsigned char slot, unsigned int addr, unsigned ch
 
   retval = enter_speed_f_to_locobuffer(slot, addr, speed, format);
   index = last_locobuffer_index();
-  if (retval & (1 << ORGZ_SLOW_DOWN) ) {  // slow down or direction change
-    my_message = build_speed_message_from_locobuffer(index);
+  my_message = build_speed_message_from_locobuffer(index);
+  if (retval & ORGZ_SLOW_DOWN) {  // slow down or direction change
     retval |= put_in_queue_hp(my_message);
     retval |= put_in_queue_low(my_message);
   }
   else {  // speed up
-    my_message = build_speed_message_from_locobuffer(index);
     retval |= put_in_queue_low(my_message);
   }
 
@@ -2184,7 +2133,7 @@ unsigned char do_loco_speed(unsigned char slot, unsigned int addr, unsigned char
 
   retval = enter_speed_to_locobuffer(slot, addr, speed);
   index = last_locobuffer_index();
-  if (retval & (1 << ORGZ_SLOW_DOWN) ) {  // slow down or direction change
+  if (retval & ORGZ_SLOW_DOWN ) {  // slow down or direction change
     my_message = build_speed_message_from_locobuffer(index);
     retval |= put_in_queue_hp(my_message);
     retval |= put_in_queue_low(my_message);
@@ -2414,25 +2363,20 @@ bool do_fast_clock(t_fast_clock* my_clock)
 }
 #endif
 
-#if (RAILCOMPLUS_SUPPORT == 1)
-#warning RAILCOMPLUS_SUPPORT: internal code only, not for release
-bool do_searchid(t_unique_id* test_id)
-{  
-  unsigned char retval;
-  
-  build_dcc_searchid(test_id, locobuff_mes_ptr);
-  retval = put_in_queue_low(locobuff_mes_ptr);
-  return(retval);
-}
-#endif
-
 void do_all_stop(void)
 {
+  // SDS : RUN_STOP sends emergency stop, not soft stop ('brake')
+  // in line with xpnet spec 2.2.4 Stop all locomotives request = emergency stop all locs
+  DCC_BC_Stop.repeat = 10;
+  put_in_queue_hp(&DCC_BC_Stop);
+  organizer_state.halted = 1;
 
+  /*
   // future idea: we could also do a soft stop. (softhalt)
   DCC_BC_Brake.repeat = 10;
   put_in_queue_hp(&DCC_BC_Brake);
   organizer_state.halted = 1;
+  */
 }
 
 // sds : moved here from xpnet.cpp

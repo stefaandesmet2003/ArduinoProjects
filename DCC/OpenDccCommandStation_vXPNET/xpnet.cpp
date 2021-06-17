@@ -60,6 +60,7 @@
 //            
 //-----------------------------------------------------------------
 
+#include "Arduino.h"
 #include "config.h"                // general structures and definitions
 #include "status.h"
 #include "database.h"              // for database broadcast
@@ -149,10 +150,6 @@ static void set_slot_to_watch(unsigned char slot)
 //
 //-------------------------------------------------------------------------------
 unsigned char current_slot;     // 1 .. 31
-#define ACK_ID      0x00
-#define FUTURE_ID   0x20        // A message with future ID to slot is Feedback broadcast (see also s88.c)
-#define CALL_ID     0x40
-#define MESSAGE_ID  0x60
 
 unsigned char rx_message[17];             // current message from client
 unsigned char rx_index;
@@ -391,8 +388,7 @@ void xp_send_lokdaten(unsigned int addr)
     tx_message[4] = 0; 
   }
   else {
-    if ((locobuffer[i].owned_by_pc) ||
-        (locobuffer[i].slot != current_slot))  tx_message[1] |= 0b0001000;
+    if (locobuffer[i].slot != current_slot)  tx_message[1] |= 0b0001000; // loc is in use by another slot
 
     speed = convert_speed_to_rail(locobuffer[i].speed, locobuffer[i].format);
     switch(locobuffer[i].format) {
@@ -481,31 +477,23 @@ void xp_send_loco_func_status(unsigned int addr)
   xp_send_message_to_current_slot(tx_ptr = tx_message);
 } // xp_send_loco_func_status
 
+// TODO SDS2021 : nog case toevoegen voor ntf naar local UI als slot=0 een loc heeft verloren!
 void xp_send_lok_stolen(unsigned char slot, unsigned int lokaddr)
 {
-  tx_message[0] = 0xE3;
-  tx_message[1] = 0x40;
-  tx_message[2] = (unsigned char) (lokaddr / 256);                           
-  tx_message[3] = (unsigned char) (lokaddr);   
-  if (lokaddr > XP_SHORT_ADDR_LIMIT) {
-    tx_message[2] |= 0xc0;                                              
-  }
-  xp_send_message(MESSAGE_ID | slot, tx_message);
-} // xp_send_lok_stolen
-
-void xp_send_stolen_loks(void)
-{
-  unsigned char i;
-
-  for (i=0; i<SIZE_LOCOBUFFER; i++) {
-    if (locobuffer[i].owner_changed  && locobuffer[i].owned_by_pc) {
-      locobuffer[i].owner_changed = 0;
-      xp_send_lok_stolen( locobuffer[i].slot, locobuffer[i].address);
-      return;  // exit here, send only one locomotive
+  if (slot != 0) {
+    tx_message[0] = 0xE3;
+    tx_message[1] = 0x40;
+    tx_message[2] = (unsigned char) (lokaddr / 256);                           
+    tx_message[3] = (unsigned char) (lokaddr);   
+    if (lokaddr > XP_SHORT_ADDR_LIMIT) {
+      tx_message[2] |= 0xc0;                                              
     }
-  }    
-  organizer_state.lok_stolen_by_pc = 0;      // thats all
-} // xp_send_stolen_loks
+    xp_send_message(MESSAGE_ID | slot, tx_message);
+  }
+  else {
+    // TODO implement ntf naar local UI
+  }
+} // xp_send_lok_stolen
 
 //-----------------------------------------------------------------------------------------------------
 // List of all messages from the client
@@ -845,7 +833,6 @@ void xp_parser(void)
         do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
         processed = 1;
       }
-      // no response is to be sent
       break;
 
     case 0xE:
@@ -923,11 +910,10 @@ void xp_parser(void)
             myspeed = convert_speed_from_rail(speed, format); // map lenz to internal 0...127                      
 
             retval = do_loco_speed_f(current_slot, addr, myspeed, format);
-            if (retval & (1<<ORGZ_STOLEN) ) {
+            if (retval & ORGZ_STOLEN) {
               xp_send_lok_stolen(orgz_old_lok_owner , addr);
             }
             processed = 1;
-            // no response is given
           }
           else {
             xp_send_busy();             // we are busy
@@ -941,10 +927,10 @@ void xp_parser(void)
               if (organizer_ready()) {
                 retval = do_loco_func_grp0(current_slot, addr, rx_message[4]>>4); // light, f0
                 retval |= do_loco_func_grp1(current_slot, addr, rx_message[4]);
-                if (retval & (1<<ORGZ_STOLEN)) {
+                if (retval & ORGZ_STOLEN) {
                   xp_send_lok_stolen(orgz_old_lok_owner, addr);
                 } 
-                processed = 1;              // no response is given
+                processed = 1;
               }
               else {
                 xp_send_busy();             // we are busy
@@ -954,11 +940,10 @@ void xp_parser(void)
             case 1:          // Hex : 0xE4 0x21 AH AL Gruppe 2 X-Or-Byte   (Gruppe 2: 0000FFFF) f8...f5
               if (organizer_ready()) {
                 retval = do_loco_func_grp2(current_slot, addr, rx_message[4]);
-                if (retval & (1<<ORGZ_STOLEN) )
-                  {
+                if (retval & ORGZ_STOLEN) {
                     xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                  } 
-                processed = 1;                // no response is given
+                } 
+                processed = 1;
               }
               else {
                 xp_send_busy();             // we are busy
@@ -968,27 +953,25 @@ void xp_parser(void)
             case 2:          // Hex : 0xE4 0x22 AH AL Gruppe 3 X-Or-Byte   (Gruppe 3: 0000FFFF) f12...f9
               if (organizer_ready()) {
                 retval = do_loco_func_grp3(current_slot, addr, rx_message[4]);
-                if (retval & (1<<ORGZ_STOLEN) )
-                  {
+                if (retval & ORGZ_STOLEN) {
                     xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                  } 
-                processed = 1;// no response is given
+                } 
+                processed = 1;
               }
-              else  {
-                  xp_send_busy();             // we are busy
-                  processed = 1;
+              else {
+                xp_send_busy();             // we are busy
+                processed = 1;
               }
               break;
             case 3:          // Hex : 0xE4 0x23 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
               if (organizer_ready()) {
                 #if (DCC_F13_F28 == 1)
                 retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
-                if (retval & (1<<ORGZ_STOLEN)) {
+                if (retval & ORGZ_STOLEN) {
                   xp_send_lok_stolen(orgz_old_lok_owner, addr);
                 }
                 #endif
                 processed = 1;
-                // no response is given
               }
               else {
                 xp_send_busy();             // we are busy
@@ -1011,13 +994,11 @@ void xp_parser(void)
               if (organizer_ready()) {
                 #if (DCC_F13_F28 == 1)
                 retval = do_loco_func_grp5(current_slot, addr, rx_message[4]);
-                if (retval & (1<<ORGZ_STOLEN) )
-                  {
+                if (retval & ORGZ_STOLEN) {
                     xp_send_lok_stolen(orgz_old_lok_owner, addr);
-                  }
+                }
                 #endif
                 processed = 1;
-                // no response is given
               }
               else {
                 xp_send_busy();             // we are busy
@@ -1105,12 +1086,11 @@ void xp_parser(void)
                 #if (DCC_F13_F28 == 1)
                   addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
                   retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
-                  if (retval & (1<<ORGZ_STOLEN)) {
+                  if (retval & ORGZ_STOLEN) {
                     xp_send_lok_stolen(orgz_old_lok_owner, addr);
                   }
                 #endif
                 processed = 1;
-                // no response is given
               }
               else {
                 xp_send_busy();             // we are busy
@@ -1121,9 +1101,8 @@ void xp_parser(void)
           break;
       }
   }
-  if (!processed) 
-  {
-    xp_send_message_to_current_slot(tx_ptr = xp_unknown);            // unknown command
+  if (!processed) {
+    xp_send_message_to_current_slot(tx_ptr = xp_unknown); // unknown command
   }
 } // xp_parser
 
@@ -1155,15 +1134,13 @@ enum xp_states { // actual state for the Xpressnet Task
   XP_WAIT_FOR_ANSWER_COMPLETE,        // Our answer complete sent?
   XP_CHECK_BROADCAST,                 // is there a broadcast event
   XP_CHECK_FEEDBACK,                  // is there a feedback event
-  XP_CHECK_STOLEN_LOK,
   XP_CHECK_DATABASE,                  // is there a database transfer
 } xp_state;
 
 signed char slot_timeout;
 uint32_t rx_timeout; // zelfde eenheid als millis()
 
-void run_xpressnet(void)
-{
+void run_xpressnet() {
   switch (xp_state) {
     case XP_INIT:
       // we supose this is done: init_timer2(); // running with 4us per tick
@@ -1172,7 +1149,7 @@ void run_xpressnet(void)
 
     case XP_INQUIRE_SLOT:
       current_slot = get_next_slot();
-      XP_send_call_byte (0x40 | current_slot);          // this is a normal inquiry call
+      XP_send_call_byte (CALL_ID | current_slot);          // this is a normal inquiry call
       xp_state = XP_WAIT_FOR_TX_COMPLETE;
       break;
 
@@ -1256,57 +1233,34 @@ void run_xpressnet(void)
       break;
 
     case XP_CHECK_FEEDBACK:
-      /* SDS - we gaan dit moeten vervangen door een non-S88 mechanisme!!
-        if ((s88_event.hardware_change_xp) || (s88_event.turnout_change_xp))
-          {
-            make_s88_xpressnet_report();                         // send broadcast: feedback events
-            xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-          }
-      SDS */
-      xp_state = XP_CHECK_STOLEN_LOK;                         // xp_state = XP_INQUIRE_SLOT;
-      break;
-
-    case XP_CHECK_STOLEN_LOK:
-      if (organizer_state.lok_stolen_by_pc) {
-        xp_send_stolen_loks();                              // report any Status Change on loks
-        xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-      }
-      else {
-        #if (LOCO_DATABASE == NAMED)
-          if (db_message_ready) xp_state = XP_CHECK_DATABASE;
-          else xp_state = XP_INQUIRE_SLOT;
-        #else
-          xp_state = XP_INQUIRE_SLOT;
-        #endif
-      }
+      // SDS : we don't do S88, feedback comes over xpressnet, so don't need this state anymore
+      xp_state = XP_CHECK_DATABASE;
       break;
 
     case XP_CHECK_DATABASE:
-      #if (LOCO_DATABASE == NAMED)
-        if (db_message_ready == 1) {
-          xp_send_message(MESSAGE_ID | 0, db_message);     // send this as MESSAGE (normal download)
-        }
-        else {
-          xp_send_message(CALL_ID | 0, db_message);           // send this as 'CALL',
-        }                                                  // it looks like coming from a client
-                                                            // (Roco has done this hack!)
+      if (db_message_ready == 0) {
+        xp_state = XP_INQUIRE_SLOT;
+      }
+      else {
+        if (db_message_ready == 1)
+          xp_send_message(MESSAGE_ID | 0, db_message);   // send this as MESSAGE (normal download)
+        else
+          xp_send_message(CALL_ID | 0, db_message);      // send this as 'CALL' (Roco hack, info W.Kufer)
+        // TODO SDS2021 : toch maar een vieze implementatie, maar allee
         db_message_ready = 0;
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
-      #endif
+      }                                                  
       break;
   }
 } // run_xpressnet
 
-
-void init_xpressnet(void)
-{
+void init_xpressnet() {
   xp_state = XP_INIT;
 } // init_xpressnet
 
-
 #else // #if (XPRESSNET_ENABLED == 1)
 
-void init_xpressnet(void) {};
-void run_xpressnet(void) {};
+void init_xpressnet() {};
+void run_xpressnet() {};
 
 #endif // #if (XPRESSNET_ENABLED == 1)

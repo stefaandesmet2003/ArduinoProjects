@@ -50,6 +50,8 @@
 
 */
 
+#include "Arduino.h"
+#include "hardware.h"   // hardware definitions
 #include "config.h"     // general structures and definitions
 #include "status.h"
 
@@ -129,9 +131,9 @@ void timeout_tick_5ms(void)
 //---------------------------------------------------------------------------------
 // set_opendcc_state(t_opendcc_state next)
 //
-// Einstellen des nï¿½chsten Zustand mit:
-// - Stellen entsprechender Bits in der Hardware und Rï¿½cksetzen der
-//   ï¿½berwachungstasks ->
+// Einstellen des nächsten Zustand mit:
+// - Stellen entsprechender Bits in der Hardware und Rücksetzen der
+//   überwachungstasks ->
 //   damit wird nach "power on" wieder Strom auf den Ausgang gelegt.
 // - Stellen der LEDs
 // - Setzen der globalen Variablen, fallweise Nachricht an den Host
@@ -184,7 +186,7 @@ void set_opendcc_state(t_opendcc_state next)
       prog_off();
       main_off();
       break;
-    case RUN_PAUSE:                 // DCC Running, all Engines Speed 0
+    case RUN_PAUSE:                 // DCC Running, all Engines Speed 0, SDS TODO : wordt nog niet gebruikt
       prog_off();
       main_on();
       break;
@@ -249,10 +251,28 @@ void dcc_fast_clock_step_5ms(void)
 #endif // DCC_FAST_CLOCK
 
 // Hinweis: RUN_PAUSE wird zur Zeit nicht angesprungen
-// SDS TODO 2021: als er EXT_STOP is én een short, dan flippert de run_state continu tussen de 2
-// en krijgen we massaal veel events -> kan beter
+// SDS TODO 2021: als er EXT_STOP is én een short, dan flippert de run_state continu tussen de RUN_OFF en RUN_SHORT
+// en krijgen we massaal veel events -> opgelost door hier RUN_SHORT niet meer te gebruiken!
+// SDS TODO 2O21 : RUN_SHORT, PROG_SHORT states nog nodig? willen we een andere afhandeling dan voor RUN_OFF / PROG_OFF?
 void run_state(void)
 {
+  // check main short
+  if ((opendcc_state != RUN_OFF) && (opendcc_state != PROG_OFF)) {
+    if (main_short_check() == true)
+    {
+      set_opendcc_state(RUN_OFF);
+      if (hwEvent_Handler)
+        hwEvent_Handler(HWEVENT_MAINSHORT);
+    }
+    // check prog short
+    if (prog_short_check() == true)
+    {
+      set_opendcc_state(PROG_OFF);
+      if (hwEvent_Handler)
+        hwEvent_Handler(HWEVENT_PROGSHORT);
+    }
+  }
+  // 5ms loop
   if ((millis() - runState5msLastMillis) > 5) {
     runState5msLastMillis = millis();
     timeout_tick_5ms();
@@ -262,7 +282,7 @@ void run_state(void)
     #endif
 
     // check external stop
-    // TODO : remove analogRead, want die is traag
+    // TODO : EXT_STOP_ACTIVE is analogRead want A6 pin is analog only, dus traag
     // is 5ms response time op EXT_STOP echt nodig?
     if ((ext_stop_enabled) && (opendcc_state != RUN_OFF))
     {
@@ -276,26 +296,10 @@ void run_state(void)
       }
     }
   }
-  // check main short
-  if ((opendcc_state != RUN_SHORT) && (opendcc_state != PROG_SHORT)) {
-    if (main_short_check() == true)
-    {
-      set_opendcc_state(RUN_SHORT);
-      if (hwEvent_Handler)
-        hwEvent_Handler(HWEVENT_MAINSHORT);
-    }
-    // check prog short
-    if (prog_short_check() == true)
-    {
-      set_opendcc_state(PROG_SHORT);
-      if (hwEvent_Handler)
-        hwEvent_Handler(HWEVENT_PROGSHORT);
-    }
-  }
 } // run_state
 
 // returns true, if we are in prog state
-// sds, houden, gebruikt door lenz_parser
+// SDS : for now only used by lenz config, no need to remove here, compiler will optimize
 bool is_prog_state(void)
 {
   bool retval = true;
@@ -317,7 +321,6 @@ bool is_prog_state(void)
   }
   return(retval);
 } // is_prog_state
-
 // return : false = no_short (ook tijdens de fast recovery), true = short
 // mijn eigen implementatie, kan beter want in praktijk is er nooit recovery
 static bool main_short_check()

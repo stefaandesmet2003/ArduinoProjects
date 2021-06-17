@@ -26,62 +26,35 @@
 //
 //-----------------------------------------------------------------
 
-#if (LOCO_DATABASE == NAMED)
-typedef struct
-  {
-    union
-      {
-        struct
-          {
-            unsigned int addr:14;
-            t_format format:2;
-          } w;
-        unsigned char b[sizeof(unsigned int)];
-      } ;
-    union
-      {
-        unsigned int pid;                             // picture ID
-        unsigned char pid_b[sizeof(unsigned int)];
-      } ;
-    unsigned char name[LOK_NAME_LENGTH];          // multiMaus supports up to 5 chars
-  } t_locoentry;
+typedef struct {
+  union {
+    struct {
+        unsigned int addr:14;
+        unsigned int format:2;
+    } w;
+    unsigned char b[sizeof(unsigned int)];
+  };
+  unsigned char name[LOK_NAME_LENGTH];          // multiMaus supports up to 5 chars
+} locoentry_t;
 
-  extern unsigned char db_message[17]; 
-  extern unsigned char db_message_ready;            // interface flag to Xpressnet
+// TODO SDS2021 : steek dit in de public interface ipv global vars
+extern unsigned char db_message[17]; 
+extern unsigned char db_message_ready;            // interface flag to Xpressnet
 
-  void init_database(void);           // at power up
+void init_database();           // at power up
+void run_database();            // multitask replacement, call in loop
+void do_xmit_database();        // start transfer on Xpressnet
 
-  void rewind_database(void);         // before dump, do a rewind
+void clear_loco_database();     // delete all entries
+void reset_loco_database();     // factory reset the entries
+unsigned char get_loco_data(locoentry_t *actual);
+t_format get_loco_format(unsigned int addr);   // if loco not in data base - we return default format
+//TODO SDS2021, is het niet beter om een get_loco_data (addr, locoentry_t*) te hebben??
+// we willen de data ook voor local ui makkelijk uit de db halen
+uint8_t get_loco_name(unsigned int addr, uint8_t *name); // sds temp??
+unsigned char store_loco_format(unsigned int addr, t_format format);
+unsigned char store_loco_name(unsigned int addr, unsigned char * name);
 
-  void run_database(void);            // multitask replacement, call in loop
-
-  void do_xmit_database(void);        // start transfer on Xpressnet
-
-  void clear_loco_database(void);     // delet all
-
-  void dump_loco_database(void);
-
-  unsigned char get_loco_data(t_locoentry *actual);
-
-  t_format get_loco_format(unsigned int addr);   // if loco not in data base - we return default format
-
-  unsigned char format_to_uint8(t_format myformat);
-
-  unsigned char store_loco_format(unsigned int addr, t_format format);
-
-  unsigned char store_loco_name(unsigned int addr, unsigned char * name);
-
-#else  // (LOCO_DATABASE == NAMED)
-
-  void init_database(void);
-
-  t_format get_loco_format(unsigned int addr);
-
-  unsigned char format_to_uint8(t_format myformat);
-
-  unsigned char store_loco_format(unsigned int addr, t_format format);
-
-#endif // (LOCO_DATABASE == NAMED)
 
 
 

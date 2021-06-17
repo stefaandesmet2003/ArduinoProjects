@@ -1,6 +1,8 @@
 #ifndef __RS485_H__
 #define __RS485_H__
 
+#include "hardware.h"
+
 #define HARDWARE_SET_XP_RECEIVE    digitalWrite(RS485_DERE,RS485Receive)
 #define HARDWARE_SET_XP_TRANSMIT   digitalWrite(RS485_DERE,RS485Transmit)
 

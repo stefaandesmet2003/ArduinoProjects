@@ -6,6 +6,8 @@
 #include "ui.h"
 #include "appstub.h"
 
+#include "database.h" // for loco database transmission test
+
 #define FOCUS_PIJLKE 0x7E
 
 // ui events
@@ -48,7 +50,8 @@ uint8_t ui_Page; // om door de functies & wissels te scrollen
 uint16_t ui_CurLoc, ui_NewLoc; // loc addr geselecteerd in UI
 uint32_t ui_CurLocFuncs; // bit field met functies 0 (light) tot 28;
 uint8_t ui_CurSpeed = 0 | DIRECTION_FORWARD ;
-char ui_locName[8]; // holds a string with a locname to display (improve this!)
+// TODO SDS2021, die 10 = LOK_NAME_LENGTH uit config.h
+char ui_locName[10]; // holds a string with a locname to display (improve this!)
 // dcc128 convention : highest bit in uint8_t speed is direction
 
 extern LiquidCrystal_I2C lcd;
@@ -209,7 +212,7 @@ static bool ui_doTestMenu (uint8_t key) {
   if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
     return false;
 
-  if ((keyCode == KEY_KEY1) || (keyCode == KEY_KEY4)) {
+  if (keyCode == KEY_KEY1) {
     ui_State = UISTATE_DEFAULT; // back // eventueel een long event gebruiken om direct terug te keren
   }
   else if (keyCode == KEY_KEY2) {
@@ -222,8 +225,29 @@ static bool ui_doTestMenu (uint8_t key) {
     app_DoExtendedAccessory (1,1, signalHeads[1]); // (decoderAddress, signalHead,signalAspect)
     signalHeads[1] = (signalHeads[1] + 1) % 9; // loop through aspects 0..8
   }
+  else if (keyCode == KEY_KEY4) {
+    // test loco database transmission
+    do_xmit_database();
+  }
   return true;
 } // ui_doTestMenu
+
+static bool ui_doSetupMenu (uint8_t key) {
+  uint8_t keyCode, keyEvent;
+  bool keyHandled = false;
+
+  keyCode = key & KEYCODEFILTER;
+  keyEvent = key & KEYEVENTFILTER;
+  // ignore key up/longdown for now
+  if ((keyEvent == KEYEVENT_UP) || (keyEvent == KEYEVENT_LONGDOWN))
+    return false;
+
+  if (ui_State == UISTATE_SETUP_PAGE1) {
+      ui_State = UISTATE_DEFAULT;
+      keyHandled = true;
+  }
+  return (keyHandled);
+} // ui_doSetupMenu
 
 static bool ui_doProgMenu (uint8_t key) {
   uint8_t keyCode, keyEvent;
@@ -306,6 +330,20 @@ static void ui_ShowAddr (uint16_t myAddr) {
   lcd.print(":");
 } // ui_ShowSpeed
 
+// test
+static void ui_ShowCurrent() {
+  int a7, mA;
+  char tmpString[5];
+  lcd.setCursor(5,0);
+  a7 = analogRead(A7);
+  if (a7>=4) mA = (a7-4)*8; // experimental conversion
+  else mA = 0;
+  //snprintf(tmpString,5,"%04d",mA);
+  snprintf(tmpString,5,"%4d",mA); 
+  lcd.print(tmpString);
+  lcd.print("mA");
+}
+
 // line : 0,1,2,3
 static void clearLine (int line)
 {
@@ -327,10 +365,18 @@ bool backlightOn = true; // reduce i2c accesses
 #define REFRESH_DELAY       200
 #define BACKLIGHTOFF_DELAY  10000
 
+uint32_t updateCurrentLastMillis; // test
+
 void ui_Update () {
   if (backlightOn && ((millis() - updateLastMillis) > BACKLIGHTOFF_DELAY)) {
     lcd.setBacklight(0);
     backlightOn = false;
+  }
+
+  // for test
+  if ( (millis() - updateCurrentLastMillis) > 500) {
+    ui_ShowCurrent(); // for test
+    updateCurrentLastMillis = millis();
   }
 
   // vermijden dat bij elke rot-key een refresh gebeurt, want dan werkt de speedup feature niet
@@ -380,7 +426,8 @@ void ui_Update () {
       lcd.setCursor (0,3);
       lcd.print("back  ");
       ui_ShowLocFuncs(ui_Page);
-      lcd.print(" ->");
+      lcd.setCursor(18,3);
+      lcd.print("->");
       return;
     }
     else if (ui_State == UISTATE_LOC_DO_ADDR) {
@@ -422,8 +469,8 @@ void ui_Update () {
     lcd.setCursor(0,0);
     lcd.print("TEST ");
     lcd.setCursor(0,1);
-    lcd.print("Test seinbeeld ");
-    lcd.setCursor(0,3); lcd.print("back   1   2");
+    lcd.print("Test funcs ");
+    lcd.setCursor(0,3); lcd.print("back sig1 sig2 DB TX");
     return;
   }
   else if (ui_State == UISTATE_PROG_PAGE1) {
@@ -551,6 +598,8 @@ void keys_Handler (key_t key) {
   keyHandled = ui_doAccMenu (key);
   if (keyHandled) return;
   keyHandled = ui_doTestMenu (key);
+  if (keyHandled) return;
+  keyHandled = ui_doSetupMenu (key);
   if (keyHandled) return;
   keyHandled = ui_doProgMenu (key);
   if (keyHandled) return;

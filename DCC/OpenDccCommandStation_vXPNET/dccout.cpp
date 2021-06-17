@@ -17,7 +17,7 @@
 //            2006-05-19 V0.2 long preambles if PROG_TRACK_STATE = ON
 //            2006-06-13 V0.3 Bugfix: TC1R no usable as state
 //            2006-09-30 V0.4 added check for F_CPU, added code proposal
-//                            for Mï¿½rklin MM1 and MM2 (not tested)
+//                            for Märklin MM1 and MM2 (not tested)
 //            2007-03-19 V0.5 added code for FEEDBACK
 //            2007-03-27 V0.6 added check for hardware.h
 //            2008-07-09 V0.7 interrupt processor dependant
@@ -35,6 +35,8 @@
 //
 //-----------------------------------------------------------------
 
+#include "Arduino.h"
+#include "hardware.h"               // hardware definitions
 #include "config.h"                 // general structures and definitions
 #include "dccout.h"                 // import own header
 
@@ -75,15 +77,15 @@
 //         0001CCCC 0AAAAAAA  consist control
 // 001     Erweiterte Funktionen des Dekoders steuern
 //         00111111 DDDDDDDD  speed step control
-// 010     Geschwindigkeit fï¿½r Rï¿½ckwï¿½rtsfahrt
-// 011     Geschwindigkeit fï¿½ur Vorwï¿½artsfahrt
+// 010     Geschwindigkeit für Rückwärtsfahrt
+// 011     Geschwindigkeit für Vorwärtsfahrt
 // 100     Hilfsfunktion aus Gruppe 1 steuern
 //         100DDDDD           DDDDD = FL, F4, F3, F2, F1
 // 101     Hilfsfunktion aus Gruppe 2 steuern
 //         two modes:
 //         1011DDDD           DDDD = F8, F7, F6, F5
 //         1010DDDD           DDDD = F12, F11, F10, F9
-// 110     Reserviert fï¿½r zukï¿½nftige Erweiterungen
+// 110     Reserviert für zukünftige Erweiterungen
 // 111     Zugriff auf Konfguration-Variablen
 //         1110CCAA AAAAAAAA DDDDDDDD
 //         CC = 00 (reserved), 01=Verify, 11=write, 10 bit set
@@ -223,18 +225,8 @@ volatile unsigned char next_message_count;
 
 //----------------------------------------------------------------------------------------
 // Optimierter Code
-// folgende Tricks:
-//  a) doi.phase wird direkt von PIND zurï¿½ckgelesen, damit entfï¿½llt der Memoryzugriff
-//  b) doi.state wird in MY_STATE_REG[7..5] abgelegt - schnell abzufragen
-//  c) kein switch fï¿½r doi.state, sondern if else
-//  d) doi.bits_in_state wird in MY_STATE_REG[4...0] abgelegt. MY_STATE_REG ist
-//     damit *die* zentrale globale Variable, die den Zustand der ISR abbildet.
-//  e) do_send nicht als call, sondern direkt als inline call
-//  f) Mit einem #define DCCOUT_STATE_REG auf ein IO-Register des Prozessors
-//     kann die ISR noch weiter beschleunigt werden -> dieses IO-Register
-//     wird dann als globale Variable fï¿½r MY_STATE_REG misbraucht. 
 //
-// Optimizimg code
+// Optimizing code
 // following tricks
 // a) read back of doi.phase from PIND - shorter then memory access
 // b) doi.state is allocated at MY_STATE_REG[7..5] - fast access
@@ -242,10 +234,9 @@ volatile unsigned char next_message_count;
 // d) doi.bits_in_state are allocated at MY_STATE_REG[4..0] - fast access
 //    MY_STATE_REG is *the* central variable!
 // e) do_send() is not called, but compiled as inline code
-// f) MY_STATE_REG is mapped to an unused IO port of the atmel
+// f) MY_STATE_REG is mapped to an unused IO port of the atmel, and misused as global variable
 //    -> #define DCCOUT_STATE_REG 
 //----------------------------------------------------------------------------------------
-
 
 static inline void do_send(bool myout) __attribute__((always_inline));
 void do_send(bool myout)
@@ -343,8 +334,7 @@ ISR(TIMER1_COMPA_vect) {
   // two phases: phase 0: just repeat same duration, but invert output.
   //             phase 1: create new bit.
   // we use back read of PIND instead of phase
-  //SDS : aanpassen voor atmega328 : DCC zit op PB1
-  //SDS if (!(PIND & (1<<DCC)))  //was: (doi.phase == 0)
+  //SDS : adapted to atmega328 : DCC is on PB1
   if (!(PINB & 0x2))  //was: (doi.phase == 0)
   {
     if ((state == DOI_CUTOUT_2) && doi.railcom_enabled) {
@@ -363,14 +353,10 @@ ISR(TIMER1_COMPA_vect) {
               | (1<<COM1B1) | (0<<COM1B0)  //  clear OC1B (=NDCC) on compare match
               | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
               | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
-      //was: doi.phase = 1;
       return;  
     }
   }
-  //was: doi.phase = 0;
-
   //     register unsigned char state = MY_STATE_REG & ~DOI_CNTMASK;    // take only 3 upper bits
-
   if (state == DOI_IDLE) {
     do_send(1);
 
@@ -466,7 +452,6 @@ void init_dccout(void)
     do_send(1);                         // init COMP regs.
 
     // setup timer 1
-
     TCNT1 = 0;    // no prescaler
 
      // note: DDR for Port D4 and D5 must be enabled
@@ -475,25 +460,13 @@ void init_dccout(void)
            | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
            | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
                                           //  TOP is OCR1A
-
     TCCR1B = (0<<ICNC1)  | (0<<ICES1)   // Noise Canceler: Off
            | (0<<WGM13)  | (1<<WGM12)
            | (0<<CS12)   | (0<<CS11) | (1<<CS10);  // no prescaler, source = sys_clk
 
 
-    #if (__AVR_ATmega644P__)
-        TIMSK1 |= (1<<OCIE1A);          // Output Compare A
-    #elif (__AVR_ATmega644__)
-        #error:  undefinded - read manual!
-    #elif (__AVR_ATmega32__)
-        TIMSK |= (1<<OCIE1A);          // Output Compare A
-    #elif (__AVR_ATmega328P__) // SDS arduino heeft atmega328 en heeft TIMSK1 register
-       TIMSK1 |= (1<<OCIE1A);
-    #else 
-      //#error:  undefined
-    #endif
+    TIMSK1 |= (1<<OCIE1A);
   }
-
 
 #endif   //  DCCISR_IS_OPTIMIZED
 
@@ -516,7 +489,7 @@ void init_dccout(void)
 void dccout_enable_cutout(void)
   {
     // eigentlich sollte man doi.state abfragen, um auch beim ersten mal synchron die cutout zu erzeugen
-    // aber DCC wirds ï¿½berleben.
+    // aber DCC wirds überleben.
     doi.railcom_enabled = 1;
   }
 
@@ -534,7 +507,7 @@ unsigned char dccout_query_cutout(void)
 // #define MAERKLIN_ENABLED
 //======================================================================
 //
-// Support fï¿½r Mï¿½rklin Format
+// Support for Märklin Format
 // 
 // Achtung:
 // folgender Code nur mal probehalber hingeschrieben,
@@ -546,7 +519,7 @@ unsigned char dccout_query_cutout(void)
 
 
 // Maerklin benutzt sog. Trits (dreiwertige Logik), welche sich auf
-// 4-wertige Logik abbilden lï¿½ï¿½t.
+// 4-wertige Logik abbilden lässt.
 //
 // Trit "0":    1000000010000000  = 0 0
 // Trit "1":    1111111011111110  = 1 1
@@ -555,8 +528,8 @@ unsigned char dccout_query_cutout(void)
 // Ersatzbits:  |------||------| ----^
 
 
-// Bei MM2 sind sogar manche Zustï¿½nde "0 1" der 4-wertigen Logik
-// zusï¿½tzlich als valid deklariert.
+// Bei MM2 sind sogar manche Zustände "0 1" der 4-wertigen Logik
+// zusätzlich als valid deklariert.
 
 // Ergo bauen wir hier eine Maschine, welche die Ersatzbits ausgeben
 // kann. Benutzt wird der Timer 1 im Fast PWM-Mode 14; der Topvalue
@@ -564,7 +537,7 @@ unsigned char dccout_query_cutout(void)
 // Die Flanke in der Mitte wird als PWM-Wert gestellt - je nach Wert
 // des Ersatzbits mal vorne bei 1/8 (=0) oder hinten bei 7/8 (=1)
 //
-// Diese Maschine muï¿½ mit den "aufgeblasenen" Trits gefï¿½ttert werden.
+// Diese Maschine muss mit den "aufgeblasenen" Trits gefüttert werden.
 // Je MM-Message sind 9 Trits verwendet: 4 Trit Adresse, 1 Funktion,
 // 4 Trit Daten. Diese werden wie folgt in next_message hinterlegt:
 //
@@ -577,13 +550,13 @@ unsigned char dccout_query_cutout(void)
 // wird festgelegt, ob es sich um einen Lokbefehl oder einen Weichenbefehl
 // handelt.
 
-// Adresserweiterung gemï¿½ï¿½ Intellibox
+// Adresserweiterung gemäss Intellibox
 // Entnommen aus: http://home.arcor.de/dr.koenig/digital/verbess.htm
-// Dort auch Vorschlï¿½ge fï¿½r Zwischenfahrstufen
+// Dort auch Vorschläge für Zwischenfahrstufen
 //
 // Diese Tabelle codiert aus der Adresse die im MM-Format verwendete
-// Bitfolge; Adresse 0..80 ist mit den normalen trinï¿½ren Zustï¿½nden
-// codiert, ab Adresse 81 kommt der ursprï¿½nglich nicht vorhandene
+// Bitfolge; Adresse 0..80 ist mit den normalen trinären Zuständen
+// codiert, ab Adresse 81 kommt der ursprünglich nicht vorhandene
 // Zustand 01 (hier mit short bezeichnet) dazu.
 //
 // Die Ausgabe erfolgt MSB first
@@ -851,7 +824,7 @@ unsigned char addr_2_trit[256] PROGMEM =
     };
 
 
-// ï¿½bersetzung von Speed nach Trit fï¿½r das alte MM1 Format
+// übersetzung von Speed nach Trit für das alte MM1 Format
 
 unsigned char speed_2_trit[16]  PROGMEM =
     {
@@ -876,8 +849,8 @@ unsigned char speed_2_trit[16]  PROGMEM =
 
 
 // Bei MM2 sind folgende Neuerungen dazugekommen:
-// Die Zustï¿½nde open und short werden auch bei den Datenbits
-// mitverwendet und fï¿½r folgende Codierung verwendet:
+// Die Zustände open und short werden auch bei den Datenbits
+// mitverwendet und für folgende Codierung verwendet:
 // 1. Speed und Direction
 // 2. Speed und Funktion f1
 // 3. Speed und Funktion f2
@@ -895,7 +868,7 @@ unsigned char speed_2_trit[16]  PROGMEM =
 //
 // Diese Tabellen werden hier als Array abgelegt:
 // Zugriff mit: mm2_speed_2_trit[speed][dir]
-// dir = 0: vorwï¿½rts (nicht wie DCC); 1=rï¿½ckwï¿½rts
+// dir = 0: vorwärts (nicht wie DCC); 1=rückwärts
 //
 unsigned char mm2_speed_dir_2_trit[16][2]  PROGMEM =
   {
@@ -919,7 +892,7 @@ unsigned char mm2_speed_dir_2_trit[16][2]  PROGMEM =
 
 //
 // Tabelle zur Umsetzung der Funktion zusammen mit der Speed.
-// Die nachfolgende Tabelle berï¿½cksichtigt auch die Ausnahmen.
+// Die nachfolgende Tabelle berücksichtigt auch die Ausnahmen.
 // Zugriff mit: mm2_speed_funct_2_trit[speed][func][state]
 // func = f1,f2,f3,f4, state = on off
 
@@ -1192,4 +1165,3 @@ void init_mmout(void)
 
 
 #endif // MAERKLIN_ENABLED
-

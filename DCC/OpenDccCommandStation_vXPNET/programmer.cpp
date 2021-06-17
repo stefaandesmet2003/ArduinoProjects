@@ -52,17 +52,19 @@
 // LINK:      http://ruppweb.dyndns.org/xray/comp/decoder.htm
 //            (calculate long addresses)
 
+#include "Arduino.h"
 #include "config.h"                // general structures and definitions
+#include "hardware.h"              // hardware definitions (ack detection)
 #include "status.h"                // timeout engine, set_state
 #include "dccout.h"                // next message
 #include "organizer.h"
 #include "programmer.h"
 //
 // Es gibt drei "switch-Schleifen", damit auch umfangreichere Kommandos
-// im quasi Multitasking durchgebracht werden kï¿½nnen. Jede Schleife
+// im quasi Multitasking durchgebracht werden können. Jede Schleife
 // hat einen State, wenn dieser IDLE ist, dann ist diese Schleife fertig;
 // 
-// Gestartet wird eine Aufgabe durch setzen der Variablen und anschlieï¿½end
+// Gestartet wird eine Aufgabe durch setzen der Variablen und anschliessend
 // umstellen des State auf "START".
 //
 //   PI: Programmer Inner Loop (die Kommandos am Gleis)
@@ -93,12 +95,12 @@
 //          (set curve)
 //
 // Besonderheit beim direkten Lesen eines Bytes per DCC:
-// OpenDCC prï¿½ft vorher nach, ob der Decoder Bitoperationen beherrscht.
+// OpenDCC prüft vorher nach, ob der Decoder Bitoperationen beherrscht.
 // Falls ja, wird das Byte mit den Bitbefehlen gelesen und dann noch
-// gegengeprï¿½ft. Fall nein, wird konventionell mit einer Suchschleife
-// ï¿½ber alle 256 mï¿½glichen Zustï¿½nde gesucht.
-// OpenDCC merkt sich fï¿½r 500ms, ob der Decoder Bitoperationen kann, damit
-// entfï¿½llt automatisch die erneute Prï¿½fung bei mehreren Lesebefehlen.
+// gegengeprüft. Fall nein, wird konventionell mit einer Suchschleife
+// über alle 256 möglichen Zustände gesucht.
+// OpenDCC merkt sich für 500ms, ob der Decoder Bitoperationen kann, damit
+// entfällt automatisch die erneute Prüfung bei mehreren Lesebefehlen.
 //
 //=====================================================================
 //
@@ -293,7 +295,7 @@ void enter_progmode(void)
         case RUN_OKAY:
         case RUN_STOP:                  // DCC Running, all Engines Emergency Stop
         case RUN_OFF:                   // Output disabled (2*Taste, PC)
-        case RUN_SHORT:                 // Kurzschluï¿½
+        case RUN_SHORT:                 // Kurzschluss
         case RUN_PAUSE:                 // DCC Running, all Engines Speed 0
 
             opendcc_state_before_prog = opendcc_state;
@@ -331,7 +333,7 @@ void leave_progmode(void)
         case RUN_OKAY:
         case RUN_STOP:             // DCC Running, all Engines Emergency Stop
         case RUN_OFF:              // Output disabled (2*Taste, PC)
-        case RUN_SHORT:            // Kurzschluï¿½
+        case RUN_SHORT:            // Kurzschluss
         case RUN_PAUSE:            // DCC Running, all Engines Speed 0
             set_opendcc_state(opendcc_state_before_prog);
             break;
@@ -852,7 +854,7 @@ void run_programmer(void)
                 case PSC_DCCWP:                     // write dcc byte, paged mode 
                 case PSC_DCCRP:                     // read dcc byte, paged mode (byteweise)
                     // paged mode ist wie register mode, nur wird voher in Register 6 die Seite
-                    // geschrieben, und ï¿½ber Register 1..4 darauf zugegriffen;
+                    // geschrieben, und über Register 1..4 darauf zugegriffen;
                     //
                     // CV = 1 + (RRR + 4 * (mypage-1))
                     //

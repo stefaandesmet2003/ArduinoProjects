@@ -43,7 +43,7 @@
 //
 //-----------------------------------------------------------------
 
-// SDS TODO2021 : dit is vies, kan dit niet weg?
+// SDS TODO2021 : dit is vies, kan dit niet weg? (maw. locobuffer enkel te gebruiken door organizer??)
 extern locomem locobuffer[SIZE_LOCOBUFFER];      // refresh
 
 // ---------------------------------------------------------------------------------
@@ -60,31 +60,27 @@ extern t_message DCC_Idle;    // DCC-Idle-Paket
 void init_organizer(void);                                      // must be called once at program start
 void run_organizer(void);                                       // must be called in a loop!
 
+// TODO SDS2021 : is dit nog nodig?
 typedef struct 
 {
   unsigned char halted: 1;                    // if != 0: speed commands are locally forced to zero
-  unsigned char lok_stolen_by_pc: 1;          // lok has been stolen by pc control
-  unsigned char lok_stolen_by_handheld: 1;    // lok has been stolen by handheld (control transfer)
-  unsigned char lok_operated_by_handheld: 1;  // lok has been manual operated
-  unsigned char turnout_by_handheld: 1;       // there was an turnout operation from handheld
+  unsigned char unused: 7;
 } t_organizer_state;
 
 extern t_organizer_state organizer_state; 
 
 // -- routines for command entry
 // -- all do_*** routines have the same return values
-#define ORGZ_SLOW_DOWN  0    // Bit 0: last entry to locobuffer slowed down
-#define ORGZ_STOLEN     1    // Bit 1: locomotive has been stolen
-#define ORGZ_NEW        2    // Bit 1: new entry created for locomotive
-#define ORGZ_FULL       7    // Bit 7: organizer fully loaded
+#define ORGZ_SLOW_DOWN  0x1    // Bit 0: last entry to locobuffer slowed down
+#define ORGZ_STOLEN     0x2    // Bit 1: locomotive has been stolen
+#define ORGZ_NEW        0x4    // Bit 2: new entry created for locomotive
+#define ORGZ_FULL       0x80   // Bit 7: organizer fully loaded
 
 // Note on stolen locomotives:
-// a) stolen by handheld: 
-// a1) from other handheld: return flag 'stolen', orginal owner in orgz_old_lok_owner
-// a2) from PC: return flag 'stolen', global flag 'lok_stolen_by_handheld'; loco_buffer.owner_changed is set.        
-// b) stolen by PC:
-//    return flag 'stolen', global flag 'lok_stolen_by_pc'; loco_buffer.'owner_changed' is set, original owner
-//    is kept in locobuffer.slot
+// SDS modified:
+// old_slot==0 -> notify local UI
+// old_slot!=0 -> notify old_slot over xpnet
+// pc is just another xpnet device
 
 extern unsigned char orgz_old_lok_owner;
 bool organizer_ready(void);                                     // true if command can be accepted
@@ -130,7 +126,6 @@ t_format get_loco_format(unsigned int addr);                                   /
 unsigned char store_loco_format(unsigned int addr, t_format format);
 unsigned int addr_inquiry_locobuffer(unsigned int addr, unsigned char dir);    // returns next addr in buffer
 void delete_from_locobuffer(unsigned int addr);
-bool do_searchid(t_unique_id* test_id);
 
 //------------------------------------------------------------------
 // Upstream Interface for programmer

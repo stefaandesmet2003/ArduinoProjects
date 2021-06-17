@@ -78,21 +78,7 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
-#define OPENDCC_SUBVERSION   9
 #define OPENDCC_VERSION     23
-#define OPENDCC_SERIAL       1     // This is a serial number used to identify different boxes.
-#define BUILD_YEAR          12
-#define BUILD_MONTH         01
-#define BUILD_DAY           27
-
-#define EEPROM_FIXED_ADDR 0         // if 1: use indivual EEPROM section for Config
-                                    // Locos and DMX
-                                    // Note: keep at 0, there is bug in AVR Studio
-                                    // Atmel is still working on the fix 
-
-
-#include "hardware.h"               // right now, this includes the definition
-                                    // for the hardware on www.opendcc.de
 
 //------------------------------------------------------------------------
 // Timing Definitions (all values in us)
@@ -100,15 +86,12 @@
 
 /// This is the timer tick for timeouts, LEDs, key-debounce ...
 #define TIMER2_TICK_PERIOD          4L      // 4us
-
 #define MAIN_SHORT_DEAD_TIME        8L      // wait 15ms before turning off power after
                                             // a short is detected on outputs
                                             // this is the default - it goes to CV34.
-
 #define PROG_SHORT_DEAD_TIME        40L     // wait 40ms before turning off power after
                                             // a short is detected on outputs
                                             // this is the default - it goes to CV35.
-
 #define POM_TIMEOUT                 500L    // Time until we consider a PoM read as failed (SDS: waar wordt dit gebruikt?nergens??)
 #define EXT_STOP_DEAD_TIME          30L     // sds, default value for eadr_ext_stop_deadtime (CV37)
 
@@ -118,43 +101,21 @@
 // Here You find the defines what system to build
 //      (may be altered by user)
 //------------------------------------------------------------------------------------------
-
 #define LENZ                1
-//#define INTELLIBOX          2
 #define NONE                3
 
-#define NAMED               1
-#define UNNAMED             2
-#define TRAINCTRLR          3
+#define PARSER              NONE // INTELLIBOX  // LENZ: behave like a LI101
 
-
-#define PARSER                  NONE // INTELLIBOX  // LENZ: behave like a LI101
-
-#define RAILCOMPLUS_SUPPORT     0           // 0: no special code
-                                            // 1: add test code
-
-#define LOCO_DATABASE           NAMED       // NAMED    containing Addr, Format, Names, PictureID
-                                            // UNNAMED  containing Addr, Format, (no Names)
-
-#define LOCO_DATABASE_MSG       TRAINCTRLR  // set p50xb answers according to traincontroller
-
-#define LOCO_DATABASE_XMT       TRAINCTRLR  // use accessory command 'on' at virtual decoder to initiate 
-                                            // loco data transfer 
-
-#define LOCO_DATABASE_ACC_ADDR  2040        // in terms of IB: counting from 1
-
-
+// SDS: loco database in eeprom
+#define LOCODB_EEPROM_OFFSET    0x40        // SDS : moet voorbij de CV variables
+#define LOCODB_NUM_ENTRIES      10          // 10 entries, 12 bytes per entry (database.cpp)
 #define LOK_NAME_LENGTH         10          // no of char; multimaus uses 5
                                             // XP has a range of 1 to 10; more than 10 would break XP size.
                                             // these are the characters without any trailing 0
 
-//SDS #define S88_ENABLED             1           // 1: if enabled, add code for s88-control
-#define S88_ENABLED             0         // 1: if enabled, add code for s88-control
-
 //SDS : ofwel LENZ ofwel xpnet op atmega328
 #define XPRESSNET_ENABLED       1           // 0: classical OpenDCC
                                             // 1: if enabled, add code for Xpressnet (Requires Atmega644P)
-
 #if (PARSER == LENZ)
   #define DEFAULT_BAUD      BAUD_19200      // supported: 2400, 4800, 9600, 19200, 38400, 57600, 115200         
 #endif
@@ -200,11 +161,7 @@
 // note: in addition, there is the locobuffer, where all commands are refreshed
 //       this locobuffer does not apply to accessory commands nor pom-commands
 
-#if (RAILCOMPLUS_SUPPORT > 0)
-  #define   MAX_DCC_SIZE  10
-#else
-  #define   MAX_DCC_SIZE  6
-#endif
+#define   MAX_DCC_SIZE  6
 
 // This enum defines the type of message put to the tracks.
 typedef enum {
@@ -216,18 +173,15 @@ typedef enum {
   is_prog_ack
 }  t_msg_type;
 
-typedef struct
-{
+typedef struct {
   unsigned char repeat;             // counter for repeat or refresh (depending)
-  union
-    {
-      struct
-      {
-        unsigned char size: 4;            // 2 .. 5
-        t_msg_type    type: 4;            // enum: isvoid, isloco, accessory, ...
-      } ;
-      unsigned char qualifier;
-    } ;
+  union {
+    struct {
+      unsigned char size: 4;            // 2 .. 5
+      t_msg_type    type: 4;            // enum: isvoid, isloco, accessory, ...
+    };
+    unsigned char qualifier;
+  };
   unsigned char dcc[MAX_DCC_SIZE];  // the dcc content
 } t_message;
 
@@ -242,8 +196,7 @@ typedef struct
 
 typedef unsigned char t_format;
 
-typedef struct 
-{
+typedef struct {
   unsigned int address;               // address (either 7 or 14 bits)
   unsigned char speed;                // this is in effect a bitfield:
                                       // msb = direction (1 = forward, 0=revers)
@@ -257,10 +210,9 @@ typedef struct
                                       // when put on the rails or to xpressnet
   #if (XPRESSNET_ENABLED == 1)
     #define SIZE_LOCOBUFFER_ENTRY_X 1
-    unsigned char slot: 5;             // Bit 4..0: controlled by this xpressnet device (1..31: throttles, 0=PC)
-    unsigned char owned_by_pc: 1;      // Bit 5:    controlled by PC      
+    unsigned char slot: 5;             // Bit 4..0: controlled by this xpressnet device (1..31: throttles, 0=local UI)
     unsigned char owner_changed: 1;    // Bit 6:    owner changed
-    unsigned char manual_operated: 1;  // Bit 7:    manual operated (from Xpressnet)
+    unsigned char unused: 2;
   #endif  
   t_format format: 2;                 // 00 = 14, 01=27, 10=28, 11=128 speed steps.
                                       // DCC27 is not supported
@@ -299,8 +251,6 @@ typedef enum {
   PR_SHORT    = 0x05,     // 0x12, short detected
   PR_NOTFOUND = 0x06,     // 0x13, no found
 } t_prog_summary;
-
-// old: typedef enum {PR_VOID, PR_READY, PR_BUSY, PR_REGMODE, PR_CVMODE, PR_SHORT} t_lenz_result;
 
 typedef struct {
   unsigned char minute; 
@@ -410,13 +360,13 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
 // EEPROM starts from 0x810000
 //
 
-#define EADR_LOCO_FORMAT     0x810080L  // base addr in mem
-#define ESIZE_LOCO_FORMAT    64         // no of locos with different format (max. 250)
-                                        // each entry requires 2 bytes
+// sds : .ee_loco segment niet in arduino ide, we doen het hier manueel
 
 //------------------------------------------------------------------------
 // 5.4 Security Checks against wrong definitions
 //------------------------------------------------------------------------
+// TODO SDS2021 : SRAM_SIZE, EEPROM_SIZE etc staan in hardware.h, maar die afhankelijkheid wil ik niet hier
+// voorlopig komen dus gewoon warnings
 
 #if (SIZE_LOCOBUFFER > 254)
 # warning: Locobuffer too large
@@ -436,50 +386,19 @@ extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
 #warning Buffers too large for current processor (see hardware.h)
 #endif
 
-#define USED_EEPROM  (20 + \
-                      ESIZE_LOCO_FORMAT * 2 )   // 20 = config of OpenDCC
+#define USED_EEPROM  ( LOCODB_EEPROM_OFFSET + \
+                      LOCODB_NUM_ENTRIES * 12 ) // SDS : database starts at offset after the CV variables  
 
 #if USED_EEPROM > (EEPROM_SIZE)
 #warning EEPROM usage too large for processor
 #endif
 
-#if (EEPROM_BASE > EADR_LOCO_FORMAT)
-#warning LOCO_FORMAT outside real memory (wrong base)
-#endif
-
-#if ((EEPROM_BASE + EEPROM_SIZE) < (EADR_LOCO_FORMAT + ESIZE_LOCO_FORMAT * 2))
-#warning LOCO_FORMAT outside real memory (too large)
-#endif
-
 // This union allows to access 16 bits as word or as two bytes.
 // This approach is (probably) more efficient than shifting.
-typedef union
-{
+// TODO SDS2021 : weg, enkel nog in een stuk commented code in xp_parser dat moet getest worden
+typedef union {
     uint16_t as_uint16;
     uint8_t  as_uint8[2];
 } t_data16;
 
-// SDS : TODO 2021 : nog nodig?
-typedef struct
-{
-  unsigned char  vendor;
-  union
-    {
-      struct
-        {
-          unsigned char  byte0;
-          unsigned char  byte1;
-          unsigned char  byte2;
-          unsigned char  byte3;
-        };
-      struct
-        {
-          unsigned int   product_id;
-          unsigned int   product_serial;
-        };
-      unsigned long vendor32;
-    };
-} t_unique_id;
-
 #endif   // config.h
-
