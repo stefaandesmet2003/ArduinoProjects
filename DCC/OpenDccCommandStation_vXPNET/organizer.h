@@ -13,14 +13,6 @@
 // file:      organizer.h
 // author:    Wolfgang Kufer
 // contact:   kufer@gmx.de
-// history:   2006-04-13 V0.01 started
-//            2006-10-17 V0.02 added turnout buffer
-//            2007-03-12 V0.03 added pom
-//            2007-11-20 V0.04 type mismatch in store_loco_format.
-//            2008-08-08 V0.05 do_loco_* with parameter slot 
-//            2009-11-09 V0.06 added do_extended_accessory
-//            2010-04-08 V0.07 added pom_accessory_cvrd  
-//
 //-----------------------------------------------------------------
 //
 // purpose:   lowcost central station for dcc
@@ -29,8 +21,8 @@
 //            engines for repeat and refresh of dcc messages
 //
 // interface upstream: 
-//            init_organizer(void)  // set up the queue structures
-//            run_organizer(void)   // multitask replacement, must be called
+//            organizer_Init()  // set up the queue structures
+//            organizer_Run()   // multitask replacement, must be called
 //                                  // every 2ms (approx)
 //
 //            bool dodcc(message*)  // put this message in the queues, returns
@@ -42,32 +34,25 @@
 //            uses "next_message..." flags to interact with dccout
 //
 //-----------------------------------------------------------------
-
-// SDS TODO2021 : dit is vies, kan dit niet weg? (maw. locobuffer enkel te gebruiken door organizer??)
-extern locomem locobuffer[SIZE_LOCOBUFFER];      // refresh
-
 // ---------------------------------------------------------------------------------
 // predefined messages
 //
-// stored in bss, copied at start to sram
 // SDS TODO2021 : dit is vies, kan dit niet weg?
 extern t_message DCC_Reset;    // DCC-Reset-Paket
 extern t_message DCC_Idle;    // DCC-Idle-Paket
 
 //---------------------------------------------------------------------------------
-// Upstream Interface for parser
+// Public Interface for organizer
 //---------------------------------------------------------------------------------
-void init_organizer(void);                                      // must be called once at program start
-void run_organizer(void);                                       // must be called in a loop!
+void organizer_Init();  // must be called once at program start
+void organizer_Run();   // must be called in a loop!
+void organizer_Restart(); // TODO SDS2021 : voorlopig toegevoegd om direct access naar organizer_state via global door status.cpp weg te werken
+extern unsigned char orgz_old_lok_owner;
+bool organizer_IsReady();                                     // true if command can be accepted
+void organizer_SendDccStartupMessages (); // stond in opendcc uncommented, lijkt geen verschil te maken?
 
-// TODO SDS2021 : is dit nog nodig?
-typedef struct 
-{
-  unsigned char halted: 1;                    // if != 0: speed commands are locally forced to zero
-  unsigned char unused: 7;
-} t_organizer_state;
-
-extern t_organizer_state organizer_state; 
+unsigned char convert_speed_to_rail(unsigned char speed128, t_format format);
+unsigned char convert_speed_from_rail(unsigned char speed, t_format format);
 
 // -- routines for command entry
 // -- all do_*** routines have the same return values
@@ -82,28 +67,24 @@ extern t_organizer_state organizer_state;
 // old_slot!=0 -> notify old_slot over xpnet
 // pc is just another xpnet device
 
-extern unsigned char orgz_old_lok_owner;
-bool organizer_ready(void);                                     // true if command can be accepted
-
-unsigned char convert_speed_to_rail(unsigned char speed128, t_format format);
-unsigned char convert_speed_from_rail(unsigned char speed, t_format format);
-
-unsigned char do_loco_speed(unsigned char slot, unsigned int addr, unsigned char speed);     // eine Lok eintragen (speed 1-127), will be converted to format
-unsigned char do_loco_speed_f(unsigned char slot, unsigned int addr, unsigned char speed, t_format format);      // eine Lok eintragen (incl. format)
-unsigned char do_loco_func_grp0(unsigned char slot, unsigned int addr, unsigned char funct); 
-unsigned char do_loco_func_grp1(unsigned char slot, unsigned int addr, unsigned char funct); 
-unsigned char do_loco_func_grp2(unsigned char slot, unsigned int addr, unsigned char funct); 
-unsigned char do_loco_func_grp3(unsigned char slot, unsigned int addr, unsigned char funct); 
+unsigned char do_loco_speed(unsigned char slot, unsigned int locAddress, unsigned char speed);     // eine Lok eintragen (speed 1-127), will be converted to format
+unsigned char do_loco_speed_f(unsigned char slot, unsigned int locAddress, unsigned char speed, t_format format);      // eine Lok eintragen (incl. format)
+unsigned char do_loco_func_grp0(unsigned char slot, unsigned int locAddress, unsigned char func); 
+unsigned char do_loco_func_grp1(unsigned char slot, unsigned int locAddress, unsigned char func); 
+unsigned char do_loco_func_grp2(unsigned char slot, unsigned int locAddress, unsigned char func); 
+unsigned char do_loco_func_grp3(unsigned char slot, unsigned int locAddress, unsigned char func); 
 #if (DCC_F13_F28 == 1)
- unsigned char do_loco_func_grp4(unsigned char slot, unsigned int addr, unsigned char funct); 
- unsigned char do_loco_func_grp5(unsigned char slot, unsigned int addr, unsigned char funct); 
+ unsigned char do_loco_func_grp4(unsigned char slot, unsigned int locAddress, unsigned char func); 
+ unsigned char do_loco_func_grp5(unsigned char slot, unsigned int locAddress, unsigned char func); 
 #endif
- unsigned char do_loco_binstates(unsigned char slot, unsigned int addr, unsigned int binstate); 
-
+#if (DCC_BIN_STATES == 1)
+  unsigned char do_loco_binstates(unsigned char slot, unsigned int locAddress, unsigned int binstate); 
+#endif
 #if (DCC_XLIMIT==1)
- bool do_loco_restricted_speed(unsigned int addr, unsigned char data);
-#endif 
-void do_all_stop(void);
+ bool do_loco_restricted_speed(unsigned int locAddress, unsigned char data);
+#endif
+
+void do_all_stop();
 bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate);
 bool do_extended_accessory(unsigned int addr, unsigned char aspect);
 bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect); // new SDS 2021
@@ -115,41 +96,31 @@ bool do_pom_accessory_cvrd(unsigned int addr, unsigned int cv);
 bool do_pom_ext_accessory(unsigned int addr, unsigned int cv, unsigned char data);
 bool do_pom_ext_accessory_cvrd(unsigned int addr, unsigned int cv);
 
-//sds, moved here from xpnet.cpp
-unsigned char scan_locobuffer(unsigned int addr);         // Hilfsroutine: locobuffer durchsuchen
 #if (DCC_FAST_CLOCK == 1)
  bool do_fast_clock(t_fast_clock* my_clock);
 #endif
 
-t_format find_format_in_locobuffer(unsigned int addr);                         // only find
-t_format get_loco_format(unsigned int addr);                                   // find + create if not found
-unsigned char store_loco_format(unsigned int addr, t_format format);
-unsigned int addr_inquiry_locobuffer(unsigned int addr, unsigned char dir);    // returns next addr in buffer
-void delete_from_locobuffer(unsigned int addr);
+// TODO SDS2021 : cleanup! set_next_message is eigenlijk een interne organizer functie, moet static
+// enkel extern gebruikt om reset/idle packets te sturen bij startup, 
+// put_in_queue_lp enkel door organizer
+//unsigned char put_in_queue_lp(t_message *new_message);
+void set_next_message (t_message *newmsg);
 
 //------------------------------------------------------------------
-// Upstream Interface for programmer
+// Public functions for programmer
 //------------------------------------------------------------------
-
-bool queue_prog_is_empty(void);
+bool queue_prog_is_empty();
 unsigned char put_in_queue_prog(t_message *new_message);
 
 //------------------------------------------------------------------------------------------------
-// Routines for locobuffer
+// Public functions for locobuffer
 //------------------------------------------------------------------------------------------------
 //
 // purpose:   creates a flexible refresh of loco speeds
 //
-// how:       every speed command is entered to locobuffer.
-//            search_locobuffer return a message of the loco
-//            to be refreshed.
+// how:       every speed command is entered to locobuffer to be refreshed.
 //            "younger" locos are refreshed more often.
-//
-// interface: set_loco_mode (int addr, format)
-//            init_locobuffer ()
-unsigned char enter_speed_to_locobuffer(unsigned char slot, unsigned int addr, unsigned char speed);                      // returns result
-unsigned char enter_speed_f_to_locobuffer(unsigned char slot, unsigned int addr, unsigned char speed, t_format format);   // returns result
-unsigned char enter_func_to_locobuffer(unsigned char slot, unsigned int addr, unsigned char funct, unsigned char grp);   // returns result
-t_message * search_locobuffer(void);   // returns pointer to dcc message
-unsigned char put_in_queue_lp(t_message *new_message);
-void set_next_message (t_message *newmsg);
+uint8_t lb_GetEntry (uint16_t locAddress, locomem **lbEntry);
+void lb_DeleteEntry(uint16_t locAddress);
+// searchDirection : 0 = forward, 1 = reverse
+uint16_t lb_FindNextAddress(uint16_t locAddress, unsigned char searchDirection);    // returns next addr in buffer

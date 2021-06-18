@@ -27,7 +27,7 @@ typedef struct
 // de index in deze array komt overeen met de keycode 
 debouncedKey_t keys[NUMBER_OF_DEBOUNCED_KEYS]; // de enter toets op de rotary encoder en de rode/groene knop
 
-static void detect_keys (void);
+static void detect_keys ();
 
 // aangeroepen bij elke change van CLK
 void isr () 
@@ -55,7 +55,7 @@ void isrFalling ()
     turns++;
 }
 
-void keys_Init (void)  
+void keys_Init ()  
 {
   pinMode(PIN_ROT_CLK,INPUT); // geen pullup van de arduino gebruiken, er zitten al 10K pullup op de module
   pinMode(PIN_ROT_DT,INPUT);  // geen pullup van de arduino gebruiken, er zitten al 10K pullup op de module
@@ -70,7 +70,7 @@ void keys_Init (void)
   
 } // keys_Init
 
-void keys_Update (void)
+void keys_Update ()
 {
   int copyTurns = 0;
   uint8_t key;
@@ -110,7 +110,7 @@ key_t keys_GetState (key_t key)
 /****************************************************************************************/
 /****************************************************************************************/
 /****************************************************************************************/
-static void detect_keys (void)
+static void detect_keys ()
 {
   int keycode;
   for (keycode=0;keycode<NUMBER_OF_DEBOUNCED_KEYS;keycode++)

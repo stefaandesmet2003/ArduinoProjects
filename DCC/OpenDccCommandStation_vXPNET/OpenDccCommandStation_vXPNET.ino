@@ -20,7 +20,7 @@
 #include "programmer.h"            // DCC service mode
 
 // op atmega328 is het of LENZ of XPNET
-#if (XPRESSNET_ENABLED ==1)
+#if (XPRESSNET_ENABLED == 1)
 #include "rs485.h"                 // interface to xpressnet
 #include "xpnet.h"                 // xpressnet parser
 #endif
@@ -57,8 +57,7 @@ const uint8_t *const charBitmap[] PROGMEM = {char1,char2,char3,char4,char5,char6
 // SDS TODO 2021
 // in mijn CS is timer2 enkel nog nodig voor de xpnet slot timing
 // kan dat niet met micros() ?, dan hebben we timer2 geheel niet nodig
-void init_timer2(void)
-{
+void timer2_Init() {
   // Timer/Counter 2 initialization
   // Clock source: System Clock / 64 -> 4us (komt overeen met TIMER2_TICK_PERIOD in config.h)
   TCCR2A = (0<< COM2A1)   // 00 = normal port mode
@@ -74,9 +73,9 @@ void init_timer2(void)
           | (0<<CS21)     //      001 = run, 010 = div8, 011=div32, 100=div64, 101=div128. 
           | (0<<CS20);    //      110 = div256, 111 = div1024
   TCNT2=0x00;
-} // init_timer2
+} // timer2_Init
 
-void init_hardware(void) {
+void hardware_Init() {
   // Input/Output Ports initialization
   // Port B
   pinMode(BUTTON_GREEN, INPUT); // pullup is extern 10K
@@ -92,8 +91,8 @@ void init_hardware(void) {
   pinMode (SW_ENABLE_MAIN,OUTPUT);
   pinMode (SW_ENABLE_PROG,OUTPUT);
   pinMode (EXT_STOP,INPUT); // pullup is extern 10K
-  digitalWrite(SW_ENABLE_MAIN,LOW);
-  digitalWrite(SW_ENABLE_PROG,LOW);
+  digitalWrite(SW_ENABLE_MAIN,LOW); // main track off
+  digitalWrite(SW_ENABLE_PROG,LOW); // prog track off
 
   // Port D
   pinMode (ROTENC_CLK,INPUT); // pullup zit op de ROTENC module
@@ -109,8 +108,8 @@ void init_hardware(void) {
   // so we can receive properly over usb-uart
   digitalWrite(RS485_DERE,RS485Transmit); 
 
-  // Timer1: done in init_dccout();
-  init_timer2();
+  // Timer1: done in dccout_Init();
+  timer2_Init();
 
   // Analog Comparator: Off (SDS: stond hier zo, is allicht al default in arduino)
   // Analog Comparator Input Capture by Timer/Counter 1: Off
@@ -118,36 +117,9 @@ void init_hardware(void) {
 
   // A7 as current measurement, will not exceed 1.1V
   analogReference(INTERNAL);
-  
-} // init_hardware
+} // hardware_Init
 
-void dcc_startup_messages (void)
-{
-  t_message testmess;
-  t_message *testmessptr;
-  testmessptr = &testmess;
-
-  // 20 Reset Pakete
-  testmessptr = &DCC_Reset;
-  set_next_message(testmessptr);
-  next_message_count = 20;
-
-  while (next_message_count > 0){ // wait
-    delay(1);
-  }
-  // 10 Idle Pakete
-
-  testmessptr = &DCC_Idle;
-  set_next_message(testmessptr);
-  next_message_count = 10;
-
-  while (next_message_count > 0){ // wait
-    delay(1);
-  }
-} // dcc_startup_messages
-
-static void setup_lcd()
-{
+static void lcd_Init() {
   int charBitmapSize = (sizeof(charBitmap ) / sizeof (charBitmap[0]));
 
   lcd.begin(20,4); // initialize the lcd 
@@ -160,18 +132,14 @@ static void setup_lcd()
     memcpy_P ((void*)aBuffer,(void*)pgm_read_word(&(charBitmap[i])),8); // eerst data copiëren van flash->sram
     lcd.createChar (i, aBuffer);
   }
-
-  ui_Init ();
-  keys_Init ();
-
   lcd.home ();
-} // setup_lcd
+} // lcd_Init
 
 void setup() {
   
-  init_hardware();          // all io's + globals
-  init_database();      // loco format and names
-  init_dccout();        // timing engine for dcc    
+  hardware_Init();          // all io's + globals
+  database_Init();      // loco format and names
+  dccout_Init();        // timing engine for dcc    
 
   //SDS20160823-eeprom data voorlopig niet gebruiken in test arduino
   //init_rs232((t_baud)eeprom_read_byte((uint8_t *)eadr_baudrate));   // 19200 is default for Lenz 3.0
@@ -180,51 +148,54 @@ void setup() {
   #endif
 
   #if (XPRESSNET_ENABLED == 1)
-  init_rs485();
-  init_xpressnet();
+    rs485_Init();
+    xpnet_Init();
+  #else
+    #if (PARSER == LENZ) 
+      init_parser(); // command parser
+    #else 
+      Serial.begin(115200);
+      Serial.println("CS zonder XPNET");
+    #endif        
   #endif
-      
-  init_state();                      // 5ms timer tick 
-  #if (PARSER == LENZ) 
-    init_parser(); // command parser
-  #endif        
 
-  init_organizer();     // engine for command repetition, 
+  status_Init();         // status.cpp
+  organizer_Init();     // engine for command repetition, 
                         // memory of loco speeds and types
-  init_programmer();    // State Engine des Programmers
+  programmer_Init();    // State Engine des Programmers
   
   if (eeprom_read_byte(eadr_OpenDCC_Version) != OPENDCC_VERSION) {
     // oops, no data loaded or wrong version! 
     // sds : todo :add something
   }
 
-  //set_opendcc_state(RUN_OFF); // start up with power off
-  set_opendcc_state(RUN_OKAY);  // start up with power enabled
+  status_SetState(RUN_OKAY);  // start up with power enabled (or RUN_OFF, to start with power off)
+  organizer_SendDccStartupMessages();   // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
   
-  // dcc_startup_messages();   // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
-  
-  setup_lcd();
+  lcd_Init();
+  ui_Init();
+  keys_Init();
+
 } // setup
 
-void loop() 
-{
+void loop() {
   // SDS TODO 2021 : zijn er time-consuming zaken die we niet willen doen tijdens programming?
-  //if (!is_prog_state())
+  //if (!status_IsProgState())
 
-  run_state();            // check short and keys
-  run_organizer();        // run command organizer, depending on state,
+  status_Run();            // check short and keys
+  organizer_Run();        // run command organizer, depending on state,
                           // it will execute normal track operation
                           // or programming
-  run_programmer();
+  programmer_Run();
   #if (XPRESSNET_ENABLED == 1)
-    run_database();                  // check transfer of loco database 
+    database_Run();                  // check transfer of loco database 
   #endif
   #if (PARSER == LENZ)
     run_parser();                    // check commands from pc
   #endif
 
   #if (XPRESSNET_ENABLED == 1)
-    run_xpressnet();
+    xpnet_Run();
   #endif
 
   keys_Update();

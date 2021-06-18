@@ -48,7 +48,7 @@ ui_State_t ui_State;
 bool ui_Redraw = true;
 uint8_t ui_Page; // om door de functies & wissels te scrollen
 uint16_t ui_CurLoc, ui_NewLoc; // loc addr geselecteerd in UI
-uint32_t ui_CurLocFuncs; // bit field met functies 0 (light) tot 28;
+uint32_t ui_CurLocFuncs; // bit field met functies 0 (light) tot 28; SDS2021 TODO : beetje stom dat we hier een lokale kopie hebben, want zit ook in locobuffer
 uint8_t ui_CurSpeed = 0 | DIRECTION_FORWARD ;
 // TODO SDS2021, die 10 = LOK_NAME_LENGTH uit config.h
 char ui_locName[10]; // holds a string with a locname to display (improve this!)
@@ -109,8 +109,8 @@ bool ui_doLocMenu (uint8_t key) {
       keyHandled = true;
     }           
     if (keyHandled) {
-      ui_CurLocFuncs ^= (0x1 << func); // toggle func bit
-      app_SetFunc(ui_CurLoc,func,(ui_CurLocFuncs >> func) & 0x1);
+      ui_CurLocFuncs ^= ((uint32_t) 0x1 << func); // toggle func bit
+      app_SetFunc(ui_CurLoc,func,ui_CurLocFuncs);
       return keyHandled;
     }
   }
@@ -143,11 +143,11 @@ bool ui_doLocMenu (uint8_t key) {
     else if (keyCode == KEY_KEY3) // down
         ui_NewLoc = app_GetPrevLoc(ui_NewLoc);
     else if (keyCode == KEY_KEY4) {
-        // bevestig de nieuwe loc selectie
-        ui_CurLoc = ui_NewLoc;
-        ui_State = UISTATE_LOC_DO_SPEED;
-        ui_CurLocFuncs = app_GetFuncs(ui_CurLoc);
-        if (ui_CurLocFuncs = 0xFFFF) ui_CurLocFuncs = 0; // voor een loc die nog niet in de locobuffer zit
+      // bevestig de nieuwe loc selectie
+      ui_CurLoc = ui_NewLoc;
+      ui_State = UISTATE_LOC_DO_SPEED;
+      ui_CurLocFuncs = app_GetFuncs(ui_CurLoc);
+      if (ui_CurLocFuncs == 0xFFFF) ui_CurLocFuncs = 0; // voor een loc die nog niet in de locobuffer zit
     }  
     else keyHandled = false;
   }
@@ -227,7 +227,7 @@ static bool ui_doTestMenu (uint8_t key) {
   }
   else if (keyCode == KEY_KEY4) {
     // test loco database transmission
-    do_xmit_database();
+    database_StartTransfer();
   }
   return true;
 } // ui_doTestMenu
@@ -437,6 +437,11 @@ void ui_Update () {
       lcd.print(':');
       app_GetLocName(ui_NewLoc,ui_locName); 
       lcd.print(ui_locName);
+      // for test
+      uint32_t funcs = app_GetFuncs(ui_NewLoc);
+      lcd.setCursor(12,1);
+      lcd.print(funcs,HEX);
+
       lcd.setCursor(0,2); lcd.print("kies nieuwe loc:");
       lcd.setCursor (0,3); lcd.print("back  up  down  OK");
       return;

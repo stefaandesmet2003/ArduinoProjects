@@ -65,9 +65,7 @@
 #include "status.h"
 #include "database.h"              // for database broadcast
 #include "rs485.h"                 // rx and tx serial if, made for xpressnet
-
 #include "programmer.h"
-
 #include "organizer.h"
 #include "xpnet.h"
 #include "accessories.h"
@@ -99,8 +97,7 @@ unsigned char slot_use_counter[32];
 unsigned char used_slot;        // 1 .. 31 (actual position for used ones)
 unsigned char unused_slot;      // 1 .. 31 (actual position for unused ones)
 
-static unsigned char get_next_slot(void)
-{
+static unsigned char get_next_slot() {
   used_slot++;             // advance
   while (used_slot < 32) {        
     if (slot_use_counter[used_slot] > 0)
@@ -120,13 +117,11 @@ static unsigned char get_next_slot(void)
 } // get_next_slot
 
 
-static void set_slot_used(unsigned char slot)
-{
+static void set_slot_used(unsigned char slot) {
   slot_use_counter[slot] = 255;           // alive
 }
 
-static void set_slot_to_watch(unsigned char slot)
-{
+static void set_slot_to_watch(unsigned char slot) {
   slot_use_counter[slot] = 10;           // nearly dead
 }
 
@@ -145,10 +140,6 @@ static void set_slot_to_watch(unsigned char slot)
 // 4. Xpressnet Parser
 //
 //===============================================================================
-//
-// 4.a) Xpressnet variables
-//
-//-------------------------------------------------------------------------------
 unsigned char current_slot;     // 1 .. 31
 
 unsigned char rx_message[17];             // current message from client
@@ -164,74 +155,45 @@ unsigned char xpnet_version[] = {0x63, 0x21,
                                  0x00};     // 0: = LZ100 Zentrale 1 = LH 200, 2= DPC, 3= Control Plus
                                             // 0x10: Roco Zentrale
 
-// 2.b) Xpressnet Send routines
 
-void xp_send_message(unsigned char callByte, unsigned char *str)
-{
-  unsigned char n, total, my_xor;
 
-  n = 0;
-  my_xor = str[0];
-  total = str[0] & 0x0F;
-  
-  while (!XP_tx_ready()) ;                 // busy waiting! (but shouldn't happen)
-
-  XP_send_call_byte(callByte);              // send slot (9th bit is 1)
-  XP_send_byte(str[0]);                    // send header
-
-  while (n != total) {
-    n++;
-    my_xor ^= str[n];
-    XP_send_byte(str[n]);              // send data
-  }    
-  XP_send_byte(my_xor);                   // send xor
-} // xp_send_message
-
-void xp_send_message_to_current_slot(unsigned char *str)
-{
-  xp_send_message(MESSAGE_ID | current_slot, str);
+static void xp_send_message_to_current_slot(unsigned char *msg) {
+  xpnet_SendMessage(MESSAGE_ID | current_slot, msg);
 }
 
-void xp_send_bc_message(void)
-{
+static void xp_send_BroadcastMessage() {
   switch(opendcc_state) {
     case RUN_OKAY:             // DCC running
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_alles_an);
       break;
     case RUN_STOP:             // DCC Running, all Engines Emergency Stop
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+    case RUN_PAUSE:            // DCC Running, all Engines Speed 0
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
       break;
     case RUN_OFF:              // Output disabled (2*Taste, PC)
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-      break;
     case RUN_SHORT:            // Kurzschluss
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
-      break;
-    case RUN_PAUSE:            // DCC Running, all Engines Speed 0
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_locos_aus);  
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_alles_aus);  
       break;
 
     case PROG_OKAY:
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_progmode);  
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_progmode);  
       break;
     case PROG_SHORT:           //
-      xp_send_message(MESSAGE_ID |0, tx_ptr = xp_BC_progshort);  
+      xpnet_SendMessage(MESSAGE_ID |0, tx_ptr = xp_BC_progshort);  
       break;
     case PROG_OFF:
       break;
     case PROG_ERROR:
       break;
     }
-  status_event.changed_xp = 0;            // broad cast done
-} // xp_send_bc_message
+  status_event.changed_xp = 0;            // broadcast done
+} // xp_send_BroadcastMessage
 
 #if (DCC_FAST_CLOCK == 1)
-void xp_send_fast_clock(unsigned char slot_id)
+static void xp_send_FastClockResponse(unsigned char slot_id)
 {
   // 0x05 0x01 TCODE0 {TCODE1 TCODE2 TCODE3} 
   tx_message[0] = 0x05;
@@ -241,13 +203,12 @@ void xp_send_fast_clock(unsigned char slot_id)
   tx_message[4] = 0x40 | fast_clock.day_of_week;
   tx_message[5] = 0xC0 | fast_clock.ratio;
 
-  xp_send_message(MESSAGE_ID | slot_id, tx_ptr = tx_message);
+  xpnet_SendMessage(MESSAGE_ID | slot_id, tx_ptr = tx_message);
   status_event.clock = 0;            // fast clock broad cast done
-} // xp_send_fast_clock
+} // xp_send_FastClockResponse
 #endif
 
-void xpnet_send_prog_result(void)
-{
+static void xpnet_send_ServiceModeInformationResponse() {
   // Messages:
   // 61 11: ready
   // 61 12: short - Kurzschluss
@@ -312,17 +273,15 @@ void xpnet_send_prog_result(void)
         break;
     }
   }
-} // xpnet_send_prog_result
+} // xpnet_send_ServiceModeInformationResponse
 
-void xp_send_busy(void)
-{
+static void xp_send_CommandStationBusyResponse() {
   xp_send_message_to_current_slot(tx_ptr = xp_busy); 
 }
 
 // bit0-1 : zijn blijkbaar omgewisseld tussen xpnet v3 en v3.6!
 // we houden hier v3.6
-void xp_send_status(void)
-{
+static void xp_send_CommandStationStatusIndicationResponse() {
   // Format: Headerbyte Daten 1 Daten 2 X-Or-Byte
   // Hex : 0x62 0x22 S X-Or-Byte
   // S:
@@ -347,51 +306,50 @@ void xp_send_status(void)
       | (opendcc_state == PROG_ERROR) ) my_status |= 0x08;          // Programmiermode
   tx_message[2] = my_status;
   xp_send_message_to_current_slot(tx_ptr = tx_message); 
-} // xp_send_status
+} // xp_send_CommandStationStatusIndicationResponse
 
 
-void xp_send_loco_addr(unsigned int addr)     
+static void xp_send_LocAddressRetrievalResponse(unsigned int locAddress)     
 {
   tx_message[0] = 0xE3;
   tx_message[1] = 0x30;                   // 0x30 + KKKK; here KKKK=0, normal loco addr
-  if (addr == 0) tx_message[1] |= 0x04;   // KKKK=4 -> no result fould
-  if (addr > XP_SHORT_ADDR_LIMIT) {
-    tx_message[2] = addr / 256;
+  if (locAddress == 0) tx_message[1] |= 0x04;   // KKKK=4 -> no result fould
+  if (locAddress > XP_SHORT_ADDR_LIMIT) {
+    tx_message[2] = (locAddress >> 8);
     tx_message[2] |= 0xC0;
   }
   else tx_message[2] = 0;
-  tx_message[3] = (unsigned char)addr;
+  tx_message[3] = (unsigned char)(locAddress & 0xFF);
   xp_send_message_to_current_slot(tx_ptr = tx_message);
-} // xp_send_loco_addr
+} // xp_send_LocAddressRetrievalResponse
 
-unsigned char convert_format[4] = {
-  0b000,      // DCC14
-  0b001,      // DCC27
-  0b010,      // DCC28
-  0b100,      // DCC128
-};
-
-void xp_send_lokdaten(unsigned int addr)
-{
-  register unsigned char i, data;
-  register unsigned char speed;
-  
-  i = scan_locobuffer(addr);
+static void xp_send_LocInformationResponse(unsigned int locAddress) {
+  register unsigned char data, speed;
+  uint32_t retval = 0;
+  locomem *lbData;
+  uint8_t convert_format[4] = {
+    0b000,      // DCC14
+    0b001,      // DCC27
+    0b010,      // DCC28
+    0b100,      // DCC128
+  };
 
   tx_message[0] = 0xE4; // Headerbyte = 0xE4
   tx_message[1] = 0x00; // Byte1 = Kennung = 0000BFFF:  B=0: nicht besetzt
                         // FFF=Fahrstufen: 000=14, 001=27, 010=28, 100=128
-  if (i==SIZE_LOCOBUFFER) { // not found - was not used yet
-    tx_message[1] |= convert_format[get_loco_format(addr)];  // ask eeprom about speed steps
+  retval = lb_GetEntry(locAddress, &lbData) & 0xFF;
+  if (retval) { // not found - was not used yet
+    tx_message[1] |= convert_format[database_GetLocoFormat(locAddress)];  // ask eeprom about speed steps
     tx_message[2] = 0;                          // no Speed
     tx_message[3] = 0;                          // no functions
     tx_message[4] = 0; 
   }
   else {
-    if (locobuffer[i].slot != current_slot)  tx_message[1] |= 0b0001000; // loc is in use by another slot
+    if (lbData->slot != current_slot) 
+      tx_message[1] |= 0b0001000; // loc is in use by another slot
 
-    speed = convert_speed_to_rail(locobuffer[i].speed, locobuffer[i].format);
-    switch(locobuffer[i].format) {
+    speed = convert_speed_to_rail(lbData->speed, lbData->format);
+    switch(lbData->format) {
       case DCC14:
         tx_message[2] = speed;    //Byte2 = Speed = R000 VVVV;
         break;
@@ -422,180 +380,55 @@ void xp_send_lokdaten(unsigned int addr)
         tx_message[2] = speed;    //Byte2 = Speed = RVVV VVVV;
         break;
     }
-    tx_message[3] = (locobuffer[i].fl << 4) | locobuffer[i].f4_f1;
-    tx_message[4] = (locobuffer[i].f12_f9 << 4) | locobuffer[i].f8_f5;
+    tx_message[3] = (lbData->fl << 4) | lbData->f4_f1;
+    tx_message[4] = (lbData->f12_f9 << 4) | lbData->f8_f5;
   }
   xp_send_message_to_current_slot(tx_ptr = tx_message);
-} // xp_send_lokdaten
+} // xp_send_LocInformationResponse
 
-#if (DCC_F13_F28 == 1)
-void xp_send_funct_level_f13_f28(unsigned int addr)
-{
-  uint8_t i;
-  
-  i = scan_locobuffer(addr);
-
-  tx_message[0] = 0xE3;
-  tx_message[1] = 0x52;
-  if (i==SIZE_LOCOBUFFER) { // not found - was not used yet
-    tx_message[2] = 0; // no functions
-    tx_message[3] = 0; // no functions
-  }
-  else {
-    tx_message[2] = locobuffer[i].f20_f13;
-    tx_message[3] = locobuffer[i].f28_f21;
-  }
-  xp_send_message_to_current_slot(tx_ptr = tx_message);
-} // xp_send_funct_level_f13_f28
-
-//SDS added
-// zelfde soort antwoord als func_status voor de F1-F12 (dummy data)
-// TODO : waarom staat hier 0xE4 in de spec, er zijn toch maar 3 data bytes??
-void pc_send_funct_status_f13_f28(unsigned int addr)
-{
-  // TODO : heeft nu geen zin om de locobuffer te doorzoeken, data staan er toch niet in
-  //uint8_t i;
-  //i = scan_locobuffer(addr);
-
-  tx_message[0] = 0xE3;
-  tx_message[1] = 0x51;
-  tx_message[2] = 0; // no data
-  tx_message[3] = 0; // no data
-  xp_send_message_to_current_slot(tx_ptr = tx_message);
-} // pc_send_funct_status_f13_f28
-
-#endif
-
-// we answer, but this is not really supported (not stored in locobuffer).
-// SDs : DUMMY!
-void xp_send_loco_func_status(unsigned int addr)
-{
+// function momentary or on/off -> not implemented
+// reply default = all functions are on/off
+static void xp_send_FunctionF0F12StatusResponse(unsigned int locAddress) {
   tx_message[0] = 0xE3; // Headerbyte = 0xE3
   tx_message[1] = 0x50; // Byte1 = Kennung = 10000000 // SDS : waarom stond hier 0x80?? dat lijkt fout voor JMRI
   tx_message[2] = 0x00; // Byte2 = 000sSSSS; s=F0, SSSS=F4...F1
   tx_message[3] = 0;    // Byte3 = SSSSSSSS; SSSSSSSS=F12...F5
   xp_send_message_to_current_slot(tx_ptr = tx_message);
-} // xp_send_loco_func_status
+} // xp_send_FunctionF0F12StatusResponse
 
-// TODO SDS2021 : nog case toevoegen voor ntf naar local UI als slot=0 een loc heeft verloren!
-void xp_send_lok_stolen(unsigned char slot, unsigned int lokaddr)
-{
-  if (slot != 0) {
-    tx_message[0] = 0xE3;
-    tx_message[1] = 0x40;
-    tx_message[2] = (unsigned char) (lokaddr / 256);                           
-    tx_message[3] = (unsigned char) (lokaddr);   
-    if (lokaddr > XP_SHORT_ADDR_LIMIT) {
-      tx_message[2] |= 0xc0;                                              
-    }
-    xp_send_message(MESSAGE_ID | slot, tx_message);
+#if (DCC_F13_F28 == 1)
+static void xp_send_FunctionF13F28OnOffResponse(unsigned int locAddress) {
+  uint32_t retval = 0;
+  locomem *lbData;
+  
+  tx_message[0] = 0xE3;
+  tx_message[1] = 0x52;
+  retval = lb_GetEntry(locAddress, &lbData) & 0xFF;
+  if (retval) { // not found - was not used yet
+    tx_message[2] = 0; // no functions
+    tx_message[3] = 0; // no functions
   }
   else {
-    // TODO implement ntf naar local UI
+    tx_message[2] = lbData->f20_f13;
+    tx_message[3] = lbData->f28_f21;
   }
-} // xp_send_lok_stolen
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // xp_send_FunctionF13F28OnOffResponse
 
-//-----------------------------------------------------------------------------------------------------
-// List of all messages from the client
-// i: implemented, n: not implemented, -: currently not implemented,  s: simulated, t: tested
-//-----------------------------------------------------------------------------------------------------
-// i | s | t |Ver.|OP-Code
-// - | - | - | new|0x05 0xF1 TCODE1 TCODE2 TCODE3 TCODE4 [XOR] "DCC FAST CLOCK set"
-// - | - | - | new|0x01 0xF2 "DCC FAST CLOCK query"
-// - | - | - | new|0x13 0x01 B+AddrH AddrL [XOR] "DCC extended accessory (B=aspect)"
-// i | - | - |    |0x21 0x10 0x31 "Request for Service Mode results"
-// - | - | - |    |0x22 0x11 REG [XOR] "Register Mode read request (Register Mode (REG=1..8))"
-// - | - | - |    |0x23 0x12 REG DAT [XOR] "Register Mode write request (Register Mode)"
-// - | - | - |    |0x22 0x14 CV [XOR] "Paged Mode read request (Paged Mode)"
-// i | - | - |    |0x22 0x15 CV [XOR] "Direct Mode CV read request (CV mode)"
-// - | - | - |    |0x23 0x16 CV DAT [XOR] "Direct Mode CV write request (CV mode (CV=1..256))"
-// - | - | - |    |0x23 0x17 CV DAT [XOR] "Paged Mode write request (Paged mode)"
-// - | - | - | 3.6|0x23 0x1C CV DAT [XOR] "Direct Mode CV write request (CV mode (CV1024, CV=1..255))"
-// - | - | - | 3.6|0x23 0x1D CV DAT [XOR] "Direct Mode CV write request (CV mode (CV=256 ... 511))"
-// - | - | - | 3.6|0x23 0x1E CV DAT [XOR] "Direct Mode CV write request (CV mode (CV=512 ... 767))"
-// - | - | - | 3.6|0x23 0x1F CV DAT [XOR] "Direct Mode CV write request (CV mode (CV=768 ... 1023))"
-// i | - | - |    |0x21 0x21 0x00 "Command station software-version request"
-// n | n | n |    |0x22 0x22 00000M00 [XOR] "Set command station power-up mode"
-// i | - | - |    |0x21 0x24 0x05 "Command station status request"
-// i | - | - | new|0x23 0x28 AddrH AddrL [XOR] "Command station special option read"
-// i | - | - | new|0x21 0x29 AddrH AddrL DAT [XOR] "Command station special option read"
-// i | - | - |    |0x21 0x80 0xA1 "Stop operations request (emergency off)"
-// i | - | - |    |0x21 0x81 0xA0 "Resume operations request"
-// i | - | - |    |0x42 Addr Nibble [XOR] "Accessory Decoder information request"
-// i | - | - |    |0x52 Addr DAT [XOR] "Accessory Decoder operation request"
-// i | - | - | new|0x74 0xE0 AddrH AddrL SPEED [XOR] Speed annoucment
-// i | - | - | new|0x78 0xE1 SID_H SID_L AddrH AddrL CV_H CV_L DAT [XOR] CV Read
-// i | - | - | new|0x73 0xF0 SID_H SID_L Detector is IDLE
-// i | - | - | new|0x73 0xF1 SID_H SID_L Detector is OCCUPIED
-// - | - | - | new|0x75 0xF2 SID_H SID_L D+AddrH AddrL Detector has Loco Detected
-// i | - | - | new|0x7x 0xFE SID_H SID_L DAT0 [DAT1] [DAT2] ... [DAT7] [XOR] 	"occupancy vector"
-// - | - | - | new|0x75 0xFF SID1_H SID1_L SID2_H SID2_request rescan
-// i | - | - |    |0x80 0x80 "Stop all locomotives request (emergency stop)"
-// i | - | - |    |0x91 loco_addr [XOR] "Emergency stop a locomotive"
-// i | - | - |    |0x92 AddrH AddrL [XOR] "Emergency stop a locomotive"
-// n | - | - | 2  |0x9N loco_addr_1 loco_addr_2 etc. loco_addr N [XOR] "Emergency stop selected locomotives"
-// n | - | - | 1  |0xA1 loco_addr [XOR] "Locomotive information request" (X-Bus V1)
-// n | - | - | 2  |0xA2 loco_addr ModSel [XOR] "Locomotive information request" (X-Bus V2)
-// n | - | - |    |0xC3 0x05 loco_addr_1 loco_addr_2 [XOR] "Establish Double Header"
-// n | - | - |    |0xC3 0x04 loco_addr_1 loco_addr_2 [XOR] "Dissolve Double Header"
-// n | - | - | 1  |0xB3 loco_addr loco_data_1 loco_data_2 [XOR] "Locomotive operation" (X-Bus V1)
-// n | - | - | 2  |0xB4 loco_addr loco_data_1 loco_data_2 ModSel [XOR] "Locomotive operation" (X-Bus V2)
-// i | - | - |    |0xE3 0x00 AddrH AddrL [XOR] "Locomotive information request"
-// n | - | - |    |0xE4 0x01+R MTR AddrH AddrL [XOR] "Address inquiry member of a Multi-unit request"
-// n | - | - |    |0xE2 0x03+R MTR [XOR] "Address inquiry Multi-unit request"
-// i | - | - |    |0xE3 0x05+R AddrH AddrL [XOR] "Address inquiry locomotive at command station stack request"
-// i | - | - |    |0xE3 0x07 AddrH AddrL [XOR] "Function status request"
-// - | - | - | 3.6|0xE3 0x08 AddrH AddrL [XOR] "Function status request F13-F28"
-// - | - | - | 3.6|0xE3 0x09 AddrH AddrL [XOR] "Function level request F13-F28"
-// i | - | - |    |0xE4 0x10 AddrH AddrL Speed [XOR] "Locomotive speed and direction operation - 14 speed step"
-// i | - | - |    |0xE4 0x11 AddrH AddrL Speed [XOR] "Locomotive speed and direction operation - 27 speed step"
-// i | - | - |    |0xE4 0x12 AddrH AddrL Speed [XOR] "Locomotive speed and direction operation - 28 speed step"
-// i | - | - |    |0xE4 0x13 AddrH AddrL Speed [XOR] "Locomotive speed and direction operation - 128 speed step"
-// i | - | - |    |0xE4 0x20 AddrH AddrL Group [XOR] "Function operation instruction - Group 1 f0f4f3f2f1"
-// i | - | - |    |0xE4 0x21 AddrH AddrL Group [XOR] "Function operation instruction - Group 2 f8f7f6f5"
-// i | - | - |    |0xE4 0x22 AddrH AddrL Group [XOR] "Function operation instruction - Group 3 f12..f9"
-// i | - | - | 3.6|0xE4 0x23 AddrH AddrL Group [XOR] "Function operation instruction - Group 4 f20..f13"
-// n | - | - |    |0xE4 0x24 AddrH AddrL Group [XOR] "Set function state - Group 1"
-// n | - | - |    |0xE4 0x25 AddrH AddrL Group [XOR] "Set function state - Group 2"
-// n | - | - |    |0xE4 0x26 AddrH AddrL Group [XOR] "Set function state - Group 3"
-// - | - | - | 3.6|0xE4 0x27 AddrH AddrL Group [XOR] "Set function state - Group 4"
-// - | - | - | 3.6|0xE4 0x28 AddrH AddrL Group [XOR] "Function operation instruction - Group 5 f28..f21"
-// i | - | - | 3.6|0xE4 0x2C AddrH AddrL Group [XOR] "Set function state - Group 5"
-// - | - | - | 3.6|0xE5 0x2F AddrH AddrL RefMode [XOR] "Set function refresh mode"
-// i | - | - |    |0xE6 0x30 AddrH AddrL 0xEA+C CV DAT [XOR] "Operations Mode Programming byte mode read request" -> 0xE4
-// i | - | - |    |0xE6 0x30 AddrH AddrL 0xEC+C CV DAT [XOR] "Operations Mode Programming byte mode write request"
-// n | - | - |    |0xE6 0x30 AddrH AddrL 0xE8+C CV DAT [XOR] "Operations Mode programming bit mode write request"
-// i | - | - | new|0xE6 0x30 AddrH AddrL 0xF0+C CV DAT [XOR] "Operations Mode Programming Accessory write request"
-// i | - | - | new|0xE5 0x30 AddrH AddrL 0xF4+C CV [XOR] "Operations Mode Programming Accessory read request"
-// i | - | - | new|0xE6 0x30 AddrH AddrL 0xF8+C CV DAT [XOR] "Operations Mode Programming ExtAccessory write request"
-// i | - | - | new|0xE5 0x30 AddrH AddrL 0xFC+C CV [XOR] "Operations Mode Programming ExtAccessory read request"
-// n | - | - |    |0xE5 0x43 ADR1H ADR1L ADR2H ADR2L [XOR] "Establish Double Header"
-// n | - | - |    |0xE5 0x43 ADR1H ADR1L 0x00 0x00 [XOR] "Dissolve Double Header"
-// n | - | - |    |0xE4 0x40+R AddrH AddrL MTR [XOR] "Add a locomotive to a multi-unit request"
-// n | - | - |    |0xE4 0x42 AddrH AddrL MTR [XOR] "Remove a locomotive from a Multi-unit request"
-// i | - | - |    |0xE3 0x44 AddrH AddrL [XOR] "Delete locomotive from command station stack request"
-// n | - | - | roc|0xE3 0xF0 AddrH AddrL [XOR] "Read Lok" (Multimaus only; Antwort dann: 
-// n | - | - | 3.6|0xF0 [XOR] "Read Version of Interface"
-// other commands (by Wim Ros on his S88-N-LI-Xpressnet)
-// 0xF2 01 Addr [XOR] set/query Xpressnet-Address
-// 0xF2 02 Baud [XOR] set/query Baud
-// 0xF2 F1 Base [XOR] set base
-// 0xF2 F2 CNT [XOR] set count
-// 0xF2 FE TM [XOR] set test mode
-// 0xF2 FF PRG [XOR] set prog mode
-//-----------------------------------------------------------------------------------------------------
-// Additional Tests
-//-----------------------------------------------------------------------------------------------------
-//
-// i | s | t |    |Handover of locomotives between handhelds
-// i | - | t |    |Handover of lokomotives between handheld and pc
-// i | - | - |    |Feedback events (generated from s88)
-// - | - | - |    |Feedback events (generated from accessory operations)
+// SDS added, beetje verwarrende naam uit de spec :
+// func status = momentary of on/off, niet of de functie aan/uit staat
+// zelfde soort antwoord als func_status voor de F1-F12 (dummy data)
+static void xp_send_FunctionF13F28StatusResponse(unsigned int locAddress) {
+  tx_message[0] = 0xE4; // 0xE4 is according spec, although only 3 bytes follow! Compatible with JMRI!
+  tx_message[1] = 0x51;
+  tx_message[2] = 0; // no data
+  tx_message[3] = 0; // no data
+  xp_send_message_to_current_slot(tx_ptr = tx_message);
+} // xp_send_FunctionF13F28StatusResponse
 
+#endif // (DCC_F13_F28 == 1)
 
-
-void xp_parser(void)
-{
+static void xp_parser() {
   unsigned int addr;
   t_data16 xaddr;
   unsigned char speed = 0;
@@ -632,12 +465,12 @@ void xp_parser(void)
             }
           }                            
           do_fast_clock(&fast_clock); // dcc msg
-          xp_send_fast_clock(current_slot); // xpnet msg
+          xp_send_FastClockResponse(current_slot); // xpnet msg
           processed = 1;
           break;
         case 0xF2:
           // query clock
-          xp_send_fast_clock(current_slot);
+          xp_send_FastClockResponse(current_slot);
           processed = 1;
           break;
       }
@@ -646,36 +479,36 @@ void xp_parser(void)
     case 0x2:
       switch(rx_message[1]) {
         case 0x10: 
-          // Prog.-Ergebnis anfordern 0x21 0x10 0x31
+          // 0x21 0x10 0x31
           if (opendcc_state >= PROG_OKAY) {
-            xpnet_send_prog_result();
+            xpnet_send_ServiceModeInformationResponse();
             processed = 1;
           }
           // else: Command void -> end of case
           break;
         case 0x11: 
-          // Prog.-Lesen Registermode 0x22 0x11 REG X-Or
+          // 0x22 0x11 REG X-Or
           // REG contains the Resister (1...8), this Command has no answer
-          my_XPT_DCCRR (rx_message[2]);   // return code = 2 - if bad parameter
+          programmer_CvRegisterRead (rx_message[2]);   // return code = 2 - if bad parameter
           processed = 1;
           break;
         case 0x12: 
-          // Prog.-Schreiben Register 0x23 0x12 REG DAT X-Or
-          my_XPT_DCCWR (rx_message[2], rx_message[3]);   
+          // 0x23 0x12 REG DAT X-Or
+          programmer_CvRegisterWrite (rx_message[2], rx_message[3]);   
           processed = 1;
           break;
         case 0x14:
           // Prog-lesen Pagemode Hex : 0x22 0x14 CV X-Or-Byte
           if (rx_message[2] == 0) addr = 256;
           else addr = rx_message[2];
-          my_XPT_DCCRP (addr);
+          programmer_CvPagedRead (addr);
           processed = 1;
           break;
         case 0x15: 
           // Prog.-Lesen CV 0x22 0x15 CV X-Or    // old; according to Lenz we should return CV1024?
           if (rx_message[2] == 0) addr = 256;
           else addr = rx_message[2];
-          my_XPT_DCCRD (addr);
+          programmer_CvDirectRead (addr);
           processed = 1;
           break;
         case 0x16: 
@@ -683,14 +516,14 @@ void xp_parser(void)
           // CV: 1..256
           if (rx_message[2] == 0) addr = 256;
           else addr = rx_message[2];
-          my_XPT_DCCWD (addr, rx_message[3]);    // direct mode
+          programmer_CvDirectWrite (addr, rx_message[3]);    // direct mode
           processed = 1;
           break;
         case 0x17: 
           // Prog.-Schreiben Paging 0x23 0x17 CV DAT X-Or
           if (rx_message[2] == 0) addr = 256;
           else addr = rx_message[2];
-          my_XPT_DCCWP (addr, rx_message[3]);
+          programmer_CvPagedWrite (addr, rx_message[3]);
           processed = 1;
           break;
         case 0x18:      // Prog.-Lesen CV 0x22 0x18 CV X-Or    // CV 1..255, 1024
@@ -699,7 +532,7 @@ void xp_parser(void)
         case 0x1B:      // Prog.-Lesen CV 0x22 0x1B CV X-Or    // CV 768 .. 1023
           addr = ((rx_message[1] & 0x03) * 256) + rx_message[2];
           if (addr == 0) addr = 1024;
-          my_XPT_DCCRD (addr);
+          programmer_CvDirectRead (addr);
           processed = 1;
           break;
         case 0x1C:      // Prog.-Schreiben CV 0x23 0x1C CV DAT X-Or; CV: 1..255, 1024
@@ -708,7 +541,7 @@ void xp_parser(void)
         case 0x1F:      // Prog.-Schreiben CV 0x23 0x1F CV DAT X-Or; CV: 768 ... 1024
           addr = ((rx_message[1] & 0x03) * 256) + rx_message[2];
           if (addr == 0) addr = 1024;
-          my_XPT_DCCWD (addr, rx_message[3]);  // direct mode
+          programmer_CvDirectWrite (addr, rx_message[3]);  // direct mode
           processed = 1;
           break;
         case 0x21:
@@ -723,17 +556,17 @@ void xp_parser(void)
           break;
         case 0x24:
           // Statusabfrage 0x21 0x24 0x05 "Command station status request"
-          xp_send_status();
+          xp_send_CommandStationStatusIndicationResponse();
           processed = 1; 
           break;
         case 0x80:    
           // 0x21 0x80 0xA1 "Stop operations request (emergency off)"
-          set_opendcc_state(RUN_OFF);
+          status_SetState(RUN_OFF);
           processed = 1;                              // no answer here, but a broadcast will occur
           break;
         case 0x81:
           // 0x21 0x81 0xA0 "Resume operations request"
-          set_opendcc_state(RUN_OKAY);    
+          status_SetState(RUN_OKAY);    
           processed = 1;                              // no answer here, but a broadcast will occur
           break;
       }
@@ -782,7 +615,7 @@ void xp_parser(void)
       // either answer the request or/and send out a broadcast
       // we do both
       xp_send_message_to_current_slot(tx_ptr = tx_message);
-      xp_send_message(FUTURE_ID | 0, tx_message);
+      xpnet_SendMessage(FUTURE_ID | 0, tx_message);
       processed = 1;
       break;
 
@@ -801,12 +634,12 @@ void xp_parser(void)
       if ((prevData & 0xF) != (newData & 0xF)) { // lower nibble changed
         tx_message[0] = 0x42;
         accessory_getInfo(rx_message[1],0,&tx_message[1]);
-        xp_send_message(FUTURE_ID | 0, tx_message);
+        xpnet_SendMessage(FUTURE_ID | 0, tx_message);
       }
       if ((prevData & 0xF0) != (newData & 0xF0)) { // upper nibble changed
         tx_message[0] = 0x42;
         accessory_getInfo(rx_message[1],1,&tx_message[1]);
-        xp_send_message(FUTURE_ID | 0, tx_message);
+        xpnet_SendMessage(FUTURE_ID | 0, tx_message);
       }
       processed = 1;
       break;
@@ -814,7 +647,7 @@ void xp_parser(void)
     case 0x8:
       // Alle Loks anhalten 0x80 0x80
       if (rx_message[1] == 0x80) {
-        set_opendcc_state(RUN_STOP);                     // from organizer.c 
+        status_SetState(RUN_STOP);                     // from organizer.c 
         processed = 1;                                   // no answer here, but a broadcast will occur
       }
       break;
@@ -848,32 +681,32 @@ void xp_parser(void)
           switch(rx_message[1] & 0x0f) {
             unsigned int result;
             case 0x00:
-              xp_send_lokdaten(addr);
+              xp_send_LocInformationResponse(addr);
               processed = 1;
               break;
             case 0x05:
-              result = addr_inquiry_locobuffer(addr, 1); // forward
-              xp_send_loco_addr(result);
+              result = lb_FindNextAddress(addr, 1); // forward
+              xp_send_LocAddressRetrievalResponse(result);
               processed = 1;
               break;
             case 0x06:
-              result = addr_inquiry_locobuffer(addr, 0); // revers
-              xp_send_loco_addr(result);
+              result = lb_FindNextAddress(addr, 0); // reverse
+              xp_send_LocAddressRetrievalResponse(result);
               processed = 1;
               break;
             case 0x07:
-              xp_send_loco_func_status(addr);
+              xp_send_FunctionF0F12StatusResponse(addr);
               processed = 1;
               break;
             #if (DCC_F13_F28 == 1)
               // 0xE3 0x08 AddrH AddrL [XOR] "Function status request F13 F28"
             case 0x08:
-              pc_send_funct_status_f13_f28(addr); // SDS : sends dummy data
+              xp_send_FunctionF13F28StatusResponse(addr); // SDS : sends dummy data
               processed = 1;
               break;
               // 0xE3 0x09 AddrH AddrL [XOR] "Function level request F13-F28"
             case 0x09:
-              xp_send_funct_level_f13_f28(addr); // SDS : sends dummy data
+              xp_send_FunctionF13F28OnOffResponse(addr); // SDS : sends dummy data
               processed = 1;
               break;
             #endif
@@ -905,18 +738,18 @@ void xp_parser(void)
               break;
           }
           
-          if (organizer_ready()) {
+          if (organizer_IsReady()) {
             unsigned char myspeed;
             myspeed = convert_speed_from_rail(speed, format); // map lenz to internal 0...127                      
 
             retval = do_loco_speed_f(current_slot, addr, myspeed, format);
             if (retval & ORGZ_STOLEN) {
-              xp_send_lok_stolen(orgz_old_lok_owner , addr);
+              xpnet_SendLocStolen(orgz_old_lok_owner , addr);
             }
             processed = 1;
           }
           else {
-            xp_send_busy();             // we are busy
+            xp_send_CommandStationBusyResponse();             // we are busy
             processed = 1;
           }
           break;
@@ -924,57 +757,57 @@ void xp_parser(void)
           addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
           switch(rx_message[1] & 0x0F) {  // Lok Funktionsbefehl ab V3 0xE4 Kennung ADR High ADR Low Gruppe X-Or
             case 0:          // Hex : 0xE4 0x20 AH AL Gruppe 1 X-Or-Byte   (Gruppe 1: 000FFFFF) f0, f4...f1
-              if (organizer_ready()) {
+              if (organizer_IsReady()) {
                 retval = do_loco_func_grp0(current_slot, addr, rx_message[4]>>4); // light, f0
                 retval |= do_loco_func_grp1(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                  xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                  xpnet_SendLocStolen(orgz_old_lok_owner, addr);
                 } 
                 processed = 1;
               }
               else {
-                xp_send_busy();             // we are busy
+                xp_send_CommandStationBusyResponse();             // we are busy
                 processed = 1;
               }
               break;
             case 1:          // Hex : 0xE4 0x21 AH AL Gruppe 2 X-Or-Byte   (Gruppe 2: 0000FFFF) f8...f5
-              if (organizer_ready()) {
+              if (organizer_IsReady()) {
                 retval = do_loco_func_grp2(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
                 } 
                 processed = 1;
               }
               else {
-                xp_send_busy();             // we are busy
+                xp_send_CommandStationBusyResponse();             // we are busy
                 processed = 1;
               }
               break;
             case 2:          // Hex : 0xE4 0x22 AH AL Gruppe 3 X-Or-Byte   (Gruppe 3: 0000FFFF) f12...f9
-              if (organizer_ready()) {
+              if (organizer_IsReady()) {
                 retval = do_loco_func_grp3(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
                 } 
                 processed = 1;
               }
               else {
-                xp_send_busy();             // we are busy
+                xp_send_CommandStationBusyResponse();             // we are busy
                 processed = 1;
               }
               break;
             case 3:          // Hex : 0xE4 0x23 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
-              if (organizer_ready()) {
+              if (organizer_IsReady()) {
                 #if (DCC_F13_F28 == 1)
                 retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                  xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                  xpnet_SendLocStolen(orgz_old_lok_owner, addr);
                 }
                 #endif
                 processed = 1;
               }
               else {
-                xp_send_busy();             // we are busy
+                xp_send_CommandStationBusyResponse();             // we are busy
                 processed = 1;
               }
               break;
@@ -991,17 +824,17 @@ void xp_parser(void)
               // Hex : 0xE4 0x27 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
               break;
             case 8: // Hex : 0xE4 0x28 AH AL Gruppe 5 X-Or-Byte   (Gruppe 5: FFFFFFFF) f28...f21
-              if (organizer_ready()) {
+              if (organizer_IsReady()) {
                 #if (DCC_F13_F28 == 1)
                 retval = do_loco_func_grp5(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
                 }
                 #endif
                 processed = 1;
               }
               else {
-                xp_send_busy();             // we are busy
+                xp_send_CommandStationBusyResponse();             // we are busy
                 processed = 1;
               }
               break;
@@ -1071,7 +904,7 @@ void xp_parser(void)
           addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
           switch(rx_message[1] & 0x0f) {
             case 0x04:
-                delete_from_locobuffer(addr);   // normally we don't need this - we manage it dynamically
+                lb_DeleteEntry(addr);   // normally we don't need this - we manage it dynamically
                 processed = 1;
                 break;
           }
@@ -1082,18 +915,18 @@ void xp_parser(void)
               break;
             case 3: // Hex : 0xE4 0xF3 AH AL Gruppe 4 X-Or-Byte   (Gruppe 4: FFFFFFFF) f20...f13
               // (special version for Roco Multimaus)
-              if (organizer_ready()) {
+              if (organizer_IsReady()) {
                 #if (DCC_F13_F28 == 1)
                   addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
                   retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
                   if (retval & ORGZ_STOLEN) {
-                    xp_send_lok_stolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
                   }
                 #endif
                 processed = 1;
               }
               else {
-                xp_send_busy();             // we are busy
+                xp_send_CommandStationBusyResponse();             // we are busy
                 processed = 1;
               }
               break;
@@ -1108,7 +941,7 @@ void xp_parser(void)
 
 //===============================================================================
 //
-// 4. Xpressnet Master 
+// 5. Xpressnet Public interface
 //
 //===============================================================================
 // Timeouts: SLOT_TIMEOUT: We wait this time after an INQUIRY for the first response
@@ -1140,7 +973,11 @@ enum xp_states { // actual state for the Xpressnet Task
 signed char slot_timeout;
 uint32_t rx_timeout; // zelfde eenheid als millis()
 
-void run_xpressnet() {
+void xpnet_Init() {
+  xp_state = XP_INIT;
+} // xpnet_Init
+
+void xpnet_Run() {
   switch (xp_state) {
     case XP_INIT:
       // we supose this is done: init_timer2(); // running with 4us per tick
@@ -1218,12 +1055,12 @@ void run_xpressnet() {
       break;
     case XP_CHECK_BROADCAST:
       if (status_event.changed_xp) {
-        xp_send_bc_message();                            // report any Status Change
+        xp_send_BroadcastMessage();                            // report any Status Change
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }
       #if (DCC_FAST_CLOCK == 1)
       else if (status_event.clock) {
-        xp_send_fast_clock(0);    // send as broadcast   // new: 23.06.2009; possibly we need a flag
+        xp_send_FastClockResponse(0);    // send as broadcast   // new: 23.06.2009; possibly we need a flag
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }
       #endif
@@ -1238,29 +1075,69 @@ void run_xpressnet() {
       break;
 
     case XP_CHECK_DATABASE:
-      if (db_message_ready == 0) {
+      if (database_XpnetMessageFlag == 0) {
         xp_state = XP_INQUIRE_SLOT;
       }
       else {
-        if (db_message_ready == 1)
-          xp_send_message(MESSAGE_ID | 0, db_message);   // send this as MESSAGE (normal download)
+        if (database_XpnetMessageFlag == 1)
+          xpnet_SendMessage(MESSAGE_ID | 0, database_XpnetMessage);   // send this as MESSAGE (normal download)
         else
-          xp_send_message(CALL_ID | 0, db_message);      // send this as 'CALL' (Roco hack, info W.Kufer)
+          xpnet_SendMessage(CALL_ID | 0, database_XpnetMessage);      // send this as 'CALL' (Roco hack, info W.Kufer)
         // TODO SDS2021 : toch maar een vieze implementatie, maar allee
-        db_message_ready = 0;
+        database_XpnetMessageFlag = 0;
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }                                                  
       break;
   }
-} // run_xpressnet
+} // xpnet_Run
 
-void init_xpressnet() {
-  xp_state = XP_INIT;
-} // init_xpressnet
+// function for sending a generic message on the xpnet
+// used by UI for sending accessory feedback, and in this file
+void xpnet_SendMessage(unsigned char callByte, unsigned char *msg) {
+  unsigned char n, total, my_xor;
+
+  n = 0;
+  my_xor = msg[0];
+  total = msg[0] & 0x0F;
+  
+  while (!XP_tx_ready()) ;                 // busy waiting! (but shouldn't happen)
+
+  XP_send_call_byte(callByte);              // send slot (9th bit is 1)
+  XP_send_byte(msg[0]);                    // send header
+
+  while (n != total) {
+    n++;
+    my_xor ^= msg[n];
+    XP_send_byte(msg[n]);              // send data
+  }    
+  XP_send_byte(my_xor);                   // send xor
+} // xpnet_SendMessage
+
+// TODO SDS2021 : nog case toevoegen voor ntf naar local UI als slot=0 een loc heeft verloren!
+// used by UI after stealing a loc from another xpnet device (slot), and used in this file
+void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress)
+{
+  if (slot != 0) {
+    tx_message[0] = 0xE3;
+    tx_message[1] = 0x40;
+    tx_message[2] = (unsigned char) (locAddress / 256);                           
+    tx_message[3] = (unsigned char) (locAddress);   
+    if (locAddress > XP_SHORT_ADDR_LIMIT) {
+      tx_message[2] |= 0xc0;                                              
+    }
+    xpnet_SendMessage(MESSAGE_ID | slot, tx_message);
+  }
+  else {
+    // TODO implement ntf naar local UI
+  }
+} // xpnet_SendLocStolen
+
 
 #else // #if (XPRESSNET_ENABLED == 1)
 
-void init_xpressnet() {};
-void run_xpressnet() {};
+void xpnet_Init() {};
+void xpnet_Run() {};
+void xpnet_SendMessage(unsigned char callByte, unsigned char *msg) {}
+void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress) {}
 
 #endif // #if (XPRESSNET_ENABLED == 1)

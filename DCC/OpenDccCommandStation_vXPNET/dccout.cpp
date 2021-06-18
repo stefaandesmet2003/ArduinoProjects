@@ -439,34 +439,33 @@ ISR(TIMER1_COMPA_vect) {
 
 } // ISR
 
-void init_dccout(void)
-  {
-    MY_STATE_REG = DOI_IDLE; // doi.state = dos_idle;
-    next_message_count = 0;
-    next_message.size = 2;
-    next_message.dcc[0] = 0;
-    next_message.dcc[1] = 0;
+void dccout_Init(){
+  MY_STATE_REG = DOI_IDLE; // doi.state = dos_idle;
+  next_message_count = 0;
+  next_message.size = 2;
+  next_message.dcc[0] = 0;
+  next_message.dcc[1] = 0;
 
-    doi.railcom_enabled = eeprom_read_byte((uint8_t *)eadr_railcom_enabled);
+  doi.railcom_enabled = eeprom_read_byte((uint8_t *)eadr_railcom_enabled);
 
-    do_send(1);                         // init COMP regs.
+  do_send(1);                         // init COMP regs.
 
-    // setup timer 1
-    TCNT1 = 0;    // no prescaler
+  // setup timer 1
+  TCNT1 = 0;    // no prescaler
 
-     // note: DDR for Port D4 and D5 must be enabled
-    TCCR1A = (1<<COM1A1) | (0<<COM1A0)  //  clear OC1A (=DCC) on compare match
-           | (1<<COM1B1) | (1<<COM1B0)  //  set   OC1B (=NDCC) on compare match
-           | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
-           | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
-                                          //  TOP is OCR1A
-    TCCR1B = (0<<ICNC1)  | (0<<ICES1)   // Noise Canceler: Off
-           | (0<<WGM13)  | (1<<WGM12)
-           | (0<<CS12)   | (0<<CS11) | (1<<CS10);  // no prescaler, source = sys_clk
+    // note: DDR for Port D4 and D5 must be enabled
+  TCCR1A = (1<<COM1A1) | (0<<COM1A0)  //  clear OC1A (=DCC) on compare match
+          | (1<<COM1B1) | (1<<COM1B0)  //  set   OC1B (=NDCC) on compare match
+          | (0<<FOC1A)  | (0<<FOC1B)   //  reserved in PWM, set to zero
+          | (0<<WGM11)  | (0<<WGM10);  //  CTC (together with WGM12 and WGM13)
+                                        //  TOP is OCR1A
+  TCCR1B = (0<<ICNC1)  | (0<<ICES1)   // Noise Canceler: Off
+          | (0<<WGM13)  | (1<<WGM12)
+          | (0<<CS12)   | (0<<CS11) | (1<<CS10);  // no prescaler, source = sys_clk
 
 
-    TIMSK1 |= (1<<OCIE1A);
-  }
+  TIMSK1 |= (1<<OCIE1A);
+}
 
 #endif   //  DCCISR_IS_OPTIMIZED
 
@@ -486,22 +485,19 @@ void init_dccout(void)
 // RailCom Interface
 //-------------------------------------------------------------------------------------
 
-void dccout_enable_cutout(void)
-  {
+void dccout_EnableCutout() {
     // eigentlich sollte man doi.state abfragen, um auch beim ersten mal synchron die cutout zu erzeugen
     // aber DCC wirds überleben.
     doi.railcom_enabled = 1;
-  }
+}
 
-void dccout_disable_cutout(void)
-  {
+void dccout_DisableCutout() {
     doi.railcom_enabled = 0;
-  }
+}
 
-unsigned char dccout_query_cutout(void)
-  {
+bool dccout_IsCutoutActive() {
     return(doi.railcom_enabled);
-  }
+}
 
 
 // #define MAERKLIN_ENABLED
@@ -1132,7 +1128,7 @@ ISR(TIMER1_OVF_vect)
      }
   }
 
-void init_mmout(void)
+void init_mmout()
   {
     mm.state = mms_idle;
     next_message_count = 0;

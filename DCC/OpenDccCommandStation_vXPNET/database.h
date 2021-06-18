@@ -38,22 +38,20 @@ typedef struct {
 } locoentry_t;
 
 // TODO SDS2021 : steek dit in de public interface ipv global vars
-extern unsigned char db_message[17]; 
-extern unsigned char db_message_ready;            // interface flag to Xpressnet
+extern unsigned char database_XpnetMessage[17]; 
+extern unsigned char database_XpnetMessageFlag;            // interface flag to Xpressnet
 
-void init_database();           // at power up
-void run_database();            // multitask replacement, call in loop
-void do_xmit_database();        // start transfer on Xpressnet
-
-void clear_loco_database();     // delete all entries
-void reset_loco_database();     // factory reset the entries
-unsigned char get_loco_data(locoentry_t *actual);
-t_format get_loco_format(unsigned int addr);   // if loco not in data base - we return default format
+void database_Init();           // at power up
+void database_Run();            // multitask replacement, call in loop
+void database_StartTransfer();        // start transfer on Xpressnet
+void database_Clear();     // delete all entries
+void database_ResetDefaults();     // factory reset the entries
+t_format database_GetLocoFormat(unsigned int addr);   // if loco not in data base - we return default format
 //TODO SDS2021, is het niet beter om een get_loco_data (addr, locoentry_t*) te hebben??
 // we willen de data ook voor local ui makkelijk uit de db halen
-uint8_t get_loco_name(unsigned int addr, uint8_t *name); // sds temp??
-unsigned char store_loco_format(unsigned int addr, t_format format);
-unsigned char store_loco_name(unsigned int addr, unsigned char * name);
+uint8_t database_GetLocoName(unsigned int addr, uint8_t *name); // sds temp??
+unsigned char database_PutLocoFormat(unsigned int addr, t_format format);
+unsigned char database_PutLocoName(unsigned int addr, unsigned char * name);
 
 
 

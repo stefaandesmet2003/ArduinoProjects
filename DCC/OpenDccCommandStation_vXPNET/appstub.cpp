@@ -34,7 +34,7 @@ void app_Init()
 {
 } // app_Init
 
-char * app_GetTime (void)
+char * app_GetTime ()
 {
 	return app_CurTime;
 }
@@ -79,79 +79,83 @@ That is why the 28 step mode is often referred to as 28/128.
 void app_SetSpeed (uint16_t locAddr, uint8_t locSpeed)
 {
   unsigned char retval;
-  if (organizer_ready()) {
+  if (organizer_IsReady()) {
     retval = do_loco_speed (LOCAL_UI_SLOT,locAddr, locSpeed);
     if (retval & ORGZ_STOLEN)
-      xp_send_lok_stolen(orgz_old_lok_owner,locAddr);
+      xpnet_SendLocStolen(orgz_old_lok_owner,locAddr);
   }
 } // app_SetSpeed
 
-uint8_t app_GetSpeed (uint16_t locAddr)
+uint8_t app_GetSpeed (uint16_t locAddress)
 {
-  uint8_t lb_index;
-  lb_index = scan_locobuffer(locAddr);  
-  if (lb_index != SIZE_LOCOBUFFER)
-    return (locobuffer[lb_index].speed);
-  else
+  uint32_t retval = 0;
+  locomem *lbData;
+
+  retval = lb_GetEntry(locAddress, &lbData) &0xFF;
+  if (retval) // not found
     return (0); // dit is geen invalid speed, maar stop met reverse bit, we gaan ervan uit dat dit normaal niet wordt gebruikt, stop speed = 0x0
+  return (lbData->speed);
 } // app_GetSpeed
 
 // support voor 32 functies, 1 bit per functie, 29 max gebruikt : fl + f1..f28
 // zijn die funcs allemaal geinitialiseerd in locobuffer? bv bij startup uit de database? of moet de commandstation/ui dit doen?
 // retval 0xFFFF = locAddr niet in loco buffer
-uint32_t app_GetFuncs (uint16_t locAddr)
+uint32_t app_GetFuncs (uint16_t locAddress)
 {
-  uint8_t lb_index;
   uint32_t retval = 0;
-  lb_index = scan_locobuffer(locAddr);  
-  if (lb_index != SIZE_LOCOBUFFER) {
-    retval = locobuffer[lb_index].fl; //FL = F0
-    retval = retval | ((locobuffer[lb_index].f4_f1 & 0x0F) << 1);
-    retval = retval | ((locobuffer[lb_index].f8_f5 & 0x0F) << 5);
-    retval = retval | ((locobuffer[lb_index].f12_f9 & 0x0F) << 9);
-#if (DCC_F13_F28 == 1)
-    retval = retval | (locobuffer[lb_index].f20_f13 << 13);
-    retval = retval | ((uint32_t)locobuffer[lb_index].f28_f21 << 21); // TODO 2021: moeten dan niet alle lijnen cast naar uint32_t hebben?
-#endif 
-    return (retval);
-  }
-  else
+  locomem *lbData;
+
+  retval = lb_GetEntry(locAddress, &lbData) & 0xFF;
+  if (retval) // not found -> return an invalid code
     return (0xFFFF); // dit is een invalid code, want er zijn maar 28 funcs gedefinieerd in dcc
+
+  retval = lbData->fl; //FL = F0
+  retval = retval | ((uint32_t)lbData->f4_f1 << 1);
+  retval = retval | ((uint32_t)lbData->f8_f5 << 5);
+  retval = retval | ((uint32_t)lbData->f12_f9 << 9);
+#if (DCC_F13_F28 == 1)
+  retval = retval | ((uint32_t)lbData->f20_f13 << 13);
+  retval = retval | ((uint32_t)lbData->f28_f21 << 21);
+#endif
+  return (retval);
+
 } // app_GetFuncs
 
-// 1 bit tegelijk, we kunnen toch maar 1 bit tegelijk togglen in de UI
+// SDS : kan beter : we kunnen maar 1 bit tegelijk togglen in de UI
+// maar we moeten hier wel alle bits uit de grpX hebben want do_loco_func_grpX overschrijft alle functie bits in de groep!!!
+// daarom voor het gemak geven we 32 bits onOff (f0->f28)
+// func is de functie die moet gezet worden, maar dus alle functies in dezelfde groep worden meegezet
 // func 0 = light
 // f1 ->f28 
 // on = 1, off = 0
-void app_SetFunc (uint16_t locAddr, uint8_t func, uint8_t onOff) 
-{
+// SDS: is niet juist want do_loco_func_grpX overschrijft alle functie bits in de groep!!!
+void app_SetFunc (uint16_t locAddr, uint8_t func, uint32_t allFuncs) {
   uint8_t retval;
-  if (organizer_ready()) {
+  if (organizer_IsReady()) {
     if (func ==0)
-      retval= do_loco_func_grp0 (LOCAL_UI_SLOT,locAddr, onOff);
+      retval= do_loco_func_grp0 (LOCAL_UI_SLOT,locAddr, allFuncs & 0xFF); // grp0 = f0 = fl
     else if ((func >=1) && (func <= 4))
-      retval= do_loco_func_grp1 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-1));
+      retval= do_loco_func_grp1 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 1)); // grp1 = f1..f4
     else if ((func >=5) && (func <= 8))
-      retval= do_loco_func_grp2 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-5));
+      retval= do_loco_func_grp2 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 5)); // grp2 = f5..f8
     else if ((func >=9) && (func <= 12))
-      retval= do_loco_func_grp3 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-9));
+      retval= do_loco_func_grp3 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 9)); // grp3 = f9..f12
 #if (DCC_F13_F28 == 1)        
     else if ((func >=13) && (func <= 20))
-      retval= do_loco_func_grp4 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-13));
+      retval= do_loco_func_grp4 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 13));
     else if ((func >=21) && (func <= 28))
-      retval= do_loco_func_grp5 (LOCAL_UI_SLOT,locAddr, (onOff & 0x1) << (func-21));
+      retval= do_loco_func_grp5 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 21));
 #endif
     if (retval & ORGZ_STOLEN)
-      xp_send_lok_stolen(orgz_old_lok_owner,locAddr);
-
+      xpnet_SendLocStolen(orgz_old_lok_owner,locAddr);
   }
 } // app_SetFunc
 
 // caller to provide memory for *name
-// database.cpp : store_loco_name wordt voorlopig nergens gebruikt
+// database.cpp : database_PutLocoName wordt voorlopig nergens gebruikt
 void app_GetLocName( uint16_t locAddr, char *locName) {
   uint8_t retval;
-  retval = get_loco_name(locAddr, (uint8_t*)locName);
+  retval = database_GetLocoName(locAddr, (uint8_t*)locName);
   if (!retval)
     strcpy(locName,app_DefaultLocName);
 } // app_GetLocName
@@ -168,7 +172,7 @@ bool app_ToggleAccessory (uint16_t turnoutAddress, bool activate) {
   // om te togglen moeten we dan coil=1 aansturen (throw)
   // bij succes, komt dan een 0-bit in app_Turnouts = wissel gebogen op display
   uint8_t coil = ((app_Turnouts >> turnoutAddress) & 0x1);
-  if (!organizer_ready())
+  if (!organizer_IsReady())
     return (APP_INTERNALERR0R);
   
   if (activate) {
@@ -179,7 +183,7 @@ bool app_ToggleAccessory (uint16_t turnoutAddress, bool activate) {
       unsigned char tx_message[3];
       tx_message[0] = 0x42;
       turnout_getInfo(turnoutAddress,&tx_message[1]);
-      xp_send_message(FUTURE_ID, tx_message); // feedback broadcast
+      xpnet_SendMessage(FUTURE_ID, tx_message); // feedback broadcast
     }
   }
   else {
@@ -190,7 +194,7 @@ bool app_ToggleAccessory (uint16_t turnoutAddress, bool activate) {
 
 bool app_DoExtendedAccessory (uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
   bool retval;
-  if (!organizer_ready())
+  if (!organizer_IsReady())
     return (APP_INTERNALERR0R);
   retval = do_signal_accessory(decoderAddress,signalId, signalAspect); // retval==0 means OK
   return retval;
@@ -199,12 +203,10 @@ bool app_DoExtendedAccessory (uint16_t decoderAddress, uint8_t signalId, uint8_t
 void app_TestCVRead()
 {
   // read CV1
-  //Serial.println("test CV read");
-  my_XPT_DCCRD(1);
+  programmer_CvDirectRead(1);
 }
 
-uint8_t app_GetProgResults (uint16_t &cv, uint8_t &cvdata)
-{
+uint8_t app_GetProgResults (uint16_t &cv, uint8_t &cvdata) {
   uint8_t retval;
   
   if (prog_event.busy)
@@ -213,4 +215,4 @@ uint8_t app_GetProgResults (uint16_t &cv, uint8_t &cvdata)
   cv = prog_cv;
   cvdata = prog_data;
   return (retval);
-}
+} // app_GetProgResults

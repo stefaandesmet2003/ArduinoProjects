@@ -35,8 +35,8 @@ typedef uint8_t key_t;
 #define DEBOUNCE_DELAY 50
 #define LONGPRESS_DELAY 1000
 
-void keys_Init (void);
-void keys_Update (void);
+void keys_Init ();
+void keys_Update ();
 // returns the key_state (UP, DOWN,LONGDOWN)
 key_t keys_GetState (key_t key);
 extern void keys_Handler( key_t key ) __attribute__ ((weak));

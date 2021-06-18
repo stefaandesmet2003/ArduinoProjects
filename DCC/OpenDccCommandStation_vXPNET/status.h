@@ -30,6 +30,15 @@
 #ifndef __STATUS_H__
 #define __STATUS_H__
 
+/* TODO SDS2021
+ * - onderscheid ts RUN_STOP & RUN_PAUSE nodig??
+ * - onderscheid ts RUN_SHORT & RUN_OFF nodig??
+ * RUN_STOP is compatibel met xpnet spec (emergency off), 
+ * RUN_PAUSE is eventueel een smoothere stop van de baan (locs bollen uit ipv direct te stoppen)?
+ * RUN_PAUSE wordt nog niet gebruikt
+ * onderscheid RUN_OFF & RUN_SHORT is niet zo duidelijk, OFF = gevraagd door UI bv, en SHORT is externe oorzaak?
+ * maar is dat onderscheid nodig in status??
+*/
 typedef enum {
   INIT,
   RUN_OKAY,     // DCC Running
@@ -43,20 +52,18 @@ typedef enum {
   PROG_ERROR    // Prog-Mode, Fehler beim Programmieren
 } t_opendcc_state;
 
-typedef struct       // each member will be decremented on every tick until 0
-{
+// TODO SDS2021 : nog enkel nodig voor lenz_parser
+typedef struct {      // each member will be decremented on every tick until 0
   unsigned int parser;       // high level parser timeout
-  //sds unsigned int main_short;   // debounce short message
-  //sds unsigned int prog_short;  
 } t_no_timeout;
 
 // Interface for OpenDCC-Parser
 typedef struct 
 {
   unsigned char changed: 1;       // if != 0: there was (could be) a state change
-                                  // set by set_opendcc_state - cleared by host parser
+                                  // set by status_SetState - cleared by host parser
   unsigned char changed_xp: 1;    // mirror for Xpressnet
-                                  // set by set_opendcc_state - cleared by xpressnet master
+                                  // set by status_SetState - cleared by xpressnet master
   unsigned char clock: 1;         // there was a minute tick for DCC Layout time
                                   // set by fast_clock - cleared by xpressnet master
 } t_status_event;
@@ -67,9 +74,10 @@ typedef enum {
 } hwEvent_t;
 
 extern t_opendcc_state opendcc_state; // this is the current state of the box
-extern t_no_timeout no_timeout;
 extern t_status_event status_event;   // Message flag: there was a change in status
 extern unsigned char ext_stop_enabled;
+// TODO SDS2021 : nog enkel nodig voor lenz_parser
+extern t_no_timeout no_timeout;
 
 #if (DCC_FAST_CLOCK==1)
 // fast clock record
@@ -78,10 +86,10 @@ extern t_fast_clock fast_clock;
 
 //===================================================================================
 // Interface-Routines to other programs
-void init_state(void);
-void set_opendcc_state(t_opendcc_state next);
-void run_state(void);
-bool is_prog_state(void);
+void status_Init();
+void status_SetState(t_opendcc_state next);
+void status_Run();
+bool status_IsProgState(); // TODO SDS2021 : enkel gebruikt in lenz parser config, mag dat niet weg ??
 extern void hwEvent_Handler( hwEvent_t event ) __attribute__ ((weak));
 
 #endif // __STATUS_H__

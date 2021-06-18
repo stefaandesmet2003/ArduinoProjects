@@ -28,9 +28,11 @@
 //                  Control of line direction 
 //
 //------------------------------------------------------------------------
-
 #include "Arduino.h"
-#include "hardware.h" // for RS485_DERE pin
+#include "config.h"
+
+#if (XPRESSNET_ENABLED == 1)
+
 #include "rs485.h"
 //=====================================================================
 //
@@ -62,18 +64,16 @@ unsigned char X_tx_read_ptr = 0;
 unsigned char X_tx_write_ptr = 0;
 unsigned char X_tx_fill = 0;
 
-static inline void set_XP_to_receive(void)
+static inline void set_XP_to_receive()
 {
   HARDWARE_SET_XP_RECEIVE;        // see rs485.h
 }
 
-static inline void set_XP_to_transmit(void)
-{
+static inline void set_XP_to_transmit() {
   HARDWARE_SET_XP_TRANSMIT;        // see rs485.h
 }
 
-static void XP_flush_rx(void)                 // Flush Receive-Buffer
-{
+static void XP_flush_rx() { // Flush Receive-Buffer
   cli();
   do {
     UDR0;
@@ -88,8 +88,7 @@ static void XP_flush_rx(void)                 // Flush Receive-Buffer
   sei();
 } // XP_flush_rx
 
-void init_rs485(void)
-{
+void rs485_Init() {
   uint16_t ubrr;
   uint8_t sreg = SREG;
   
@@ -133,7 +132,7 @@ void init_rs485(void)
   XP_flush_rx();
   UCSR0A |= (1 << TXC0);         // clear tx complete flag
   sei();
-} // init_rs485
+} // rs485_Init
 
 //---------------------------------------------------------------------------
 // Halbduplex: auf TXC Complete schalten wir sofort die Richtung um
@@ -141,8 +140,7 @@ void init_rs485(void)
 // Wenn Optimize wegfällt, dann darf NAKED nicht mehr benutzt werden - Flags!
 // Vermutlich wird alles andere als ISR_NOBLOCK laufen müssen!
 //
-ISR(USART_TX_vect)
-{    
+ISR(USART_TX_vect) {
   set_XP_to_receive();
 } // USART_TX_vect
 
@@ -153,16 +151,13 @@ ISR(USART_TX_vect)
 
 // We transmit 9 bits
 //sds aangepast voor uart0 ipv uart1
-ISR(USART_UDRE_vect) 
-{
-  union
-  {
+ISR(USART_UDRE_vect) {
+  union {
     unsigned int w;
     unsigned char b[sizeof(unsigned int)];
   } tdat;
 
-  if (X_tx_read_ptr != X_tx_write_ptr)
-  {
+  if (X_tx_read_ptr != X_tx_write_ptr) {
     // sds : niet gecomment in rs232.cpp, 
     // allicht omdat we hier de TXC int systematisch gebruiken, 
     // en dan wordt TXC flag automatisch gereset
@@ -185,8 +180,7 @@ ISR(USART_UDRE_vect)
 // keine überlaufsicherung, da ja wir Master sind.
 //
 // sds aangepast voor uart0 ipv uart1
-ISR(USART_RX_vect)
-{
+ISR(USART_RX_vect) {
   if (UCSR0A & (1<< FE0)) { // Frame Error
     UDR0;  // zumindest lesen, damit der INT stirbt
 	}
@@ -206,8 +200,7 @@ ISR(USART_RX_vect)
 // Upstream Interface
 //-----------------------------------------------------------------------------
 // TX:
-bool XP_tx_ready (void)
-{
+bool XP_tx_ready () {
   if (X_tx_fill < (X_TxBuffer_Size-18)) { // keep space for one complete message (16)
     return(true);  // true if enough room
   }
@@ -216,8 +209,7 @@ bool XP_tx_ready (void)
 
 // ret 1 if full
 // This goes with fifo (up to 32), bit 8 is 0.
-bool XP_send_word (const unsigned int c)
-{
+bool XP_send_word (const unsigned int c) {
   X_TxBuffer[X_tx_write_ptr] = c;
 
   X_tx_write_ptr++;
@@ -238,13 +230,11 @@ bool XP_send_word (const unsigned int c)
   return(false);
 } // XP_send_word
 
-bool XP_send_byte (const unsigned char c)
-{
+bool XP_send_byte (const unsigned char c) {
   return(XP_send_word(c));
 } // XP_send_byte
 
-bool XP_send_call_byte (const unsigned char c)
-{
+bool XP_send_call_byte (const unsigned char c) {
   unsigned char my_c, temp;
 
   my_c = c & 0x7F;
@@ -261,9 +251,7 @@ bool XP_send_call_byte (const unsigned char c)
 
 //------------------------------------------------------------------------------
 // RX:
-// SDS TODO 2021 : rename isAvailable() of zoiets
-bool XP_rx_ready (void)
-{
+bool XP_rx_ready () {
   if (X_rx_read_ptr != X_rx_write_ptr)
     return(true);     // there is something
   else return(false);  
@@ -274,8 +262,7 @@ bool XP_rx_ready (void)
 //
 // there is no check whether a char is ready, this must be
 // done before calling with a call to rx_fifo_ready();
-unsigned char XP_rx_read (void)
-{
+unsigned char XP_rx_read () {
   unsigned char retval;
 
   retval = X_RxBuffer[X_rx_read_ptr];
@@ -288,3 +275,5 @@ unsigned char XP_rx_read (void)
       
   return(retval);
 } // XP_rx_read
+
+#endif // (XPRESSNET_ENABLED ==1)

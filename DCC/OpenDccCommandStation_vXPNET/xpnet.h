@@ -22,10 +22,10 @@
 #define CALL_ID     0x40
 #define MESSAGE_ID  0x60
 
-void init_xpressnet(void);
-void run_xpressnet(void);                       // multitask replacement
-void xp_send_message(unsigned char callByte, unsigned char *str);   // send a message with this callbyte (ID+slot)
+void xpnet_Init();
+void xpnet_Run();                       // multitask replacement
+void xpnet_SendMessage(unsigned char callByte, unsigned char *str);   // send a message with this callbyte (ID+slot)
 
 // TODO SDS2021 : is dit de beste oplossing als een lok wordt gestolen door de UI?
 // nu wordt locobuffer.owner_changed flag niet meer gebruikt, maar wel die mottige orgz_old_owner
-void xp_send_lok_stolen(unsigned char slot, unsigned int lokaddr);
+void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress);

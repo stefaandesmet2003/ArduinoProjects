@@ -40,10 +40,7 @@ volatile extern unsigned char next_message_count;     // load message and set co
                                                // if > 1 -> output next_message
 											   // if = 0 -> ready for next_message
 
-void init_dccout(void);                      // call once at boot up
-void dccout_enable_cutout(void);             // create railcom cutout
-void dccout_disable_cutout(void);
-unsigned char dccout_query_cutout(void);
-
-
-
+void dccout_Init();                      // call once at boot up
+void dccout_EnableCutout();             // create railcom cutout
+void dccout_DisableCutout();
+bool dccout_IsCutoutActive();

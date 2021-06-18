@@ -141,12 +141,7 @@
 #define RS485Transmit    HIGH
 #define RS485Receive     LOW
 
-#define MAIN_TRACK_ON    digitalWrite(SW_ENABLE_MAIN,HIGH)
-#define MAIN_TRACK_OFF   digitalWrite(SW_ENABLE_MAIN,LOW)
-#define MAIN_TRACK_STATE (digitalRead(SW_ENABLE_MAIN))
-#define PROG_TRACK_ON    digitalWrite(SW_ENABLE_PROG,HIGH)
-#define PROG_TRACK_OFF   digitalWrite(SW_ENABLE_PROG,LOW)
-#define PROG_TRACK_STATE (digitalRead(SW_ENABLE_PROG))
+#define PROG_TRACK_STATE (digitalRead(SW_ENABLE_PROG)) // used by dccout
 
 // Abfragen:
 //sds 201611 : NMAIN_SHORT, NPROG_SHORT, zijn active low

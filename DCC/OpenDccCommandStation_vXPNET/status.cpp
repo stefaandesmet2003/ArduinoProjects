@@ -19,7 +19,7 @@
 //            2007-10-15 V0.05 key_go_at_start_pressed neu dazu.
 //            2008-01-08 V0.06 short_turnoff_time is fetched from eeprom
 //            2008-01-11 V0.07 prog_short_turnoff_time is fetched from eeprom
-//            2008-01-16 V0.08 is_prog_state() added
+//            2008-01-16 V0.08 status_IsProgState() added
 //                             moved to XP
 //            2008-07-18 V0.09 ext_stop added; also DMX out is parallel controlled
 //                             bugfix in timer mode for atmega644p
@@ -46,8 +46,7 @@
 //-----------------------------------------------------------------
 /* 2021 SDS TODO
  * check of de oude implementatie van short check weg mag
- * gebruiken? :  #define BLOCK_SHORT_after_PowerOn     25    // Shorts are ignored immediately after power on, voorlopig niet gebruikt (copy from bidi-booster)
-
+ * 5ms loop is nogal onnauwkeurig, en fast clock ook daardoor
 */
 
 #include "Arduino.h"
@@ -56,7 +55,13 @@
 #include "status.h"
 
 #include "organizer.h"  // for sending fast clock dcc message
-#include "programmer.h" // for reset_programmer
+#include "programmer.h" // for programmer_Reset
+
+
+#define SET_MAIN_TRACK_ON    digitalWrite(SW_ENABLE_MAIN,HIGH)
+#define SET_MAIN_TRACK_OFF   digitalWrite(SW_ENABLE_MAIN,LOW)
+#define SET_PROG_TRACK_ON    digitalWrite(SW_ENABLE_PROG,HIGH)
+#define SET_PROG_TRACK_OFF   digitalWrite(SW_ENABLE_PROG,LOW)
 
 //---------------------------------------------------------------------------
 // data for timeout and debounce
@@ -79,7 +84,6 @@ uint32_t runState5msLastMillis; //sds : zelfde type als millis()
 #define FAST_RECOVER_ON_TIME        1
 #define FAST_RECOVER_OFF_TIME       4
 #define SLOW_RECOVER_TIME         1000  // 1s voor we opnieuw NO_SHORT melden na een kortsluiting
-//sds #define BLOCK_SHORT_after_PowerOn     25    // Shorts are ignored immediately after power on, voorlopig niet gebruikt (copy from bidi-booster)
 
 typedef enum {NO_SHORT, IGNORE_SHORT, FASTREC_OFF, FASTREC_ON, SHORT} shortState_t;
 shortState_t mainShortState,progShortState;
@@ -88,10 +92,8 @@ uint8_t shortFastRecoverAttemptsLeft;
 static bool main_short_check();
 static bool prog_short_check();
 
-void init_state(void)
-{
-  if (eeprom_read_byte((uint8_t *)eadr_ext_stop_enabled) != 0)
-  {
+void status_Init() {
+  if (eeprom_read_byte((uint8_t *)eadr_ext_stop_enabled) != 0) {
     ext_stop_enabled = 1;           // enable external OC Input for emergency stop
     ext_stop_deadtime = eeprom_read_byte((uint8_t *)eadr_ext_stop_deadtime);
     if (ext_stop_deadtime > 100) ext_stop_deadtime = 100;
@@ -115,21 +117,17 @@ void init_state(void)
   mainShortState = NO_SHORT;
   progShortState = NO_SHORT;
 
-} // init_state
+} // status_Init
 
 
-// global timeout supervision
-// opendcc used this for key debouncing too
-// i took short supervision out for now -> <5ms monitoring
-void timeout_tick_5ms(void)
-{
+// sds : wat nog overblijft van opendcc global timeout supervision
+// short supervision zit nu in <5ms monitoring
+void timeout_tick_5ms() {
     if (no_timeout.parser) no_timeout.parser--;  
-    //if (no_timeout.main_short) no_timeout.main_short--;  
-    //if (no_timeout.prog_short) no_timeout.prog_short--;  
 } // timeout_tick_5ms
 
 //---------------------------------------------------------------------------------
-// set_opendcc_state(t_opendcc_state next)
+// status_SetState(t_opendcc_state next)
 //
 // Einstellen des nächsten Zustand mit:
 // - Stellen entsprechender Bits in der Hardware und Rücksetzen der
@@ -138,78 +136,42 @@ void timeout_tick_5ms(void)
 // - Stellen der LEDs
 // - Setzen der globalen Variablen, fallweise Nachricht an den Host
 //
-
-
-static void prog_on(void)
-{
-  PROG_TRACK_ON;
-}
-static void prog_off(void)
-{
-  PROG_TRACK_OFF;
-  reset_programmer();
-}
-
-static void main_on(void)
-{
-  MAIN_TRACK_ON;
-}
-static void main_off(void)
-{
-  MAIN_TRACK_OFF;
-}
-
-void set_opendcc_state(t_opendcc_state next)
-{
+void status_SetState(t_opendcc_state next) {
   if (next == opendcc_state) return;      // no change
   opendcc_state = next;
   status_event.changed = 1;
   status_event.changed_xp = 1;
     
-  switch(next)
-  {
+  switch(next) {
     case RUN_OKAY:                  // DCC running
-      prog_off();
-      main_on();
-      organizer_state.halted = 0;   // enable speed commands again
+      SET_PROG_TRACK_OFF;
+      SET_MAIN_TRACK_ON;
+      organizer_Restart();          // enable speed commands again
       break;
     case RUN_STOP:                  // DCC Running, all Engines Emergency Stop
+    case RUN_PAUSE:                 // DCC Running, all Engines Speed 0, SDS TODO : wordt nog niet gebruikt
       do_all_stop();
-      prog_off();
-      main_on();
+      SET_PROG_TRACK_OFF;
+      SET_MAIN_TRACK_ON;
       break;
     case RUN_OFF:                   // Output disabled (2*Taste, PC)
-      prog_off();
-      main_off();
+    case RUN_SHORT:                 // short on main track
+      SET_PROG_TRACK_OFF;
+      SET_MAIN_TRACK_OFF;
       break;
-    case RUN_SHORT:                 // Kurzschluss
-      prog_off();
-      main_off();
-      break;
-    case RUN_PAUSE:                 // DCC Running, all Engines Speed 0, SDS TODO : wordt nog niet gebruikt
-      prog_off();
-      main_on();
-      break;
-
     case PROG_OKAY:
-      prog_on();
-      main_off();
-      organizer_state.halted = 0;   // enable speed commands again
-      break;
-    case PROG_SHORT:                //
-      prog_off();
-      main_off();
-      break;
-    case PROG_OFF:
-      prog_off();
-      main_off();
-      break;
     case PROG_ERROR:
-      prog_on();
-      main_off();
+      SET_PROG_TRACK_ON;
+      SET_MAIN_TRACK_OFF;
+      organizer_Restart();          // enable speed commands again
+      break;
+    case PROG_SHORT:                // short on programming track
+    case PROG_OFF:
+      SET_PROG_TRACK_OFF;
+      SET_MAIN_TRACK_OFF;
       break;
   }
-} // set_opendcc_state
+} // status_SetState
 
 #if (DCC_FAST_CLOCK==1)
 
@@ -224,7 +186,7 @@ t_fast_clock fast_clock =      // we start, Monday, 8:00
 
 // TODO : deze is niet meer nauwkeurig; 1 fast clock minuut om de +-9sec?
 // is dat omdat deze functie op een 5ms software tick hangt, en niet meer op een timer isr?
-void dcc_fast_clock_step_5ms(void)
+void dcc_fast_clock_step_5ms()
 {
   if (fast_clock.ratio)
   {
@@ -250,24 +212,21 @@ void dcc_fast_clock_step_5ms(void)
 } // dcc_fast_clock_step_5ms
 #endif // DCC_FAST_CLOCK
 
-// Hinweis: RUN_PAUSE wird zur Zeit nicht angesprungen
 // SDS TODO 2021: als er EXT_STOP is én een short, dan flippert de run_state continu tussen de RUN_OFF en RUN_SHORT
 // en krijgen we massaal veel events -> opgelost door hier RUN_SHORT niet meer te gebruiken!
 // SDS TODO 2O21 : RUN_SHORT, PROG_SHORT states nog nodig? willen we een andere afhandeling dan voor RUN_OFF / PROG_OFF?
-void run_state(void)
+void status_Run()
 {
   // check main short
   if ((opendcc_state != RUN_OFF) && (opendcc_state != PROG_OFF)) {
-    if (main_short_check() == true)
-    {
-      set_opendcc_state(RUN_OFF);
+    if (main_short_check() == true) {
+      status_SetState(RUN_OFF);
       if (hwEvent_Handler)
         hwEvent_Handler(HWEVENT_MAINSHORT);
     }
     // check prog short
-    if (prog_short_check() == true)
-    {
-      set_opendcc_state(PROG_OFF);
+    if (prog_short_check() == true) {
+      status_SetState(PROG_OFF);
       if (hwEvent_Handler)
         hwEvent_Handler(HWEVENT_PROGSHORT);
     }
@@ -284,27 +243,24 @@ void run_state(void)
     // check external stop
     // TODO : EXT_STOP_ACTIVE is analogRead want A6 pin is analog only, dus traag
     // is 5ms response time op EXT_STOP echt nodig?
-    if ((ext_stop_enabled) && (opendcc_state != RUN_OFF))
-    {
-      if (!EXT_STOP_ACTIVE) extStopOkLastMillis = millis();
-      else if ((millis() - extStopOkLastMillis) > ext_stop_deadtime)
-      {
+    if ((ext_stop_enabled) && (opendcc_state != RUN_OFF)) {
+      if (!EXT_STOP_ACTIVE) 
+        extStopOkLastMillis = millis();
+      else if ((millis() - extStopOkLastMillis) > ext_stop_deadtime){
           // we hebben een extStop event!
-        set_opendcc_state(RUN_OFF);
+        status_SetState(RUN_OFF);
         if (hwEvent_Handler)
           hwEvent_Handler(HWEVENT_EXTSTOP);
       }
     }
   }
-} // run_state
+} // status_Run
 
 // returns true, if we are in prog state
 // SDS : for now only used by lenz config, no need to remove here, compiler will optimize
-bool is_prog_state(void)
-{
+bool status_IsProgState() {
   bool retval = true;
-  switch(opendcc_state)
-  {
+  switch(opendcc_state) {
     case RUN_OKAY:             // wir laufen ganz normal:
     case RUN_STOP:             // DCC Running, all Engines Emergency Stop
     case RUN_OFF:              // Output disabled (2*Taste, PC)
@@ -320,14 +276,13 @@ bool is_prog_state(void)
     break;
   }
   return(retval);
-} // is_prog_state
+} // status_IsProgState
+
 // return : false = no_short (ook tijdens de fast recovery), true = short
 // mijn eigen implementatie, kan beter want in praktijk is er nooit recovery
-static bool main_short_check()
-{
+static bool main_short_check() {
   bool retval = false; // no_short
-  switch(mainShortState)
-  {
+  switch(mainShortState) {
     case NO_SHORT :
       if (MAIN_IS_SHORT) {
         mainShortState =  IGNORE_SHORT;
@@ -337,20 +292,20 @@ static bool main_short_check()
     case IGNORE_SHORT :
       if (!MAIN_IS_SHORT) {
         mainShortState = NO_SHORT;
-        MAIN_TRACK_ON;
+        SET_MAIN_TRACK_ON;
       }
       else {
         if ((millis() - shortLastMillis) > main_short_ignore_time) {
           mainShortState = FASTREC_OFF;
           shortFastRecoverAttemptsLeft = 3;
-          MAIN_TRACK_OFF;
+          SET_MAIN_TRACK_OFF;
           shortLastMillis = millis();
         }
       }
       break;
     case FASTREC_OFF : 
       if ((millis() - shortLastMillis) > FAST_RECOVER_OFF_TIME) { // 4ms uit, en dan opnieuw aan en zien of de short weg is
-        MAIN_TRACK_ON;
+        SET_MAIN_TRACK_ON;
         mainShortState = FASTREC_ON;
         shortLastMillis = millis();
       }
@@ -360,7 +315,7 @@ static bool main_short_check()
         if (MAIN_IS_SHORT) {
           mainShortState = FASTREC_OFF;
           shortLastMillis = millis();
-          MAIN_TRACK_OFF;
+          SET_MAIN_TRACK_OFF;
           shortFastRecoverAttemptsLeft--;
           if (!shortFastRecoverAttemptsLeft) {
             mainShortState = SHORT;
@@ -369,7 +324,7 @@ static bool main_short_check()
         }
         else {
           mainShortState = NO_SHORT;
-          MAIN_TRACK_ON;
+          SET_MAIN_TRACK_ON;
         }
       }
       break;
@@ -387,8 +342,7 @@ static bool main_short_check()
 } // main_short_check
 
 // return : false = no_short (ook tijdens de fast recovery), true = short
-static bool prog_short_check()
-{
+static bool prog_short_check() {
   bool retval = false; // no_short
   switch(progShortState) {
     case NO_SHORT :
@@ -400,20 +354,20 @@ static bool prog_short_check()
     case IGNORE_SHORT :
       if (!PROG_IS_SHORT) {
         progShortState = NO_SHORT;
-        PROG_TRACK_ON;
+        SET_PROG_TRACK_ON;
       }
       else {
         if ((millis() - shortLastMillis) > prog_short_ignore_time) {
           progShortState = FASTREC_OFF;
           shortFastRecoverAttemptsLeft = 3;
-          PROG_TRACK_OFF;
+          SET_PROG_TRACK_OFF;
           shortLastMillis = millis();
         }
       }
       break;
     case FASTREC_OFF : 
       if ((millis() - shortLastMillis) > FAST_RECOVER_OFF_TIME) { // 4ms uit, en dan opnieuw aan en zien of de short weg is
-        PROG_TRACK_ON;
+        SET_PROG_TRACK_ON;
         progShortState = FASTREC_ON;
         shortLastMillis = millis();
       }
@@ -423,7 +377,7 @@ static bool prog_short_check()
         if (PROG_IS_SHORT) {
           progShortState = FASTREC_OFF;
           shortLastMillis = millis();
-          PROG_TRACK_OFF;
+          SET_PROG_TRACK_OFF;
           shortFastRecoverAttemptsLeft--;
           if (!shortFastRecoverAttemptsLeft) {
             progShortState = SHORT;
@@ -432,7 +386,7 @@ static bool prog_short_check()
         }
         else {
           progShortState = NO_SHORT;
-          PROG_TRACK_ON;
+          SET_PROG_TRACK_ON;
         }
       }
       break;
@@ -494,7 +448,7 @@ signed char prog_short_mean = 0;
 
 signed char next_short_check;
 
-unsigned char run_main_short_check(void)
+unsigned char run_main_short_check()
   {
     switch(main_short)
       {
@@ -554,7 +508,7 @@ unsigned char run_main_short_check(void)
 
 
 
-unsigned char run_prog_short_check(void)
+unsigned char run_prog_short_check()
   {
     switch(prog_short)
       {

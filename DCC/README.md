@@ -7,14 +7,12 @@
 - using static addresses for the moment, no dynamic addresses. Fixed addressing via defines or CV variable.
 - overview of used addresses :  
 -> 0 : CommandStation, using 'slot 0' for the local UI, this is a not-valid XPNET address  
--> 1 : PcInterface, fixed define  
+-> 1 : PcInterface, fixed define for now  
 -> 3 : Throttle, fixed define for now  
 -> 5 : FeedbackDecoder, configurable over CV35, for potentially multiple decoders  
 -> other addresses in range 1..31 not yet used
 
 ## Tested functionality
--  functionality not completely retested in commit 17/06!!  
---> this commit has a partial rework of eeprom database, and locobuffer (esp the loc stolen is simplified)  
 - loco control via local UI & JMRI, JMRI receives loc stolen message
 - turnout control via local UI & JMRI
 - turnout feedback, possibility to assign feedback decoders to provide turnout feedback  
@@ -64,6 +62,11 @@
 -> default accessory addresses : 10 + 11
 -> in JMRI this translates to sensors 81 -> 96 (address X has sensors 8X+1 -> 8X+8), because JMRI counts from 1
 
+## loc database
+- in eeprom from address 0x40, 
+- a store for a number of locs with their default DCC format, and a name (shown on the UI)
+- functions to modify the loc database are implemented, but not hooked up to the UI for now. loc database is initialized using the default eeprom init sketch.
+
 ## note on DCC fast clock
 - is a DCC extension proposed by W. Kufer, CommandStation has a builtin fast clock, and sends updates as DCC packets
 - but fast clock is not part of standard xpnet, and not implemented in JRMI
@@ -71,20 +74,29 @@
 - similarly, JMRI can synchronize with eg. loconet fast clock, but not xpnet : JMRI doesn't handle the xpnet broadcast of fast clock by the CommandStation (proprietary xpnet extension by Kufer not implemented in JMRI)
 - as a result, CommandStation & JRMI cannot synchronize fast clocks over xpnet
 
+## note on stealing locos between xpnet devices
+- multiple xpnet devices can control the same loc decoder. A 'loc_stolen' event is sent to the device that lost control of a loc.
+- JMRI implements a polling of the loc status (speed & functions) and maintains these when taking over control  
+--> TODO for the CS local UI, and throttle
+- release loco from local UI : not yet implemented (can be done by modifying locobuffer directly)  
+--> the loc will then be seen as 'free' by another xpnet device
+- release loco from xpnet device : 
+--> no specific xpnet command available for this function
+-->'Remove Loc from Command Station Stack' command removes loc from the locobuffer, but then the current settings are lost, ie. cannot be taken over by the stealing device  
+- When JMRI receives the loc stolen notification, it continues to poll the CS for the loc status, and can steal the loc back at any time  
+--> initially there was an issue with this, but solved after correctly implementing the F13_F28 Status Response (0xE4-0x51)
+- loc stolen notify on local UI : todo!
+
 ## todo
 - UI : add power on/off, add dcc clock time  
 - UI : rework code  
-- lok_stolen_by_pc etc -> rework locobuffer & organizer (orgz_old_lok_owner=dirty)  
---> ongoing in commit 17/06, needs rework on UI 
-- release loco from local UI :  
-  --> not sure how JMRI can steal a loc, it keeps polling the lost loco but stops after a while  
-  --> looks like an issue in JMRI, because after a while JMRI doesn't poll loc information inquiry (the only way to know the 'loc_is_free' bit  
-  --> even if UI/throttle release the loc in locobuffer, JMRI will not reclaim the loc (needs JMRI restart)  
 - loc stolen notification on local UI
 - appstub clean-up
 - modify timing for short detection on programming track at startup  
 --> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
 --> timing for short detection is too tight  
+--> same for programming a loc with smoothing capacitor
+--> prog track could stay powered on as well? (but this doesn't solve the short detection by the inrush currents)
 - CS blijft fast clock msgs sturen tijdens programming, is dat ok?
 - accessory screen (for decoupler rails & lights)  
 --> keys have toggle on/off function on the decoder outputs  
@@ -93,7 +105,6 @@
 - JMRI 0xE?-0x30 : juist implementeren in xpnet_parser  
 -> dit is een algemeen xpnet msg die DCC packet encapsuleert
 -> ok, nog checken of de POM commands nu nog goed worden uitgevoerd
-- locobuffer uitmesten (ook startup checken, DCC default format etc. nodig?)
 - fast clock lijkt iets te snel te lopen
 - CVs van CommandStation schrijven via programming?
 - add checks on feedback addresses to avoid writing beyond allocated array memory!!!
