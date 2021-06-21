@@ -22,6 +22,16 @@
 #define CALL_ID     0x40
 #define MESSAGE_ID  0x60
 
+typedef struct {
+  unsigned char statusChanged: 1; // if != 0: there was a state change
+                                  // set by status_SetState - cleared by xpnet parser
+  unsigned char clockChanged: 1;  // there was a minute tick for DCC Layout time
+                                  // set by fast_clock - cleared by xpressnet master
+} xpnet_Event_t;
+
+extern xpnet_Event_t xpnet_Event;
+
+
 void xpnet_Init();
 void xpnet_Run();                       // multitask replacement
 void xpnet_SendMessage(unsigned char callByte, unsigned char *str);   // send a message with this callbyte (ID+slot)

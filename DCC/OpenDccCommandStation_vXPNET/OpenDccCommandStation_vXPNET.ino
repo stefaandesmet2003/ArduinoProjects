@@ -11,8 +11,8 @@
 //
 //-----------------------------------------------------------------
 
-#include "config.h"                // general structures and definitions - make your changes here
 #include "hardware.h"              // hardware definitions
+#include "config.h"                // general structures and definitions - make your changes here
 #include "database.h"              // format and names
 #include "status.h"                // led, key, state
 #include "dccout.h"                // make dcc
@@ -57,7 +57,7 @@ const uint8_t *const charBitmap[] PROGMEM = {char1,char2,char3,char4,char5,char6
 // SDS TODO 2021
 // in mijn CS is timer2 enkel nog nodig voor de xpnet slot timing
 // kan dat niet met micros() ?, dan hebben we timer2 geheel niet nodig
-void timer2_Init() {
+static void timer2_Init() {
   // Timer/Counter 2 initialization
   // Clock source: System Clock / 64 -> 4us (komt overeen met TIMER2_TICK_PERIOD in config.h)
   TCCR2A = (0<< COM2A1)   // 00 = normal port mode
@@ -75,7 +75,7 @@ void timer2_Init() {
   TCNT2=0x00;
 } // timer2_Init
 
-void hardware_Init() {
+static void hardware_Init() {
   // Input/Output Ports initialization
   // Port B
   pinMode(BUTTON_GREEN, INPUT); // pullup is extern 10K
@@ -201,3 +201,51 @@ void loop() {
   keys_Update();
   ui_Update();   
 } // loop
+
+// handle events from status module
+void status_EventNotify ( statusEvent_t event, void *data) {
+  switch (event) {
+    case STATUS_STATE_CHANGED :
+      // t_opendcc_state commandStationState = *((t_opendcc_state*) data);
+      // gewoon open_dcc_state gebruiken, want die is toch global
+      switch (opendcc_state) {
+        // TODO : cleanup, dit is voorlopig letterlijk overgenomen uit status_SetState
+        // waar we de afhankelijkheid van organizer weg wilden
+        case RUN_OKAY:
+        case PROG_OKAY:
+        case PROG_ERROR:
+          organizer_Restart(); // enable speed commands again
+          break;
+        case RUN_STOP:        // DCC Running, all Engines Emergency Stop
+        case RUN_PAUSE:       // DCC Running, all Engines Speed 0, SDS TODO : wordt nog niet gebruikt
+          do_all_stop();
+      }
+      break;
+      // notify lenz
+      //lenzEvent.statusChanged = 1;
+      // notify xpnet
+      xpnet_Event.statusChanged = 1;
+      // notify UI
+    case STATUS_CLOCK_CHANGED : 
+      //t_fast_clock *fastClock = (t_fast_clock*) data;
+      // gewoon fast_clock global gebruiken om te lezen is ook ok
+      // now send this to DCC (but not during programming or when stopped)
+      if (opendcc_state == RUN_OKAY) do_fast_clock(&fast_clock);
+      //er moet nog een cleane intf naar xpnet komen ipv xpnet_Event global
+      // notify lenz
+      //lenzEvent.clockChanged = 1;
+      xpnet_Event.clockChanged = 1; // send clock_event to Xpressnet
+      // notify UI -> doen we niet, voldoende dat UI pollt volgens gewenste refresh
+      break;
+    case STATUS_MAIN_SHORT :
+      // TODO cleanup, voorlopig gebruiken we hier nog de oude ntf interface naar UI
+      hwEvent_Handler(HWEVENT_MAINSHORT);
+      break;
+    case STATUS_PROG_SHORT : 
+      hwEvent_Handler(HWEVENT_PROGSHORT);
+      break;
+    case STATUS_EXT_STOP : 
+      hwEvent_Handler(HWEVENT_EXTSTOP);
+      break;
+  }
+}

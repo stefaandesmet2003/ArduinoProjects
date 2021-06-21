@@ -13,30 +13,8 @@
 // file:      xpnet.c
 // author:    Wolfgang Kufer
 // contact:   kufer@gmx.de
-// history:   2008-07-08 V0.01 started
-//            2008-07-31 V0.02 added status_event
-//            2008-08-20 V0.03 send lok stolen changed owner-addr
-//            2008-08-22       added F13 - F28 support
-//            2008-09-01 V0.04 watch handling by slot_use_counter
-//            2008-11-05 V0.05 tunnel_fifo neu dazu
-//            2008-12-03 V0.06 Adresssplitting bei Rückmeldern
-//                             Feedback mit Call-ID 0x20
-//            2009-02-22 V0.07 Bugfix for Emergency Stop
-//            2009-03-09 V0.08 added special command roco multimaus f13-f20
-//            2009-03-11       data base is sent as message or as call
-//            2009-05-25 V0.09 jens.kohn: Accessory Decoder also as broad cast
-//            2009-06-23 V0.10 kw: added status_event.clock to send fast clock 
-//                             added handling of fast clock messages in parser                   
-//            2009-11-09 V0.11 kw: extended accessory 
-//            2010-02-17 V0.12 kw: Pom cv rd command added 
-//            2010-03-16 V0.13 kw: extended accessory on 0x1* 0x13  
-//            2010-04-02 V0.14 kw: PomRead with 0xE4 
-//            2010-04-04 V0.15 kim: Tunnel bugfix             
-//            2010-06-07 V0.16 kw: command 0x80 repaired (bug in V0.23.4 and V0.23.5)
-//            2010-06-17 V0.17 kw added PoM for accessory and extended accessory
-//            2010-11-07 V0.18 kw added feedback and PomCV reading
-//            2011-03-08 V0.19 kw bug fix for roco functions f13-f20
-//
+
+// info Kufer:
 // differences to Xpressnet - docu:
 // a) There is no request for acknowledge - we act different:
 //    if an client creates an error:
@@ -52,19 +30,16 @@
 // content:   XPressnet Interface (Master)
 //            Only Xpressnet V3 is supported.
 //            no support for Multiheader
-// used sw:   status.c:     
-//                          reading status events
-//            rs485.c:      low level rs485 io
-//            organizer.c:  loco stack management   
+
 // used hw:   Timer2 (read only, for short timeouts)
 //            
 //-----------------------------------------------------------------
 
 #include "Arduino.h"
-#include "config.h"                // general structures and definitions
-#include "status.h"
-#include "database.h"              // for database broadcast
-#include "rs485.h"                 // rx and tx serial if, made for xpressnet
+#include "config.h"       // general structures and definitions
+#include "status.h"       // xpnet commands a status change
+#include "database.h"     // for database broadcast
+#include "rs485.h"        // rx and tx serial if, made for xpressnet
 #include "programmer.h"
 #include "organizer.h"
 #include "xpnet.h"
@@ -72,15 +47,19 @@
 
 #if (XPRESSNET_ENABLED == 1)
 
-// generell fixed messages
-unsigned char xp_datenfehler[] = {0x61, 0x80};             // xor wrong
-unsigned char xp_busy[] = {0x61, 0x81};                    // busy
-unsigned char xp_unknown[] = {0x61, 0x82};                 // unknown command
-unsigned char xp_BC_alles_aus[] = {0x61, 0x00};            // Kurzschlussabschaltung
-unsigned char xp_BC_alles_an[] = {0x61, 0x01};             // DCC wieder einschalten
-unsigned char xp_BC_progmode[] = {0x61, 0x02};             // Progmode (das auslösende Gerät muss alles an senden)
-unsigned char xp_BC_progshort[] = {0x61, 0x12};            // Progmode and short
-unsigned char xp_BC_locos_aus[] = {0x81, 0x00};            // Alle Loks gestoppt
+// TODO SDS20201 : we parkeren dat event voorlopig hier ipv in status
+xpnet_Event_t xpnet_Event;
+
+
+// general fixed messages
+static unsigned char xp_datenfehler[] = {0x61, 0x80};             // xor wrong
+static unsigned char xp_busy[] = {0x61, 0x81};                    // busy
+static unsigned char xp_unknown[] = {0x61, 0x82};                 // unknown command
+static unsigned char xp_BC_alles_aus[] = {0x61, 0x00};            // Kurzschlussabschaltung
+static unsigned char xp_BC_alles_an[] = {0x61, 0x01};             // DCC wieder einschalten
+static unsigned char xp_BC_progmode[] = {0x61, 0x02};             // Progmode (das auslösende Gerät muss alles an senden)
+static unsigned char xp_BC_progshort[] = {0x61, 0x12};            // Progmode and short
+static unsigned char xp_BC_locos_aus[] = {0x81, 0x00};            // Alle Loks gestoppt
 
 //===============================================================================
 //
@@ -93,9 +72,9 @@ unsigned char xp_BC_locos_aus[] = {0x81, 0x00};            // Alle Loks gestoppt
 //          d) every time when a round with all used slots is done, one unused
 //             slot is called.
 
-unsigned char slot_use_counter[32];
-unsigned char used_slot;        // 1 .. 31 (actual position for used ones)
-unsigned char unused_slot;      // 1 .. 31 (actual position for unused ones)
+static unsigned char slot_use_counter[32];
+static unsigned char used_slot;        // 1 .. 31 (actual position for used ones)
+static unsigned char unused_slot;      // 1 .. 31 (actual position for unused ones)
 
 static unsigned char get_next_slot() {
   used_slot++;             // advance
@@ -127,35 +106,23 @@ static void set_slot_to_watch(unsigned char slot) {
 
 //===============================================================================
 //
-// 3. Feedback Event Queue 
+// 2. Xpressnet Parser
 //
 //===============================================================================
-//
-// Whenever there is a feedback event, we must tell these events to
-// our clients.
-//
+static unsigned char current_slot;     // 1 .. 31
 
-//===============================================================================
-//
-// 4. Xpressnet Parser
-//
-//===============================================================================
-unsigned char current_slot;     // 1 .. 31
+static unsigned char rx_message[17];             // current message from client
+static unsigned char rx_index;
+static unsigned char rx_size;
 
-unsigned char rx_message[17];             // current message from client
-unsigned char rx_index;
-unsigned char rx_size;
-
-unsigned char tx_message[17];             // current message from master
-unsigned char *tx_ptr;
+static unsigned char tx_message[17];             // current message from master
+static unsigned char *tx_ptr;
 
 // predefined messages
-unsigned char xpnet_version[] = {0x63, 0x21, 
-                                 0x36,      // Version 3.6
-                                 0x00};     // 0: = LZ100 Zentrale 1 = LH 200, 2= DPC, 3= Control Plus
+static unsigned char xpnet_version[] = {0x63, 0x21, 
+                                        0x36,      // Version 3.6
+                                        0x00};     // 0: = LZ100 Zentrale 1 = LH 200, 2= DPC, 3= Control Plus
                                             // 0x10: Roco Zentrale
-
-
 
 static void xp_send_message_to_current_slot(unsigned char *msg) {
   xpnet_SendMessage(MESSAGE_ID | current_slot, msg);
@@ -189,12 +156,11 @@ static void xp_send_BroadcastMessage() {
     case PROG_ERROR:
       break;
     }
-  status_event.changed_xp = 0;            // broadcast done
+  xpnet_Event.statusChanged = 0;            // broadcast done
 } // xp_send_BroadcastMessage
 
 #if (DCC_FAST_CLOCK == 1)
-static void xp_send_FastClockResponse(unsigned char slot_id)
-{
+static void xp_send_FastClockResponse(unsigned char slot_id) {
   // 0x05 0x01 TCODE0 {TCODE1 TCODE2 TCODE3} 
   tx_message[0] = 0x05;
   tx_message[1] = 0xF1;
@@ -204,7 +170,7 @@ static void xp_send_FastClockResponse(unsigned char slot_id)
   tx_message[5] = 0xC0 | fast_clock.ratio;
 
   xpnet_SendMessage(MESSAGE_ID | slot_id, tx_ptr = tx_message);
-  status_event.clock = 0;            // fast clock broad cast done
+  xpnet_Event.clockChanged = 0;            // fast clock broad cast done
 } // xp_send_FastClockResponse
 #endif
 
@@ -441,33 +407,36 @@ static void xp_parser() {
     case 0x0:
       #if (DCC_FAST_CLOCK == 1)
       switch(rx_message[1]) {
-        case 0xF1:
+        case 0xF1: {
+          t_fast_clock newClock;
           // set clock
           for(coil = 2; coil <= (rx_message[0] & 0x0F); coil++ ) {   // use coil as temp
             speed = 99;     // use speed as temp
             switch(rx_message[coil] & 0xC0) {
               case 0x00:  
                 speed = rx_message[coil] & 0x3F;
-                if (speed < 60) fast_clock.minute = speed;
+                if (speed < 60) newClock.minute = speed;
                 break;
               case 0x80:  
                 speed = rx_message[coil] & 0x3F;
-                if (speed < 24) fast_clock.hour = speed;
+                if (speed < 24) newClock.hour = speed;
                 break;
               case 0x40:  
                 speed = rx_message[coil] & 0x3F;
-                if (speed < 7) fast_clock.day_of_week = speed;
+                if (speed < 7) newClock.day_of_week = speed;
                 break;
               case 0xC0:  
                 speed = rx_message[coil] & 0x3F;
-                if (speed < 32) fast_clock.ratio = speed;
+                if (speed < 32) newClock.ratio = speed;
                 break;
             }
-          }                            
-          do_fast_clock(&fast_clock); // dcc msg
-          xp_send_FastClockResponse(current_slot); // xpnet msg
+          }
+          status_SetFastClock(&newClock);
+          // sds : commented here, a broadcast will follow so everyone knows
+          //xp_send_FastClockResponse(current_slot); // xpnet msg
           processed = 1;
           break;
+        }
         case 0xF2:
           // query clock
           xp_send_FastClockResponse(current_slot);
@@ -941,7 +910,7 @@ static void xp_parser() {
 
 //===============================================================================
 //
-// 5. Xpressnet Public interface
+// 3. Xpressnet Public interface
 //
 //===============================================================================
 // Timeouts: SLOT_TIMEOUT: We wait this time after an INQUIRY for the first response
@@ -970,8 +939,8 @@ enum xp_states { // actual state for the Xpressnet Task
   XP_CHECK_DATABASE,                  // is there a database transfer
 } xp_state;
 
-signed char slot_timeout;
-uint32_t rx_timeout; // zelfde eenheid als millis()
+static signed char slot_timeout;
+static uint32_t rx_timeout; // zelfde eenheid als millis()
 
 void xpnet_Init() {
   xp_state = XP_INIT;
@@ -1054,12 +1023,12 @@ void xpnet_Run() {
       }
       break;
     case XP_CHECK_BROADCAST:
-      if (status_event.changed_xp) {
+      if (xpnet_Event.statusChanged) {
         xp_send_BroadcastMessage();                            // report any Status Change
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }
       #if (DCC_FAST_CLOCK == 1)
-      else if (status_event.clock) {
+      else if (xpnet_Event.clockChanged) {
         xp_send_FastClockResponse(0);    // send as broadcast   // new: 23.06.2009; possibly we need a flag
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }
@@ -1115,8 +1084,7 @@ void xpnet_SendMessage(unsigned char callByte, unsigned char *msg) {
 
 // TODO SDS2021 : nog case toevoegen voor ntf naar local UI als slot=0 een loc heeft verloren!
 // used by UI after stealing a loc from another xpnet device (slot), and used in this file
-void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress)
-{
+void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress) {
   if (slot != 0) {
     tx_message[0] = 0xE3;
     tx_message[1] = 0x40;

@@ -69,15 +69,21 @@ typedef struct
 } t_status_event;
 
 // SDS : mijn intf naar de display
+// TODO SDS2021 : moet weg (vervangen door status_EventNotify)
 typedef enum {
   HWEVENT_MAINSHORT, HWEVENT_PROGSHORT, HWEVENT_EXTSTOP, HWEVENT_NODCC
 } hwEvent_t;
 
+// SDS nieuwe status event interface
+typedef enum {
+  STATUS_STATE_CHANGED, STATUS_CLOCK_CHANGED, 
+  STATUS_MAIN_SHORT, STATUS_PROG_SHORT, STATUS_EXT_STOP
+} statusEvent_t;
+
 extern t_opendcc_state opendcc_state; // this is the current state of the box
-extern t_status_event status_event;   // Message flag: there was a change in status
-extern unsigned char ext_stop_enabled;
-// TODO SDS2021 : nog enkel nodig voor lenz_parser
-extern t_no_timeout no_timeout;
+// TODO SDS2021 : no_timeout nog enkel nodig voor lenz_parser -> te vervangen door een millis() implementatie in lenz_parser!
+//
+//extern t_no_timeout no_timeout;
 
 #if (DCC_FAST_CLOCK==1)
 // fast clock record
@@ -88,9 +94,11 @@ extern t_fast_clock fast_clock;
 // Interface-Routines to other programs
 void status_Init();
 void status_SetState(t_opendcc_state next);
+void status_SetFastClock(t_fast_clock *newClock);
 void status_Run();
 bool status_IsProgState(); // TODO SDS2021 : enkel gebruikt in lenz parser config, mag dat niet weg ??
 extern void hwEvent_Handler( hwEvent_t event ) __attribute__ ((weak));
+extern void status_EventNotify ( statusEvent_t event, void *data) __attribute__ ((weak));
 
 #endif // __STATUS_H__
 

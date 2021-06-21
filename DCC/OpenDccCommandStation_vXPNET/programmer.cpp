@@ -59,6 +59,23 @@
 #include "dccout.h"                // next message
 #include "organizer.h"
 #include "programmer.h"
+
+/* TODO SDS2021 : programmer needs notify for short on progtrack (PT_SHORT is not used)
+ * - for now nothing happens in programmer when a short occurs
+ * -> status will cut power to the booster, but organizer will keep sending out the packets to dccout, programmer will eventually end on NO_ACK
+ * -> is dat voldoende of willen we ook de prog_queue kunnen wissen als een short optreedt?
+ * -> nu hebben we enkel programmer_Reset(), maar die wordt niet gebruikt, en die zet ook niet pb_reset=PT_SHORT of een andere error code
+ * -> ik vermoed dat de huidige code de programming cyclus volledig laat aflopen (er gebeurt wel niets want booster is off)
+ * -> maar die is niet gegarandeerd afgelopen als je op de UI de PROGSHORT afmeldt. dan schakelt de booster terug in, en komt er rubbish op de track,
+ * -> of packets in het midden van de cyclus -> eigenlijk hoort hier de progQ gereset te worden (als respons op een short notify van status.cpp)
+ * 
+ * - nothing prevents xpnet to send next programming command before previous cmd is terminated
+ * -> xpnet doesn't check the return code (0x80=Busy from programmer.cpp)
+ * -> is dat een probleem, want het verstoort anderzijds ook niet de uitvoering van het huidig commando, en het is zuiver een fout van de caller
+ * -> en jmri pollt wel correct op prog_event.busy
+ * 
+ */
+
 //
 // Es gibt drei "switch-Schleifen", damit auch umfangreichere Kommandos
 // im quasi Multitasking durchgebracht werden können. Jede Schleife
@@ -1009,7 +1026,6 @@ unsigned char programmer_CvRegisterRead (unsigned int cv) {
   prog_qualifier = PQ_REGMODE;
   ps_command = PSC_DCCRR;
   prog_cv = cv-1;                         // interner Register Range 0..7
-  // ps_step = 0;
 
   prog_seq_state = PS_START;
   programmer_Run();                           // auch gleich mal aufrufen
@@ -1059,7 +1075,6 @@ unsigned char programmer_CvPagedRead (unsigned int cv) {
   prog_qualifier = PQ_REGMODE;
   ps_command = PSC_DCCRP;
   prog_cv = cv;
-  // ps_step = 0;
 
   prog_seq_state = PS_START;
   programmer_Run();                           // auch gleich mal aufrufen
@@ -1181,8 +1196,7 @@ unsigned char programmer_CvBitRead (unsigned int cv) {
   prog_qualifier = PQ_CVMODE_B0;
   ps_command = PSC_DCCRB;
   prog_cv = cv;
-  // ps_step = 0;
-
+  
   prog_seq_state = PS_START;
   programmer_Run();                           // auch gleich mal aufrufen
   return(0);
