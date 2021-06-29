@@ -21,8 +21,14 @@
 // purpose:   lowcost central station for dcc
 // content:   reads pc-commands from rs232 and generates calls
 //            to organizer.c
-//
 
-void init_parser(void);
-void run_parser(void);
-void pc_send_lenz(unsigned char *str);   // *str is the raw message, no xor; xor is added by pc_send
+// pcintf wants to know about these changes
+typedef enum {
+  EVENT_CS_STATUS_CHANGED, EVENT_CLOCK_CHANGED
+} pcintf_Event_t;
+
+void pcintf_Init();
+void pcintf_Run();
+void pcintf_SendMessage(unsigned char *str);   // *str is the raw message, no xor; xor is added by pc_send
+void pcintf_SendLocStolen(unsigned int locAddress); // notify PC that it's loc is stolen by the local UI
+void pcintf_EventNotify (pcintf_Event_t event);

@@ -197,27 +197,23 @@ typedef struct {
 typedef uint8_t t_format;
 
 typedef struct {
-  uint16_t address;               // address (either 7 or 14 bits)
+  uint16_t address;             // address (either 7 or 14 bits)
   uint8_t speed;                // this is in effect a bitfield:
-                                      // msb = direction (1 = forward, 0=revers)
-                                      // else used as integer, speed 1 ist NOTHALT
-                                      // this is i.e. for 28 speed steps:
-                                      //       0: stop
-                                      //       1: emergency stop
-                                      //  2..127: speed steps 1..126
-                                      // speed is always stored as 128 speed steps
-                                      // and only converted to the according format
-                                      // when put on the rails or to xpressnet
+                                // msb = direction (1 = forward, 0=revers)
+                                // else used as integer, speed 1 ist NOTHALT
+                                // this is i.e. for 28 speed steps:
+                                //       0: stop
+                                //       1: emergency stop
+                                //  2..127: speed steps 1..126
+                                // speed is always stored as 128 speed steps
+                                // and only converted to the according format
+                                // when put on the rails or to xpressnet
 
-  t_format format: 2;                 // 00 = 14, 01=27, 10=28, 11=128 speed steps.
-                                      // DCC27 is not supported
+  t_format format: 2;           // 00 = 14, 01=27, 10=28, 11=128 speed steps.
+                                // DCC27 is not supported
   uint8_t active: 1;            // 1: lok is in refresh, 0: lok is not refreshed
-
-  #if (XPRESSNET_ENABLED == 1)
-    uint8_t slot: 5;            // loc is controlled by this xpressnet device (1..31: throttles, 0=local UI)
-  #else
-    uint8_t unused:5;
-  #endif
+  uint8_t slot: 5;              // loc is controlled by this xpressnet device (1..31: throttles, 0=local UI)
+                                // sds: lenz_parser will now also use this with a #defined slot (e.g. same as PcInterface hardware)
 
   union {
     #if (DCC_F13_F28)

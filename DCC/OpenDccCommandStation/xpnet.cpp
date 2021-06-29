@@ -37,6 +37,9 @@
 
 #include "Arduino.h"
 #include "config.h"       // general structures and definitions
+
+#if (XPRESSNET_ENABLED == 1)
+
 #include "status.h"       // xpnet commands a status change
 #include "database.h"     // for database broadcast
 #include "rs485.h"        // rx and tx serial if, made for xpressnet
@@ -45,7 +48,6 @@
 #include "xpnet.h"
 #include "accessories.h"
 
-#if (XPRESSNET_ENABLED == 1)
 
 // TODO SDS20201 : we parkeren dat event voorlopig hier ipv in status
 typedef struct {
@@ -296,8 +298,9 @@ static void xp_send_LocAddressRetrievalResponse(unsigned int locAddress)
   xp_send_message_to_current_slot(tx_ptr = tx_message);
 } // xp_send_LocAddressRetrievalResponse
 
+// TODO SDS2021 : check code duplication (convert_format? bv)
 static void xp_send_LocInformationResponse(unsigned int locAddress) {
-  register unsigned char data, speed;
+  unsigned char data, speed;
   uint32_t retval = 0;
   locomem *lbData;
   uint8_t convert_format[4] = {
@@ -363,7 +366,7 @@ static void xp_send_LocInformationResponse(unsigned int locAddress) {
 // reply default = all functions are on/off
 static void xp_send_FunctionF0F12StatusResponse(unsigned int locAddress) {
   tx_message[0] = 0xE3; // Headerbyte = 0xE3
-  tx_message[1] = 0x50; // Byte1 = Kennung = 10000000 // SDS : waarom stond hier 0x80?? dat lijkt fout voor JMRI
+  tx_message[1] = 0x50; // Byte1 = Kennung = 10000000
   tx_message[2] = 0x00; // Byte2 = 000sSSSS; s=F0, SSSS=F4...F1
   tx_message[3] = 0;    // Byte3 = SSSSSSSS; SSSSSSSS=F12...F5
   xp_send_message_to_current_slot(tx_ptr = tx_message);
@@ -822,12 +825,14 @@ static void xp_parser() {
             }
           break;
         case 0x30:
+        {
           // 0xE?-0x30 zijn raw dcc msgs encapsulated in xpnet
           // SDS TODO : check of de POM nu nog werkt (misschien doet do_pom_loco_xxx nog meer dan enkel dcc msg maken??)
           uint8_t dccSize = (rx_message[0] & 0xF) - 1;
           do_raw_msg(&rx_message[2], dccSize);
           processed = 1;
-
+          break;
+        }
           // SDS 2021 TEMP commented
           /*
           // Prog. on Main Byte ab V3   0xE6 0x30 AddrH AddrL 0xEC + C CV DAT X-Or
@@ -871,7 +876,6 @@ static void xp_parser() {
             processed = 1;
           }
           */
-          break; 
         case 0x40:   //Lokverwaltung (Double Header)
           // !!! Lok zu MTR hinzufügen ab V3 0xE4 0x40 + R ADR High ADR Low MTR X-Or
           // !!! Lok aus MTR entfernen ab V3 0xE4 0x42 ADR High ADR Low MTR X-Or
@@ -880,9 +884,9 @@ static void xp_parser() {
           addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
           switch(rx_message[1] & 0x0f) {
             case 0x04:
-                lb_ReleaseLoc(addr); // sds : modified, loc address is not removed from locobuffer, only released
-                processed = 1;
-                break;
+              lb_ReleaseLoc(addr); // sds : modified, loc address is not removed from locobuffer, only released
+              processed = 1;
+              break;
           }
           break;
         case 0xF0:
@@ -1118,13 +1122,13 @@ void xpnet_EventNotify (xpnet_Event_t event) {
     default:
       break;
   }
-}
+} // xpnet_EventNotify
 
 #else // #if (XPRESSNET_ENABLED == 1)
-
+/*
 void xpnet_Init() {};
 void xpnet_Run() {};
 void xpnet_SendMessage(unsigned char callByte, unsigned char *msg) {}
 void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress) {}
-
+*/
 #endif // #if (XPRESSNET_ENABLED == 1)

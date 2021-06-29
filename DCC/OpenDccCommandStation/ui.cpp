@@ -7,8 +7,13 @@
 #include "status.h" // status & fastclock
 #include "organizer.h" // loc & turnout commands
 #include "database.h" // for loc database access
-#include "xpnet.h" // send xpnet event for loc stolen
 #include "accessories.h" // turnout status
+#if (XPRESSNET_ENABLED == 1)
+  #include "xpnet.h" // send events to xpnet (loc stolen)
+#endif
+#if (PARSER == LENZ)
+  #include "lenz_parser.h" // send event to pc intf (loc stolen)
+#endif
 
 //#include "programmer.h" // for CV programming via UI
 // TODO : toch events gebruiken voor turnout updates ipv polling ?
@@ -368,15 +373,23 @@ That is why the 28 step mode is often referred to as 28/128.
 */
 
 // #define DCC_SHORT_ADDR_LIMIT   112  (in config.h)
-// als locAddr > DCC_SHORT_ADDR_LIMIT, gaat de organiser DCC msgs voor long addr gebruiken
-// dus : locAddr < 112 -> short addr naar loc-decoder, > 112 --> long addr naar loc-decoder
+// als locAddress > DCC_SHORT_ADDR_LIMIT, gaat de organiser DCC msgs voor long addr gebruiken
+// dus : locAddress < 112 -> short addr naar loc-decoder, > 112 --> long addr naar loc-decoder
 // dus : locSpeed in het locobuffer format (128 steps), dwz 0 = stop, 1= noodstop, 2..127 = speedsteps, msb = richting, 1=voorwaarts, 0=achterwaarts
-static void ui_SetLocSpeed (uint16_t locAddr, uint8_t locSpeed) {
+static void ui_SetLocSpeed (uint16_t locAddress, uint8_t locSpeed) {
   unsigned char retval;
-  if (organizer_IsReady()) {
-    retval = do_loco_speed (LOCAL_UI_SLOT,locAddr, locSpeed);
-    if (retval & ORGZ_STOLEN)
-      xpnet_SendLocStolen(orgz_old_lok_owner,locAddr);
+
+  if (!organizer_IsReady()) // can't send anything to organizer for now
+    return;
+
+  retval = do_loco_speed (LOCAL_UI_SLOT,locAddress, locSpeed);
+  if (retval & ORGZ_STOLEN) {
+    #if (XPRESSNET_ENABLED == 1)
+      xpnet_SendLocStolen(orgz_old_lok_owner,locAddress);
+    #endif
+    #if (PARSER == LENZ)
+    pcintf_SendLocStolen(locAddress);
+    #endif
   }
 } // ui_SetLocSpeed
 
@@ -389,27 +402,33 @@ static void ui_SetLocSpeed (uint16_t locAddr, uint8_t locSpeed) {
 // func 0 = light
 // f1 ->f28 
 // on = 1-bit, off = 0-bit
-static void ui_SetLocFunction (uint16_t locAddr, uint8_t func, uint32_t allFuncs) {
+static void ui_SetLocFunction (uint16_t locAddress, uint8_t func, uint32_t allFuncs) {
   uint8_t retval;
   if (!organizer_IsReady()) // can't send anything to organizer for now
     return;
 
   if (func==0)
-    retval= do_loco_func_grp0 (LOCAL_UI_SLOT,locAddr, allFuncs & 0xFF); // grp0 = f0 = fl
+    retval= do_loco_func_grp0 (LOCAL_UI_SLOT,locAddress, allFuncs & 0xFF); // grp0 = f0 = fl
   else if ((func >=1) && (func <= 4))
-    retval= do_loco_func_grp1 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 1)); // grp1 = f1..f4
+    retval= do_loco_func_grp1 (LOCAL_UI_SLOT,locAddress, (allFuncs >> 1)); // grp1 = f1..f4
   else if ((func >=5) && (func <= 8))
-    retval= do_loco_func_grp2 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 5)); // grp2 = f5..f8
+    retval= do_loco_func_grp2 (LOCAL_UI_SLOT,locAddress, (allFuncs >> 5)); // grp2 = f5..f8
   else if ((func >=9) && (func <= 12))
-    retval= do_loco_func_grp3 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 9)); // grp3 = f9..f12
+    retval= do_loco_func_grp3 (LOCAL_UI_SLOT,locAddress, (allFuncs >> 9)); // grp3 = f9..f12
 #if (DCC_F13_F28 == 1)        
   else if ((func >=13) && (func <= 20))
-    retval= do_loco_func_grp4 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 13));
+    retval= do_loco_func_grp4 (LOCAL_UI_SLOT,locAddress, (allFuncs >> 13));
   else if ((func >=21) && (func <= 28))
-    retval= do_loco_func_grp5 (LOCAL_UI_SLOT,locAddr, (allFuncs >> 21));
+    retval= do_loco_func_grp5 (LOCAL_UI_SLOT,locAddress, (allFuncs >> 21));
 #endif
-  if (retval & ORGZ_STOLEN)
-    xpnet_SendLocStolen(orgz_old_lok_owner,locAddr);
+  if (retval & ORGZ_STOLEN) {
+    #if (XPRESSNET_ENABLED == 1)
+      xpnet_SendLocStolen(orgz_old_lok_owner,locAddress);
+    #endif
+    #if (PARSER == LENZ)
+      pcintf_SendLocStolen(locAddress);
+    #endif
+  }
 } // ui_SetLocFunction
 
 // TODO : return value needed to handle failed do_accessory(...) cmd?
@@ -436,7 +455,12 @@ static void ui_ToggleTurnout (uint16_t turnoutAddress, bool activate) {
     unsigned char tx_message[3];
     tx_message[0] = 0x42;
     turnout_getInfo(turnoutAddress,&tx_message[1]);
-    xpnet_SendMessage(FUTURE_ID, tx_message); // feedback broadcast
+    #if (XPRESSNET_ENABLED == 1)
+      xpnet_SendMessage(FUTURE_ID, tx_message); // feedback broadcast
+    #endif
+    #if (PARSER == LENZ)
+      pcintf_SendMessage(tx_message);
+    #endif
   }
 } // ui_ToggleTurnout
 

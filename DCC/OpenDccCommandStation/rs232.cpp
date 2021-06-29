@@ -20,7 +20,7 @@
 //            2006-11-16 V0.05 added push_to_rx for easier simulation
 //            2007-01-27 V0.06 changed to 2 stop bits to clear some 
 //                             trouble with USB-to-Serial Converter
-//            2007-06-09 V0.07 new function tx_all_sent
+//            2007-06-09 V0.07 new function rs232_is_all_sent
 //                             reset txc on data transmission 
 //            2008-04-04 V0.08 used for sniffer - runs on Atmega162,
 //                             UART0; 
@@ -39,100 +39,42 @@
 //
 //-----------------------------------------------------------------
 
+#include "Arduino.h"
 #include "config.h"               // general structures and definitions
-#include "hardware.h"
-#include "status.h"
+
+#if (PARSER == LENZ)
+
+//nodig? #include "hardware.h"
+//TODO 2021 : nodig ? #include "status.h"
 #include "rs232.h"
 
-//=====================================================================
-// resolve UART definitions
-#if (__AVR_ATmega32__)
-    #define my_UCSRA  UCSRA
-     #define my_RXC    RXC
-     #define my_TXC    TXC
-     #define my_U2X    U2X
-     #define my_FE     FE
-     #define my_DOR    DOR
-     #define my_UDRE   UDRE
-    #define my_UCSRB  UCSRB
-     #define my_TXB8   TXB8
-     #define my_UCSZ2  UCSZ2
-     #define my_UDRIE  UDRIE
-     #define my_TXEN   TXEN
-     #define my_RXEN   RXEN
-     #define my_RXCIE  RXCIE
-    #define my_UCSRC  UCSRC
-     #define my_URSEL  URSEL
-     #define my_UMSEL  UMSEL
-     #define my_UPM1   UPM1 
-     #define my_UPM0   UPM0
-     #define my_USBS   USBS
-     #define my_UCSZ1  UCSZ1 
-     #define my_UCSZ0  UCSZ0
-     #define my_UCPOL  UCPOL
-    #define my_UBRRL  UBRRL
-    #define my_UBRRH  UBRRH
-    #define my_UDR    UDR
-#elif (__AVR_ATmega644__)
-    #warning - check datasheet
-#elif (__AVR_ATmega644P__)
-    #define my_UCSRA  UCSR0A
-     #define my_RXC    RXC0
-     #define my_TXC    TXC0
-     #define my_U2X    U2X0
-     #define my_FE     FE0
-     #define my_DOR    DOR0
-     #define my_UDRE   UDRE0
-    #define my_UCSRB  UCSR0B
-     #define my_TXB8   TXB80
-     #define my_UCSZ2  UCSZ20
-     #define my_UDRIE  UDRIE0
-     #define my_TXEN   TXEN0
-     #define my_RXEN   RXEN0
-     #define my_RXCIE  RXCIE0
-    #define my_UCSRC  UCSR0C
-     #define my_UMSEL0 UMSEL00
-     #define my_UMSEL1 UMSEL01
-     #define my_UPM1   UPM01 
-     #define my_UPM0   UPM00
-     #define my_USBS   USBS0
-     #define my_UCSZ1  UCSZ01 
-     #define my_UCSZ0  UCSZ00
-     #define my_UCPOL  UCPOL0
-    #define my_UBRRL  UBRR0L
-    #define my_UBRRH  UBRR0H
-    #define my_UDR    UDR0 
-#elif (__AVR_ATmega328P__) //SDS atmega328 definitions
-    #define my_UCSRA  UCSR0A
-     #define my_RXC    RXC0
-     #define my_TXC    TXC0
-     #define my_U2X    U2X0
-     #define my_FE     FE0
-     #define my_DOR    DOR0
-     #define my_UDRE   UDRE0
-    #define my_UCSRB  UCSR0B
-     #define my_TXB8   TXB80
-     #define my_UCSZ2  UCSZ20
-     #define my_UDRIE  UDRIE0
-     #define my_TXEN   TXEN0
-     #define my_RXEN   RXEN0
-     #define my_RXCIE  RXCIE0
-    #define my_UCSRC  UCSR0C
-     #define my_UMSEL0 UMSEL00
-     #define my_UMSEL1 UMSEL01
-     #define my_UPM1   UPM01 
-     #define my_UPM0   UPM00
-     #define my_USBS   USBS0
-     #define my_UCSZ1  UCSZ01 
-     #define my_UCSZ0  UCSZ00
-     #define my_UCPOL  UCPOL0
-    #define my_UBRRL  UBRR0L
-    #define my_UBRRH  UBRR0H
-    #define my_UDR    UDR0 
-#else    
-  #warning - no or wrong processor defined    
-#endif
 
+#define my_UCSRA  UCSR0A
+#define my_RXC    RXC0
+#define my_TXC    TXC0
+#define my_U2X    U2X0
+#define my_FE     FE0
+#define my_DOR    DOR0
+#define my_UDRE   UDRE0
+#define my_UCSRB  UCSR0B
+#define my_TXB8   TXB80
+#define my_UCSZ2  UCSZ20
+#define my_UDRIE  UDRIE0
+#define my_TXEN   TXEN0
+#define my_RXEN   RXEN0
+#define my_RXCIE  RXCIE0
+#define my_UCSRC  UCSR0C
+#define my_UMSEL0 UMSEL00
+#define my_UMSEL1 UMSEL01
+#define my_UPM1   UPM01 
+#define my_UPM0   UPM00
+#define my_USBS   USBS0
+#define my_UCSZ1  UCSZ01 
+#define my_UCSZ0  UCSZ00
+#define my_UCPOL  UCPOL0
+#define my_UBRRL  UBRR0L
+#define my_UBRRH  UBRR0H
+#define my_UDR    UDR0 
 
 //=====================================================================
 //
@@ -152,37 +94,29 @@
 //
 //-----------------------------------------------------------------
 
-// FIFO-Objekte und Puffer fï¿½r die Ein- und Ausgabe
+// FIFO-Objekte und Puffer für die Ein- und Ausgabe
 // max. Size: 255
 
 #define RxBuffer_Size  64              // mind. 16
-unsigned char RxBuffer[RxBuffer_Size];
-
 #define TxBuffer_Size  64              // on sniffer: 128
-unsigned char TxBuffer[TxBuffer_Size];
 
-unsigned char rx_read_ptr = 0;        // point to next read
-unsigned char rx_write_ptr = 0;       // point to next write
-unsigned char rx_fill = 0;
-unsigned char tx_read_ptr = 0;
-unsigned char tx_write_ptr = 0;
-unsigned char tx_fill = 0;
+static unsigned char RxBuffer[RxBuffer_Size];
+static unsigned char TxBuffer[TxBuffer_Size];
 
-const unsigned long baudrate[] PROGMEM = { // ordered like in Lenz Interface!
-  9600L,   //  = 0,
-  19200L,  //  = 1,
-  38400L,  //  = 2,
-  57600L,  //  = 3,
-  115200L, //  = 4,
-};
+static unsigned char rx_read_ptr = 0;        // point to next read
+static unsigned char rx_write_ptr = 0;       // point to next write
+static unsigned char rx_fill = 0;
+static unsigned char tx_read_ptr = 0;
+static unsigned char tx_write_ptr = 0;
+static unsigned char tx_fill = 0;
+
 t_baud actual_baudrate;                      // index to field above
 
 // sds een overblijfsel van de orig CTS
 volatile bool rs232_parser_reset_needed = 0; // flag, that a break was detected
                                              // volatile, weil aus ISR bearbeitet wird.
 
-void init_rs232(t_baud new_baud)
-{
+void rs232_Init(t_baud new_baud) {
   uint16_t ubrr;
   uint8_t sreg = SREG;
   uint8_t dummy;
@@ -194,8 +128,7 @@ void init_rs232(t_baud new_baud)
 
   // note calculations are done at mult 100
   // to avoid integer cast errors +50 is added
-  switch(new_baud)
-  {
+  switch(new_baud) {
     //sds info : die ubrr berekeningen werken niet altijd, omdat de precompiler er een soep van maakt!!
     default:
     case BAUD_9600:
@@ -238,7 +171,7 @@ void init_rs232(t_baud new_baud)
       break;
   }
   
-  // FIFOs fï¿½r Ein- und Ausgabe initialisieren
+  // FIFOs for Ein- und Ausgabe initialisieren
   rx_read_ptr = 0;      
   rx_write_ptr = 0;
   rx_fill = 0;      
@@ -246,37 +179,14 @@ void init_rs232(t_baud new_baud)
   tx_write_ptr = 0;
   tx_fill = 0;
 
-  #if (__AVR_ATmega32__)
-      my_UCSRC = (1 << my_URSEL)        // must be one - to address this register (also on sniffer)
-                | (0 << my_UMSEL)        // 0 = asyn mode
-                | (0 << my_UPM1)         // 00 = parity disabled
-                | (0 << my_UPM0)         
-                | (1 << my_USBS)         // 1 = tx with 2 stop bits
-                | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
-                | (1 << my_UCSZ0)
-                | (0 << my_UCPOL);
-  #elif (__AVR_ATmega644__)
-      #warning - check datasheet
-  #elif (__AVR_ATmega644P__)
-      my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
-                | (0 << my_UMSEL0)
-                | (0 << my_UPM1)         // 00 = parity disabled
-                | (0 << my_UPM0)
-                | (1 << my_USBS)         // 1 = tx with 2 stop bits
-                | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
-                | (1 << my_UCSZ0)
-                | (0 << my_UCPOL);
-  #elif (__AVR_ATmega328P__) //SDS added for atmega328
-      my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
-                | (0 << my_UMSEL0)
-                | (0 << my_UPM1)         // 00 = parity disabled
-                | (0 << my_UPM0)
-                | (1 << my_USBS)         // 1 = tx with 2 stop bits
-                | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
-                | (1 << my_UCSZ0)
-                | (0 << my_UCPOL);
-  #else 
-  #endif
+  my_UCSRC = (0 << my_UMSEL1)       // 00 = async. UART 
+            | (0 << my_UMSEL0)
+            | (0 << my_UPM1)         // 00 = parity disabled
+            | (0 << my_UPM0)
+            | (1 << my_USBS)         // 1 = tx with 2 stop bits
+            | (1 << my_UCSZ1)        // 11 = 8 or 9 bits
+            | (1 << my_UCSZ0)
+            | (0 << my_UCPOL);
 
   // UART Receiver und Transmitter anschalten, Receive-Interrupt aktivieren
   // Data mode 8N1, asynchron
@@ -298,27 +208,14 @@ void init_rs232(t_baud new_baud)
   rs232_parser_reset_needed = false;
   SREG = sreg;
 
-} // init_rs232
+} // rs232_Init
 
 //---------------------------------------------------------------------------
 // Empfangene Zeichen werden in die Eingabgs-FIFO gespeichert und warten dort
-// Wenn bis auf einen Rest von 10 gefï¿½llt ist: CTS senden.
+// Wenn bis auf einen Rest von 10 gefüllt ist: CTS senden.
 //
 
-#if (__AVR_ATmega32__)
-    ISR(SIG_UART_RECV)              // standard opendcc
-#elif (__AVR_ATmega644__)
-    #warning - check datasheet
-#elif (__AVR_ATmega162__)           // sniffer
-    ISR(USART0_RXC_vect) 
-#elif (__AVR_ATmega644P__)
-    ISR(USART0_RX_vect)             // opendcc_xp
-#elif (__AVR_ATmega328P__) //SDS for atmega328p
-    ISR(USART_RX_vect) 
-#else 
-    #warning - no or wrong processor defined
-#endif
-{
+ISR(USART_RX_vect) {
   if (my_UCSRA & (1<< my_FE)) { // Frame Error 
     rs232_parser_reset_needed = true; // set flag for parser and discard 
 
@@ -349,20 +246,7 @@ void init_rs232(t_baud new_baud)
 
 // Bei 9 Bit konnte noch ein Stopbit erzeugt werden: UCSRB |= (1<<TXB8);
 
-#if (__AVR_ATmega32__)
-    ISR(SIG_UART_DATA)              // standard opendcc
-#elif (__AVR_ATmega644__)
-    #warning - check datasheet
-#elif (__AVR_ATmega162__)      // sniffer
-    ISR(USART0_UDRE_vect) 
-#elif (__AVR_ATmega644P__)
-    ISR(USART0_UDRE_vect)           // opendcc_xp
-#elif (__AVR_ATmega328P__) //SDS for atmega328p
-    ISR(USART_UDRE_vect)           
-#else 
-    #warning - no or wrong processor defined
-#endif
-{
+ISR(USART_UDRE_vect) {
   if (tx_read_ptr != tx_write_ptr) {
     my_UCSRA |= (1 << my_TXC);              // writing a one clears any existing tx complete flag
     my_UDR = TxBuffer[tx_read_ptr];
@@ -379,19 +263,15 @@ void init_rs232(t_baud new_baud)
 // Upstream Interface
 //-----------------------------------------------------------------------------
 // TX:
-bool tx_fifo_ready (void)
-{
+bool rs232_tx_ready () {
   if (tx_fill < (TxBuffer_Size-16)) { // keep space for one complete message (16)
-    return(1);                        // true if enough room
+    return(true);                        // true if enough room
   }
-  else {
-    return(0);
-  }
-} // tx_fifo_ready
+  else return(false);
+} // rs232_tx_ready
 
 // ret 1 if full
-bool tx_fifo_write (const unsigned char c)
-{
+bool rs232_send_byte (const unsigned char c) {
   TxBuffer[tx_write_ptr] = c;
 
   tx_write_ptr++;
@@ -409,50 +289,33 @@ bool tx_fifo_write (const unsigned char c)
     return(1);
   }
   return(0);
-} // tx_fifo_write
+} // rs232_send_byte
 
 // ret 1 if all is sent
-bool tx_all_sent (void)
-{
+bool rs232_is_all_sent () {
   if (tx_fill == 0) {
-    if (!(my_UCSRA & (1 << my_UDRE)))  return(0);    // UDR not empty
-    if (!(my_UCSRA & (1 << my_TXC)))  return(0);    // TX Completed not set
-    return(1);                        
+    if (!(my_UCSRA & (1 << my_UDRE)))  return(false);    // UDR not empty
+    if (!(my_UCSRA & (1 << my_TXC)))  return(false);    // TX Completed not set
+    return(true);                        
   }
-  else {
-    return(0);
-  }
-} // tx_all_sent
-
-void uart_puts (const char *s)
-{
-  do
-    {
-      tx_fifo_write (*s);
-    }
-  while (*s++);
-} // uart_puts
+  else return(false);
+} // rs232_is_all_sent
 
 //------------------------------------------------------------------------------
 // RX:
-bool rx_fifo_ready (void)
-{
-  if (rx_read_ptr != rx_write_ptr) {
-      return(true);     // there is something
-  }
-  else {
-      return(false);  
-  }
-} // rx_fifo_ready
+bool rs232_rx_ready () {
+  if (rx_read_ptr != rx_write_ptr)
+    return(true);     // there is something
+  else return(false);  
+} // rs232_rx_ready
 
 //-------------------------------------------------------------------
-// rx_fifo_read gets one char from the input fifo
+// rs232_rx_read gets one char from the input fifo
 //
 // there is no check whether a char is ready, this must be
-// done before calling with a call to rx_fifo_ready();
+// done before calling with a call to rs232_rx_ready();
 
-unsigned char rx_fifo_read (void)
-{
+unsigned char rs232_rx_read () {
   unsigned char retval;
 
   retval = RxBuffer[rx_read_ptr];
@@ -468,4 +331,6 @@ unsigned char rx_fifo_read (void)
     // hier was code voor CTS -> removed
   }
   return(retval);
-} // rx_fifo_read
+} // rs232_rx_read
+
+#endif // (PARSER == LENZ)

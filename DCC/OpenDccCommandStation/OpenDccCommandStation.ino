@@ -95,9 +95,9 @@ void setup() {
   dccout_Init();        // timing engine for dcc    
 
   //SDS20160823-eeprom data voorlopig niet gebruiken in test arduino
-  //init_rs232((t_baud)eeprom_read_byte((uint8_t *)eadr_baudrate));   // 19200 is default for Lenz 3.0
+  //rs232_Init((t_baud)eeprom_read_byte((uint8_t *)eadr_baudrate));   // 19200 is default for Lenz 3.0
   #if (PARSER == LENZ)
-    init_rs232(BAUD_19200); 
+    rs232_Init(BAUD_19200); 
   #endif
 
   #if (XPRESSNET_ENABLED == 1)
@@ -105,7 +105,7 @@ void setup() {
     xpnet_Init();
   #else
     #if (PARSER == LENZ) 
-      init_parser(); // command parser
+      pcintf_Init(); // command parser
     #else 
       Serial.begin(115200);
       Serial.println("CS zonder XPNET");
@@ -143,7 +143,7 @@ void loop() {
     database_Run();                  // check transfer of loco database 
   #endif
   #if (PARSER == LENZ)
-    run_parser();                    // check commands from pc
+    pcintf_Run();                    // check commands from pc
   #endif
 
   #if (XPRESSNET_ENABLED == 1)
@@ -173,9 +173,13 @@ void status_EventNotify ( statusEvent_t event, void *data) {
           do_all_stop();
           break;
       }
-      xpnet_EventNotify(EVENT_CS_STATUS_CHANGED); // // notify xpnet
       uiEvent.statusChanged = 1; // notify UI
-      //lenzEvent.statusChanged = 1; // notify lenz
+      #if (XPRESSNET_ENABLED == 1)
+        xpnet_EventNotify(EVENT_CS_STATUS_CHANGED); // // notify xpnet
+      #endif 
+      #if (PARSER == LENZ)
+        pcintf_EventNotify(EVENT_CS_STATUS_CHANGED); // // notify xpnet
+      #endif
       break;
     case STATUS_CLOCK_CHANGED : 
       //t_fast_clock *fastClock = (t_fast_clock*) data;
@@ -183,9 +187,13 @@ void status_EventNotify ( statusEvent_t event, void *data) {
       // now send this to DCC (but not during programming or when stopped)
       if (opendcc_state == RUN_OKAY) do_fast_clock(&fast_clock);
 
-      xpnet_EventNotify(EVENT_CLOCK_CHANGED); // // notify xpnet
       uiEvent.clockChanged = 1; // notify UI
-      //lenzEvent.clockChanged = 1; // notify lenz
+      #if (XPRESSNET_ENABLED == 1)
+        xpnet_EventNotify(EVENT_CLOCK_CHANGED); // // notify xpnet
+      #endif 
+      #if (PARSER == LENZ)
+        pcintf_EventNotify(EVENT_CLOCK_CHANGED); // notify lenz
+      #endif
       break;
     // the next events are unknown in xpnet, but status.cpp will have sent the event RUN_OFF before as well!
     case STATUS_MAIN_SHORT :

@@ -54,15 +54,15 @@
 
 #define X_RxBuffer_Size  32              // mind. 16
 #define X_TxBuffer_Size  32
-unsigned char X_RxBuffer[X_RxBuffer_Size];
-unsigned int X_TxBuffer[X_TxBuffer_Size];       // this is int, we have 9 bits
+static unsigned char X_RxBuffer[X_RxBuffer_Size];
+static unsigned int X_TxBuffer[X_TxBuffer_Size];       // this is int, we have 9 bits
 
-unsigned char X_rx_read_ptr = 0;                // point to next read
-unsigned char X_rx_write_ptr = 0;               // point to next write
-unsigned char X_rx_fill = 0;
-unsigned char X_tx_read_ptr = 0;
-unsigned char X_tx_write_ptr = 0;
-unsigned char X_tx_fill = 0;
+static unsigned char X_rx_read_ptr = 0;                // point to next read
+static unsigned char X_rx_write_ptr = 0;               // point to next write
+static unsigned char X_rx_fill = 0;
+static unsigned char X_tx_read_ptr = 0;
+static unsigned char X_tx_write_ptr = 0;
+static unsigned char X_tx_fill = 0;
 
 static inline void set_XP_to_receive()
 {
@@ -258,10 +258,10 @@ bool XP_rx_ready () {
 } // XP_rx_ready
 
 //-------------------------------------------------------------------
-// rx_fifo_read gets one char from the input fifo
+// XP_rx_read gets one char from the input fifo
 //
 // there is no check whether a char is ready, this must be
-// done before calling with a call to rx_fifo_ready();
+// done before calling with a call to XP_rx_ready();
 unsigned char XP_rx_read () {
   unsigned char retval;
 

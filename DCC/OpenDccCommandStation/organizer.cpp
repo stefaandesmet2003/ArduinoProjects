@@ -804,6 +804,7 @@ static void init_locobuffer() {
 #if (XPRESSNET_ENABLED == 1)
   unsigned char orgz_old_lok_owner; // on ORGZ_STOLEN, command station will inform this xpnet device that it's loc has been stolen
 #endif // XPRESSNET_ENABLED
+// not needed for LENZ PARSER version because owner is either CS or PC (slot 0 or 1)
 
 #ifdef SDS_DEBUG
 void print_lbData(locomem *lbData) {
@@ -840,20 +841,18 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
       lbIndex = i;
       *lbDataPtr = &locobuffer[lbIndex];
       if (locobuffer[lbIndex].active) {
-        #if (XPRESSNET_ENABLED == 1)
-          // check for stolen loc
-          if (locobuffer[lbIndex].slot != slot) { // stealing from another device
+        // check for stolen loc
+        if (locobuffer[lbIndex].slot != slot) { // stealing from another device
+          #if (XPRESSNET_ENABLED == 1)
             orgz_old_lok_owner = locobuffer[lbIndex].slot;    // save for notify
-            locobuffer[lbIndex].slot = slot;
-            retval = ORGZ_STOLEN;
-          }
-        #endif
+          #endif
+          locobuffer[lbIndex].slot = slot;
+          retval = ORGZ_STOLEN;
+        }
         return(retval);
       }
       else {
-        #if (XPRESSNET_ENABLED == 1)
-          locobuffer[lbIndex].slot = slot;
-        #endif
+        locobuffer[lbIndex].slot = slot;
         locobuffer[lbIndex].address = locAddress;
         locobuffer[lbIndex].refresh = 0;
         locobuffer[lbIndex].format = database_GetLocoFormat(locAddress);
@@ -870,9 +869,7 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
     if (locobuffer[i].address == 0) {
       lbIndex = i;
       *lbDataPtr = &locobuffer[lbIndex];
-      #if (XPRESSNET_ENABLED == 1)
-          locobuffer[lbIndex].slot = slot;
-      #endif
+      locobuffer[lbIndex].slot = slot;
       locobuffer[lbIndex].address = locAddress;
       locobuffer[lbIndex].refresh = 0;
       locobuffer[lbIndex].format = database_GetLocoFormat(locAddress);
@@ -890,9 +887,7 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
   }
   lbIndex = found_i;
   *lbDataPtr = &locobuffer[lbIndex];
-  #if (XPRESSNET_ENABLED == 1)
-    locobuffer[lbIndex].slot = slot;
-  #endif
+  locobuffer[lbIndex].slot = slot;
 
   locobuffer[lbIndex].address = locAddress;
   locobuffer[lbIndex].refresh = 0;

@@ -1,9 +1,20 @@
-# CommandStation XPNET
-- configuration for command station with XPNET interface on uart1  
-- uses RS485 PHY for xpnet  
-- works with PcInterface (connection with JMRI)  
+# DCC CommandStation
+- built from the original opendcc code
+- comes in 2 main configurations :  with RS485 xpressnet, or direct RS232 PC interface. 
+--> Atmega328 has only 1 uart interface. The original opendcc cpu had 2 uarts.  
+--> Here,both xpressnet & pc-interface are implemented on uart1, and are therefore mutually exclusive
+--> the PC interface is modelled following the Lenz specification (quasi identical to xpressnet, except for the missing call byte), and can be used to interface with e.g. JMRI.
 
-## XPNET addresses  
+## Building xpressnet configuration
+- define XPRESSNET_ENABLED=1 and PARSER=NONE in config.h  
+- uses RS485 PHY for xpnet  (see hardware.h for details)
+- PcInterface sketch (see below) provides code for a separate pc interface. It acts as bridge between xpressnet and PC, similar to Lenz LI101, and requires only basic hardware (atmega+rs485PHY+USBserial-ttl converter)    
+
+## Building direct PC interface configuration
+- define XPRESSNET_ENABLED=0 and PARSER=LENZ in config.h
+- uart1 talks Lenz protocol at default 19200 baud. The atmega328 connects directly to the PC with e.g. JMRI
+
+## xpressnet addresses  
 - using static addresses for the moment, no dynamic addresses. Fixed addressing via defines or CV variable.
 - overview of used addresses :  
 -> 0 : CommandStation, using 'slot 0' for the local UI, this is a not-valid XPNET address  
@@ -21,6 +32,7 @@
 - track power on/off, on/off/short/external-stop notifications  
 - not all possible commands in the parser have been tested!!  
 - turnout control from local UI broadcasted over xpnet
+- local UI syncs with commands over xpnet
 
 ## Command Station CVs
 - for the moment it's not possible to read/write CommandStation CVs  
@@ -77,21 +89,16 @@
 ## note on stealing locos between xpnet devices
 - multiple xpnet devices can control the same loc decoder. A 'loc_stolen' event is sent to the device that lost control of a loc.
 - JMRI implements a polling of the loc status (speed & functions) and maintains these when taking over control  
---> TODO for the CS local UI, and throttle
-- release loco from local UI : not yet implemented (can be done by modifying locobuffer directly)  
---> the loc will then be seen as 'free' by another xpnet device
+- local UI can steal a loc from another xpnet device, and takes over the current settings (speed & functions)
+--> TODO for the throttle
+- when a new loc is chosen from the CommandStation local UI, the previous loc is 'released' (i.e. will appear as 'free' to other xpnet devices)    
 - release loco from xpnet device : 
 --> no specific xpnet command available for this function
--->'Remove Loc from Command Station Stack' command removes loc from the locobuffer, but then the current settings are lost, ie. cannot be taken over by the stealing device  
+-->'Remove Loc from Command Station Stack' command is implemented this way in the CommandStation. On 'release' the loc is set inactive (it will not receive repeated speed/function instructions), and will appear 'free' to other xpnet devices. Another device can take over the loc with its current settings.  
 - When JMRI receives the loc stolen notification, it continues to poll the CS for the loc status, and can steal the loc back at any time  
 --> initially there was an issue with this, but solved after correctly implementing the F13_F28 Status Response (0xE4-0x51)
-- loc stolen notify on local UI : todo!
 
 ## todo
-- UI : add power on/off, add dcc clock time  
-- UI : rework code  
-- loc stolen notification on local UI
-- appstub clean-up
 - modify timing for short detection on programming track at startup  
 --> when the accessory decoder is powered from DCC, the inrush current on the 470uF smoothing capacitor is seen as a short on the programming track, and the programming is aborted  
 --> timing for short detection is too tight  
@@ -110,22 +117,19 @@
 - add checks on feedback addresses to avoid writing beyond allocated array memory!!!
 - fast clock configuration in CommandStation (is now fixed, starts at 8:00 and speed via CV, but this can be more flexible over UI config)
 
-# CommandStation LENZ
-- configuration for command station with LENZ PC interface on uart1
-- code not up to date! (lenz parser only partially cleaned up, not up to date with xpnet version)  
---> maybe integrate entirely in xpnet, both code bases have already the necessary #define switches  
-
 # PcInterface
-a sketch that implements a LI101 PC Interface  
+- a sketch that implements a LI101 PC Interface  
 -> PC side : softSerial (pin 8=RX,9=TX) to usb-serial adapter, running default 19200 baud  
 -> XPNET side : atmega uart1  
-works with JMRI connected to the softSerial  
-JMRI doesn't accept ACK for every command => parseCommand function updated to only ack requests that don't generate a command station response!  
-rs485c - xpc : adapted so message bytes for other slots are discarded by the ISR, 
+- works with JMRI connected to the softSerial  
+- only basic hardware is required : atmega328 + MAX485 + usb-to-serial adapter
+- notes:  
+--> JMRI doesn't accept ACK for every command => parseCommand function updated to only ack requests that don't generate a command station response!  
+--> rs485c - xpc : adapted so message bytes for other slots are discarded by the ISR, 
 i.e. never make it to the RxBuffer = less work for xpc_Run()
 
 ## tested
-- see CommandStation XPNET  
+- see DCC CommandStation
 
 ## stability
 keeps working under constant polling from JMRI, especially during programming  

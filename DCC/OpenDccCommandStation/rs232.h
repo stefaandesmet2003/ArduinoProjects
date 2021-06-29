@@ -35,20 +35,18 @@ typedef enum {BAUD_9600 = 0,
               BAUD_115200 = 4,
               } t_baud;
 
-// this gives a translation to integer              
-extern const unsigned long baudrate[] PROGMEM;
 extern t_baud actual_baudrate;
 extern volatile bool rs232_parser_reset_needed; // gets true, if a parser reset is required (sds, was : break condition on rs232)
 //=============================================================================
 // Upstream Interface
 //----------------------------------------------------------------------------
 //
-void init_rs232(t_baud baudrate);
-bool tx_fifo_write (const unsigned char c);
-bool tx_fifo_ready (void);
-bool tx_all_sent (void);  // 1 if fifo is empty and all data are sent
-bool rx_fifo_ready (void);
-unsigned char rx_fifo_read (void);
+void rs232_Init(t_baud baudrate);
+bool rs232_send_byte (const unsigned char c);
+bool rs232_tx_ready ();   // true if byte can be sent
+bool rs232_is_all_sent ();      // 1 if fifo is empty and all data are sent
+bool rs232_rx_ready ();   // true if one byte can be read
+uint8_t rs232_rx_read ();  // reads one byte
 
 #endif  // __RS232_H__
 
