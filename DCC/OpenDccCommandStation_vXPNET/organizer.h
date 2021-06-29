@@ -121,6 +121,6 @@ unsigned char put_in_queue_prog(t_message *new_message);
 // how:       every speed command is entered to locobuffer to be refreshed.
 //            "younger" locos are refreshed more often.
 uint8_t lb_GetEntry (uint16_t locAddress, locomem **lbEntry);
-void lb_DeleteEntry(uint16_t locAddress);
+void lb_ReleaseLoc(uint16_t locAddress);
 // searchDirection : 0 = forward, 1 = reverse
 uint16_t lb_FindNextAddress(uint16_t locAddress, unsigned char searchDirection);    // returns next addr in buffer

@@ -57,24 +57,7 @@ typedef struct {      // each member will be decremented on every tick until 0
   unsigned int parser;       // high level parser timeout
 } t_no_timeout;
 
-// Interface for OpenDCC-Parser
-typedef struct 
-{
-  unsigned char changed: 1;       // if != 0: there was (could be) a state change
-                                  // set by status_SetState - cleared by host parser
-  unsigned char changed_xp: 1;    // mirror for Xpressnet
-                                  // set by status_SetState - cleared by xpressnet master
-  unsigned char clock: 1;         // there was a minute tick for DCC Layout time
-                                  // set by fast_clock - cleared by xpressnet master
-} t_status_event;
-
-// SDS : mijn intf naar de display
-// TODO SDS2021 : moet weg (vervangen door status_EventNotify)
-typedef enum {
-  HWEVENT_MAINSHORT, HWEVENT_PROGSHORT, HWEVENT_EXTSTOP, HWEVENT_NODCC
-} hwEvent_t;
-
-// SDS nieuwe status event interface
+// notify events to main loop
 typedef enum {
   STATUS_STATE_CHANGED, STATUS_CLOCK_CHANGED, 
   STATUS_MAIN_SHORT, STATUS_PROG_SHORT, STATUS_EXT_STOP
@@ -97,7 +80,6 @@ void status_SetState(t_opendcc_state next);
 void status_SetFastClock(t_fast_clock *newClock);
 void status_Run();
 bool status_IsProgState(); // TODO SDS2021 : enkel gebruikt in lenz parser config, mag dat niet weg ??
-extern void hwEvent_Handler( hwEvent_t event ) __attribute__ ((weak));
 extern void status_EventNotify ( statusEvent_t event, void *data) __attribute__ ((weak));
 
 #endif // __STATUS_H__

@@ -101,7 +101,7 @@ uint8_t feedback_update(uint8_t decoderAddress, uint8_t data) {
 // vervangt save_turnout uit organizer
 // 2 bits per wissel in accessoryBuffer
 // even bit = coil 0 laatst actief, oneven bit = coil 1 laatst actief
-void turnout_update(uint16_t turnoutAddress, uint8_t coil) {
+void turnout_UpdateStatus(uint16_t turnoutAddress, uint8_t coil) {
   uint16_t bufferIdx;
   uint8_t bitPos, bitsVal;
 
@@ -111,7 +111,12 @@ void turnout_update(uint16_t turnoutAddress, uint8_t coil) {
   if (bufferIdx < NUM_ACCESSORY_ADDRESSES) { // overwrite the 2 bits in the buffer
     accessoryBuffer[bufferIdx] = (accessoryBuffer[bufferIdx] & ~(0x3 << bitPos)) | (bitsVal << bitPos);
   }
-} // turnout_update
+} // turnout_UpdateStatus
+
+// returns TURNOUT_STATE_xxx
+uint8_t turnout_GetStatus (uint16_t turnoutAddress) {
+  return getTurnoutCommandPosition(turnoutAddress);
+}
 
 // fills *msg with decoderAddress + ITTNZZZZ xpnet data (2bytes)
 // ofwel op decoderAddress niveau en 4 bytes sturen?

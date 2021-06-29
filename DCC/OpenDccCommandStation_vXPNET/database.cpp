@@ -72,7 +72,7 @@ uint32_t db_lastMillis;                 // controls min delay between xpnet mess
 #define DB_UPDATE_PERIOD  50L           // ms, like millis()
 
 const locoentry_t locdb_defaults[] PROGMEM = {
-  //  addr format        name
+  //  locAddress format        name
   {{ {  3, DCC128 }}, {"DIESEL\x00"} },
   {{ {  4, DCC128 }}, {"STOOM\x00"}  },
 };
@@ -149,13 +149,13 @@ static void database_Rewind() {
 /****************************************************************************************************/
 /// database_GetLocoFormat returns the stored loco format, if loco was never
 //  used with a format different from default it is not stored.
-t_format database_GetLocoFormat(unsigned int addr) {
+t_format database_GetLocoFormat(uint16_t locAddress) {
   unsigned char stored_h, stored_l;
 	unsigned char i;
 	unsigned char addr_low, addr_high;
 
-	addr_low = (unsigned char) addr;
-	addr_high = (unsigned char) (addr>>8);
+	addr_low = (unsigned char) locAddress;
+	addr_high = (unsigned char) (locAddress>>8);
 
   for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
     stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
@@ -171,13 +171,15 @@ t_format database_GetLocoFormat(unsigned int addr) {
 
 // sds temp??
 // caller provides memory for the name string
-uint8_t database_GetLocoName(unsigned int addr, uint8_t *name) {
+uint8_t database_GetLocoName(uint16_t locAddress, uint8_t *name) {
   unsigned char stored_h, stored_l;
 	unsigned char i,j;
 	unsigned char addr_low, addr_high;
 
-	addr_low = (unsigned char) addr;
-	addr_high = (unsigned char) (addr>>8);
+	if (locAddress==0) return 0;
+
+  addr_low = (unsigned char) locAddress;
+	addr_high = (unsigned char) (locAddress>>8);
 
   for (i=0; i<LOCODB_NUM_ENTRIES; i++) {
     stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
@@ -197,14 +199,14 @@ uint8_t database_GetLocoName(unsigned int addr, uint8_t *name) {
 
 // SDS : aangepast : geen onderscheid meer tussen default format of niet, elke loc wordt opgeslagen
 // TODO SDS2021 : naar word size voor eeprom read gaan? code wordt dan eenvoudiger, maar trager
-unsigned char database_PutLocoFormat(unsigned int addr, t_format format) {
+unsigned char database_PutLocoFormat(uint16_t locAddress, t_format format) {
   unsigned char i;
   unsigned char stored_h, stored_l;
   unsigned char my_h;
   unsigned char addr_low, addr_high;
 
-  addr_low = (unsigned char) addr;
-  addr_high = (unsigned char) (addr>>8);
+  addr_low = (unsigned char) locAddress;
+  addr_high = (unsigned char) (locAddress>>8);
   my_h = (format << 6) | addr_high;
   
   // search loco, if found: replace it
@@ -212,7 +214,7 @@ unsigned char database_PutLocoFormat(unsigned int addr, t_format format) {
     stored_l = eeprom_read_byte((uint8_t*)&locodb[i].b[0]);
     if (stored_l == addr_low) {
       stored_h = eeprom_read_byte((uint8_t*)&locodb[i].b[1]);
-      if ((stored_h & 0x3f) == addr_high) { // entry with same addr found
+      if ((stored_h & 0x3f) == addr_high) { // entry with same locAddress found
         eeprom_update_byte((uint8_t*)&locodb[i].b[1], my_h);   // replace format
         return(1);
       }
@@ -236,13 +238,13 @@ unsigned char database_PutLocoFormat(unsigned int addr, t_format format) {
   return(0);
 } // database_PutLocoFormat
 
-unsigned char database_PutLocoName(unsigned int addr, unsigned char * locName) {
+unsigned char database_PutLocoName(uint16_t locAddress, uint8_t *locName) {
   unsigned char i;
   unsigned char stored_h, stored_l;
   unsigned char addr_low, addr_high;
 
-  addr_low = (unsigned char) addr;
-  addr_high = (unsigned char) (addr>>8);
+  addr_low = (unsigned char) locAddress;
+  addr_high = (unsigned char) (locAddress>>8);
 
   // search loco, if found: replace name
   for (i=0; i<LOCODB_NUM_ENTRIES; i++) {

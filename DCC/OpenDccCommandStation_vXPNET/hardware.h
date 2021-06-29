@@ -122,10 +122,8 @@
 // D5 vrij
 #define ROTENC_DT       6     // D6,in, draaiknop DT
 #define ROTENC_SW       7     // D7,in, drukknop op de rotary enc
-#define BUTTON_GREEN    8     // input, SDS D8 
 #define DCC             9     // out,sds D9
 #define NDCC            10     // out,sds D10
-#define BUTTON_RED      11     // input, SDS D11
 //D12 vrij --> button 3 & 4 voorzien!!
 //D13 vrij
 
@@ -143,7 +141,6 @@
 
 #define PROG_TRACK_STATE (digitalRead(SW_ENABLE_PROG)) // used by dccout
 
-// Abfragen:
 //sds 201611 : NMAIN_SHORT, NPROG_SHORT, zijn active low
 //sds 201611 : ACK_DETECTED active high
 //sds 201610 : de keys zijn active low aangesloten

@@ -299,11 +299,9 @@ void status_SetState(t_opendcc_state next) {
     case RUN_OKAY:                  // DCC running
       SET_PROG_TRACK_OFF;
       SET_MAIN_TRACK_ON;
-      //sds organizer_Restart();          // enable speed commands again
       break;
     case RUN_STOP:                  // DCC Running, all Engines Emergency Stop
     case RUN_PAUSE:                 // DCC Running, all Engines Speed 0, SDS TODO : wordt nog niet gebruikt
-      //sds do_all_stop();
       SET_PROG_TRACK_OFF;
       SET_MAIN_TRACK_ON;
       break;
@@ -316,7 +314,6 @@ void status_SetState(t_opendcc_state next) {
     case PROG_ERROR:
       SET_PROG_TRACK_ON;
       SET_MAIN_TRACK_OFF;
-      //sds organizer_Restart();          // enable speed commands again
       break;
     case PROG_SHORT:                // short on programming track
     case PROG_OFF:

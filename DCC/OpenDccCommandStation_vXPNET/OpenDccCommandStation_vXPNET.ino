@@ -1,16 +1,3 @@
-//----------------------------------------------------------------
-//
-// OpenDCC
-//
-// Copyright (c) 2006 Kufer
-//
-// This source file is subject of the GNU general public license 2,
-// that is available at the world-wide-web at
-// http://www.gnu.org/licenses/gpl.txt
-//
-//
-//-----------------------------------------------------------------
-
 #include "hardware.h"              // hardware definitions
 #include "config.h"                // general structures and definitions - make your changes here
 #include "database.h"              // format and names
@@ -30,25 +17,9 @@
   #include "lenz_parser.h"         // talk to pc (same as ibox_parser.h)
 #endif
 
-/*********************************************************************************************************/
-// sds : voor de UI
-#include <Wire.h> 
-#include <LiquidCrystal_I2C.h>
+// for the local UI
 #include "ui.h"
 #include "keys.h"
-LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
-// Create a set of new characters
-const uint8_t char1[] PROGMEM = { 0x0E, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x0E, 0x0E }; // lampke aan
-const uint8_t char2[] PROGMEM = { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E, 0x0E }; // lampke uit
-const uint8_t char3[] PROGMEM = { 0x1F, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1F }; // leeg blokske
-const uint8_t char4[] PROGMEM = { 0x1F, 0x19, 0x19, 0x19, 0x19, 0x19, 0x19, 0x1F }; // half blokske
-const uint8_t char5[] PROGMEM = { 0x04, 0x0E, 0x15, 0x04, 0x04, 0x04, 0x04, 0x04 }; // wissel recht
-const uint8_t char6[] PROGMEM = { 0x0F, 0x03, 0x05, 0x09, 0x10, 0x10, 0x10, 0x10 }; // wissel schuin
-const uint8_t char7[] PROGMEM = { 0x10, 0x0, 0x6, 0x9, 0x9, 0x6, 0, 0x0 };
-const uint8_t char8[] PROGMEM = { 0x0, 0x0, 0x0, 0x6, 0x9, 0x9, 0x6, 0x0 };
-const uint8_t *const charBitmap[] PROGMEM = {char1,char2,char3,char4,char5,char6,char7,char8};
-
-/*********************************************************************************************************/
 
 #if  (TIMER2_TICK_PERIOD != (64L * 1000000L / F_CPU))    // we use div 64 on timer 2 -> 4us
     #warning TIMER2_TICK_PERIOD does not match divider!
@@ -78,8 +49,6 @@ static void timer2_Init() {
 static void hardware_Init() {
   // Input/Output Ports initialization
   // Port B
-  pinMode(BUTTON_GREEN, INPUT); // pullup is extern 10K
-  pinMode(BUTTON_RED, INPUT); // pullup is extern 10K
   pinMode(NDCC, OUTPUT); // pullup is extern 10K
   pinMode(DCC, OUTPUT); // pullup is extern 10K
   digitalWrite(DCC,HIGH);
@@ -95,8 +64,8 @@ static void hardware_Init() {
   digitalWrite(SW_ENABLE_PROG,LOW); // prog track off
 
   // Port D
-  pinMode (ROTENC_CLK,INPUT); // pullup zit op de ROTENC module
-  pinMode (ROTENC_DT,INPUT); // pullup zit op de ROTENC module
+  pinMode (ROTENC_CLK,INPUT); // pullup on the print (same as KY-040 module)
+  pinMode (ROTENC_DT,INPUT); // pullup on the print (same as KY-040 module)
   pinMode (ROTENC_SW,INPUT_PULLUP);
   pinMode (ACK_DETECTED,INPUT); // pullup is extern 10K
   pinMode (RS485_DERE,OUTPUT);
@@ -118,22 +87,6 @@ static void hardware_Init() {
   // A7 as current measurement, will not exceed 1.1V
   analogReference(INTERNAL);
 } // hardware_Init
-
-static void lcd_Init() {
-  int charBitmapSize = (sizeof(charBitmap ) / sizeof (charBitmap[0]));
-
-  lcd.begin(20,4); // initialize the lcd 
-  // Switch on the backlight
-  //lcd.setBacklight(1); // overbodig, want by default al aan
-
-  // init special characters
-  for (int i = 0; i < charBitmapSize; i++) {
-    uint8_t aBuffer[8];
-    memcpy_P ((void*)aBuffer,(void*)pgm_read_word(&(charBitmap[i])),8); // eerst data copiëren van flash->sram
-    lcd.createChar (i, aBuffer);
-  }
-  lcd.home ();
-} // lcd_Init
 
 void setup() {
   
@@ -172,7 +125,6 @@ void setup() {
   status_SetState(RUN_OKAY);  // start up with power enabled (or RUN_OFF, to start with power off)
   organizer_SendDccStartupMessages();   // issue defined power up sequence on tracks (sds: vreemd dat dit ook in de GOLD uitgecomment is..)
   
-  lcd_Init();
   ui_Init();
   keys_Init();
 
@@ -219,33 +171,31 @@ void status_EventNotify ( statusEvent_t event, void *data) {
         case RUN_STOP:        // DCC Running, all Engines Emergency Stop
         case RUN_PAUSE:       // DCC Running, all Engines Speed 0, SDS TODO : wordt nog niet gebruikt
           do_all_stop();
+          break;
       }
+      xpnet_EventNotify(EVENT_CS_STATUS_CHANGED); // // notify xpnet
+      uiEvent.statusChanged = 1; // notify UI
+      //lenzEvent.statusChanged = 1; // notify lenz
       break;
-      // notify lenz
-      //lenzEvent.statusChanged = 1;
-      // notify xpnet
-      xpnet_Event.statusChanged = 1;
-      // notify UI
     case STATUS_CLOCK_CHANGED : 
       //t_fast_clock *fastClock = (t_fast_clock*) data;
       // gewoon fast_clock global gebruiken om te lezen is ook ok
       // now send this to DCC (but not during programming or when stopped)
       if (opendcc_state == RUN_OKAY) do_fast_clock(&fast_clock);
-      //er moet nog een cleane intf naar xpnet komen ipv xpnet_Event global
-      // notify lenz
-      //lenzEvent.clockChanged = 1;
-      xpnet_Event.clockChanged = 1; // send clock_event to Xpressnet
-      // notify UI -> doen we niet, voldoende dat UI pollt volgens gewenste refresh
+
+      xpnet_EventNotify(EVENT_CLOCK_CHANGED); // // notify xpnet
+      uiEvent.clockChanged = 1; // notify UI
+      //lenzEvent.clockChanged = 1; // notify lenz
       break;
+    // the next events are unknown in xpnet, but status.cpp will have sent the event RUN_OFF before as well!
     case STATUS_MAIN_SHORT :
-      // TODO cleanup, voorlopig gebruiken we hier nog de oude ntf interface naar UI
-      hwEvent_Handler(HWEVENT_MAINSHORT);
+      uiEvent.mainShort = 1;
       break;
     case STATUS_PROG_SHORT : 
-      hwEvent_Handler(HWEVENT_PROGSHORT);
+      uiEvent.progShort = 1;
       break;
     case STATUS_EXT_STOP : 
-      hwEvent_Handler(HWEVENT_EXTSTOP);
+      uiEvent.extStop = 1;
       break;
   }
-}
+} // status_EventNotify

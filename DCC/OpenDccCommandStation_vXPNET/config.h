@@ -40,7 +40,7 @@
 //            2008-01-07 V0.15 added type for message
 //                             added CV for Prog turnoff and s88 timing
 //            2008-02-02       feedback_size added          
-//            2008-06-29       changed from bool to unsigned char (new WinAVR)
+//            2008-06-29       changed from bool to uint8_t (new WinAVR)
 //            2008-07-09 V0.20 moved to new project -> OpenDCC_XP (with Xpressnet)
 //            2008-07-18       CV36 for external Stop
 //            2008-07-30       CV29 for Xpressnet feedback mode
@@ -174,15 +174,15 @@ typedef enum {
 }  t_msg_type;
 
 typedef struct {
-  unsigned char repeat;             // counter for repeat or refresh (depending)
+  uint8_t repeat;             // counter for repeat or refresh (depending)
   union {
     struct {
-      unsigned char size: 4;            // 2 .. 5
-      t_msg_type    type: 4;            // enum: isvoid, isloco, accessory, ...
+      uint8_t     size: 4;            // 2 .. 5
+      t_msg_type  type: 4;            // enum: isvoid, isloco, accessory, ...
     };
-    unsigned char qualifier;
+    uint8_t qualifier;
   };
-  unsigned char dcc[MAX_DCC_SIZE];  // the dcc content
+  uint8_t dcc[MAX_DCC_SIZE];  // the dcc content
 } t_message;
 
 // define a structure for the loco memory (6 bytes)
@@ -194,11 +194,11 @@ typedef struct {
 #define DCC28   2
 #define DCC128  3
 
-typedef unsigned char t_format;
+typedef uint8_t t_format;
 
 typedef struct {
-  unsigned int address;               // address (either 7 or 14 bits)
-  unsigned char speed;                // this is in effect a bitfield:
+  uint16_t address;               // address (either 7 or 14 bits)
+  uint8_t speed;                // this is in effect a bitfield:
                                       // msb = direction (1 = forward, 0=revers)
                                       // else used as integer, speed 1 ist NOTHALT
                                       // this is i.e. for 28 speed steps:
@@ -208,28 +208,39 @@ typedef struct {
                                       // speed is always stored as 128 speed steps
                                       // and only converted to the according format
                                       // when put on the rails or to xpressnet
-  #if (XPRESSNET_ENABLED == 1)
-    #define SIZE_LOCOBUFFER_ENTRY_X 1
-    unsigned char slot: 5;             // Bit 4..0: controlled by this xpressnet device (1..31: throttles, 0=local UI)
-    unsigned char owner_changed: 1;    // Bit 6:    owner changed
-    unsigned char unused: 2;
-  #endif  
+
   t_format format: 2;                 // 00 = 14, 01=27, 10=28, 11=128 speed steps.
                                       // DCC27 is not supported
-  unsigned char active: 1;            // 1: lok is in refresh, 0: lok is not refreshed
-  unsigned char fl: 1;                // function light
-  unsigned char f4_f1: 4;             // function 4 downto 1
-  unsigned char f8_f5: 4;             // function 8 downto 5
-  unsigned char f12_f9: 4;            // function 12 downto 9
-  #if (DCC_F13_F28)
-  #define SIZE_LOCOBUFFER_ENTRY_D 1
-  unsigned char f20_f13: 8;           // function 20 downto 13
-  unsigned char f28_f21: 8;           // function 28 downto 21
+  uint8_t active: 1;            // 1: lok is in refresh, 0: lok is not refreshed
+
+  #if (XPRESSNET_ENABLED == 1)
+    uint8_t slot: 5;            // loc is controlled by this xpressnet device (1..31: throttles, 0=local UI)
+  #else
+    uint8_t unused:5;
   #endif
-  unsigned char refresh;              // refresh is used as level: 0 -> refreshed often
+
+  union {
+    #if (DCC_F13_F28)
+      #define SIZE_LOCOBUFFER_ENTRY_D 2
+      uint32_t funcs;
+    #else
+      uint16_t funcs;
+    #endif
+    struct {
+      uint8_t fl: 1;                // function light
+      uint8_t f4_f1: 4;             // function 4 downto 1
+      uint8_t f8_f5: 4;             // function 8 downto 5
+      uint8_t f12_f9: 4;            // function 12 downto 9
+      #if (DCC_F13_F28)
+        uint8_t f20_f13: 8;           // function 20 downto 13
+        uint8_t f28_f21: 8;           // function 28 downto 21
+      #endif
+    };
+  };
+  uint8_t refresh;              // refresh is used as level: 0 -> refreshed often
 } locomem;
 
-#define SIZE_LOCOBUFFER_ENTRY (6+SIZE_LOCOBUFFER_ENTRY_D+SIZE_LOCOBUFFER_ENTRY_X)
+#define SIZE_LOCOBUFFER_ENTRY (7+SIZE_LOCOBUFFER_ENTRY_D)
 
 // Note on speed coding (downstream):
 //
@@ -253,17 +264,17 @@ typedef enum {
 } t_prog_summary;
 
 typedef struct {
-  unsigned char minute; 
-  unsigned char hour;
-  unsigned char day_of_week;
-  unsigned char ratio;
+  uint8_t minute; 
+  uint8_t hour;
+  uint8_t day_of_week;
+  uint8_t ratio;
 } t_fast_clock;
 
 //========================================================================
 // 5. Usage of Memory, EEROM and Registers
 //========================================================================
 // Globals
-extern const unsigned char opendcc_version PROGMEM;
+extern const uint8_t opendcc_version PROGMEM;
 
 #define SIZE_QUEUE_PROG       6       // programming queue (7 bytes each entry)
 #define SIZE_QUEUE_LP        16       // low priority queue (7 bytes each entry)
@@ -344,7 +355,7 @@ extern const unsigned char opendcc_version PROGMEM;
 // XSOGet 0006)  -> is CTS a indicator for Power Off
 // 008 Number of groups of 8 sensor-bits (half S88) to be read automatically.
 // 014 Maximum time in units of 50 ms that a turnout must be left powered on, when no other turnout command arrives.
-extern unsigned char eemem[] __attribute__((section("EECV")));    // EEMEM
+extern uint8_t eemem[] __attribute__((section("EECV")));    // EEMEM
 // Note:
 // the new sections are defined by:
 //

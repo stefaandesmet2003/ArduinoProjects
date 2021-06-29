@@ -51,8 +51,8 @@
 /*
  * TODO SDS2021 : 
  * organizer state heeft nog enkel 'halted' -> verder cleanup mogelijk?
- * owner_changed wordt niet meer gebruikt : een owner change wordt momenteel elke keer opgevangen door naar de retval ORGZ_STOLEN te kijken
- * dat gebeurt in xpnet (owner change na een xpnet command), en appstub (owner change na ui command)
+ * owner_changed veld in locobuffer entries is verwijderd : een owner change wordt momenteel elke keer opgevangen door naar de retval ORGZ_STOLEN te kijken
+ * dat gebeurt in xpnet (owner change na een xpnet command), en ui (owner change na ui command)
  * in kufer code liep er ook een check via de xpnet state machine of owner_change bits waren gezet (maar die waren enkel gelinkt aan locs die door pc waren geowned)
  * dat is hier ook een mogelijkheid, zodat de owner change notify op 1 centrale plaats gebeurt
  * old owner wordt nu in een global bewaard, niet per loc in de locobuffer
@@ -62,7 +62,6 @@
  * locobuffer accesses : check eeprom accesses ihb, 
  * --> kan problematisch zijn als 2 devices met verschillend format dezelfde loc sturen 
  * --> want dan wordt elke keer eeprom geschreven (database_PutLocoFormat) met het laatst aangestuurde format
- * locobuffer moet static zijn, en enkel hier geschreven : ok? nog niet static, maar wordt wel enkel in organizer.cpp gewijzigd, elders enkel gelezen
 */
 
 #include "Arduino.h"
@@ -70,7 +69,6 @@
 #include "database.h"
 #include "dccout.h"
 #include "status.h"                // opendcc_state
-
 #include "organizer.h" 
 #include "programmer.h"           // for prog_event.busy() -> TODO SDS2021 : is dit echt nodig??
 #include "accessories.h"          // for turnout_Update()
@@ -846,7 +844,6 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
           // check for stolen loc
           if (locobuffer[lbIndex].slot != slot) { // stealing from another device
             orgz_old_lok_owner = locobuffer[lbIndex].slot;    // save for notify
-            locobuffer[lbIndex].owner_changed = 1;
             locobuffer[lbIndex].slot = slot;
             retval = ORGZ_STOLEN;
           }
@@ -856,16 +853,12 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
       else {
         #if (XPRESSNET_ENABLED == 1)
           locobuffer[lbIndex].slot = slot;
-          locobuffer[lbIndex].owner_changed = 0;
         #endif
         locobuffer[lbIndex].address = locAddress;
         locobuffer[lbIndex].refresh = 0;
         locobuffer[lbIndex].format = database_GetLocoFormat(locAddress);
-        locobuffer[lbIndex].speed = 0;
-        locobuffer[lbIndex].fl = 0;
-        locobuffer[lbIndex].f4_f1 = 0;
-        locobuffer[lbIndex].f8_f5 = 0;
-        locobuffer[lbIndex].f12_f9 = 0;
+        //locobuffer[lbIndex].speed = 0; // sds commented 2021 -> reuse settings from when loc was last active (left by previous owner)
+        //locobuffer[lbIndex].funcs = 0;
         retval = ORGZ_NEW;
         return(retval);
       }
@@ -879,16 +872,12 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
       *lbDataPtr = &locobuffer[lbIndex];
       #if (XPRESSNET_ENABLED == 1)
           locobuffer[lbIndex].slot = slot;
-          locobuffer[lbIndex].owner_changed = 0;
       #endif
       locobuffer[lbIndex].address = locAddress;
       locobuffer[lbIndex].refresh = 0;
       locobuffer[lbIndex].format = database_GetLocoFormat(locAddress);
       locobuffer[lbIndex].speed = 0;
-      locobuffer[lbIndex].fl = 0;
-      locobuffer[lbIndex].f4_f1 = 0;
-      locobuffer[lbIndex].f8_f5 = 0;
-      locobuffer[lbIndex].f12_f9 = 0;
+      locobuffer[lbIndex].funcs = 0;
       retval = ORGZ_NEW;
       return(retval);
     }
@@ -903,17 +892,13 @@ static unsigned char lb_PutLocAddress(unsigned char slot, unsigned int locAddres
   *lbDataPtr = &locobuffer[lbIndex];
   #if (XPRESSNET_ENABLED == 1)
     locobuffer[lbIndex].slot = slot;
-    locobuffer[lbIndex].owner_changed = 0;
   #endif
 
   locobuffer[lbIndex].address = locAddress;
   locobuffer[lbIndex].refresh = 0;
   locobuffer[lbIndex].format = database_GetLocoFormat(locAddress);
   locobuffer[lbIndex].speed = 0;
-  locobuffer[lbIndex].fl = 0;
-  locobuffer[lbIndex].f4_f1 = 0;
-  locobuffer[lbIndex].f8_f5 = 0;
-  locobuffer[lbIndex].f12_f9 = 0;
+  locobuffer[lbIndex].funcs = 0;
   retval = ORGZ_NEW;  // okay, is probably stolen, but who cares? (it is our oldest loco)
   return(retval);
 } // lb_PutLocAddress
@@ -2068,10 +2053,9 @@ bool do_pom_loco_cvrd(unsigned int addr, unsigned int cv)
 // parameters: turnoutAddress:  turnout decoder [0000-4095]
 //             coil:          coil (red, green) [0,1]
 //             activate:        off, on = [0,1]; 
-// TODO SDS 2021: notify local ui? (removed 'slot' function parameter, local UI is slot 0)
 bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate) {
   unsigned char retval;
-  if (activate) turnout_update(turnoutAddress, coil);
+  if (activate) turnout_UpdateStatus(turnoutAddress, coil);
   build_nmra_basic_accessory(turnoutAddress, coil, activate, locobuff_mes_ptr);
   retval = put_in_queue_low(locobuff_mes_ptr);
   return(retval);
@@ -2278,8 +2262,9 @@ unsigned char put_in_queue_prog(t_message *new_message) {
 //-----------------------------------------------------------------------------------
 
 // return : 0 : OK, 0xFF = NOK
-// TODO : nog een ORGZ code geven ?
 uint8_t lb_GetEntry (uint16_t locAddress, locomem **lbEntry) {
+  if (locAddress == 0) return (0xFF);
+
   for (uint8_t i=0;i<SIZE_LOCOBUFFER;i++) {
     if (locobuffer[i].address == locAddress){
       *lbEntry = &locobuffer[i];
@@ -2289,13 +2274,13 @@ uint8_t lb_GetEntry (uint16_t locAddress, locomem **lbEntry) {
   return (0xFF);
 } // lb_GetEntry
 
-void lb_DeleteEntry(unsigned int locAddress) {
-  unsigned char i;
+void lb_ReleaseLoc(uint16_t locAddress) {
+  uint8_t i;
+  if (locAddress == 0) return;
   
   for (i=0; i<SIZE_LOCOBUFFER; i++) {
     if (locobuffer[i].address == locAddress) {
-      locobuffer[i].address = 0;
-      locobuffer[i].active = 0;
+      locobuffer[i].active = 0; // the loc will no longer be refreshed, but current settings remain in the locobuffer
     }
   }
 } // lb_DeleteEntry

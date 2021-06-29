@@ -48,8 +48,15 @@
 #if (XPRESSNET_ENABLED == 1)
 
 // TODO SDS20201 : we parkeren dat event voorlopig hier ipv in status
-xpnet_Event_t xpnet_Event;
+typedef struct {
+  uint8_t statusChanged: 1; // if != 0: there was a state change
+                            // set by status_SetState - cleared by xpnet parser
+  uint8_t clockChanged: 1;  // there was a minute tick for DCC Layout time
+                            // set by fast_clock - cleared by xpressnet master
+  uint8_t unused: 6;
+} xpEvent_t;
 
+xpEvent_t xpEvent;
 
 // general fixed messages
 static unsigned char xp_datenfehler[] = {0x61, 0x80};             // xor wrong
@@ -156,7 +163,7 @@ static void xp_send_BroadcastMessage() {
     case PROG_ERROR:
       break;
     }
-  xpnet_Event.statusChanged = 0;            // broadcast done
+  xpEvent.statusChanged = 0;            // broadcast done
 } // xp_send_BroadcastMessage
 
 #if (DCC_FAST_CLOCK == 1)
@@ -170,7 +177,7 @@ static void xp_send_FastClockResponse(unsigned char slot_id) {
   tx_message[5] = 0xC0 | fast_clock.ratio;
 
   xpnet_SendMessage(MESSAGE_ID | slot_id, tx_ptr = tx_message);
-  xpnet_Event.clockChanged = 0;            // fast clock broad cast done
+  xpEvent.clockChanged = 0;            // fast clock broad cast done
 } // xp_send_FastClockResponse
 #endif
 
@@ -873,7 +880,7 @@ static void xp_parser() {
           addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
           switch(rx_message[1] & 0x0f) {
             case 0x04:
-                lb_DeleteEntry(addr);   // normally we don't need this - we manage it dynamically
+                lb_ReleaseLoc(addr); // sds : modified, loc address is not removed from locobuffer, only released
                 processed = 1;
                 break;
           }
@@ -1023,12 +1030,12 @@ void xpnet_Run() {
       }
       break;
     case XP_CHECK_BROADCAST:
-      if (xpnet_Event.statusChanged) {
+      if (xpEvent.statusChanged) {
         xp_send_BroadcastMessage();                            // report any Status Change
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }
       #if (DCC_FAST_CLOCK == 1)
-      else if (xpnet_Event.clockChanged) {
+      else if (xpEvent.clockChanged) {
         xp_send_FastClockResponse(0);    // send as broadcast   // new: 23.06.2009; possibly we need a flag
         xp_state = XP_WAIT_FOR_ANSWER_COMPLETE;
       }
@@ -1082,7 +1089,6 @@ void xpnet_SendMessage(unsigned char callByte, unsigned char *msg) {
   XP_send_byte(my_xor);                   // send xor
 } // xpnet_SendMessage
 
-// TODO SDS2021 : nog case toevoegen voor ntf naar local UI als slot=0 een loc heeft verloren!
 // used by UI after stealing a loc from another xpnet device (slot), and used in this file
 void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress) {
   if (slot != 0) {
@@ -1096,10 +1102,23 @@ void xpnet_SendLocStolen(unsigned char slot, unsigned int locAddress) {
     xpnet_SendMessage(MESSAGE_ID | slot, tx_message);
   }
   else {
-    // TODO implement ntf naar local UI
+    // no ntf to local UI, will poll
   }
 } // xpnet_SendLocStolen
 
+// request a xpnet broadcast
+void xpnet_EventNotify (xpnet_Event_t event) {
+  switch (event) {
+    case EVENT_CS_STATUS_CHANGED:
+      xpEvent.statusChanged = 1;
+      break;
+    case EVENT_CLOCK_CHANGED:
+      xpEvent.clockChanged = 1;
+      break;
+    default:
+      break;
+  }
+}
 
 #else // #if (XPRESSNET_ENABLED == 1)
 
