@@ -2,7 +2,7 @@
 - built from the original opendcc code
 - comes in 2 main configurations :  with RS485 xpressnet, or direct RS232 PC interface. 
 --> Atmega328 has only 1 uart interface. The original opendcc cpu had 2 uarts.  
---> Here,both xpressnet & pc-interface are implemented on uart1, and are therefore mutually exclusive
+--> Here,both xpressnet & pc-interface are implemented on uart1, and are therefore mutually exclusive  
 --> the PC interface is modelled following the Lenz specification (quasi identical to xpressnet, except for the missing call byte), and can be used to interface with e.g. JMRI.
 
 ## Building xpressnet configuration
@@ -33,6 +33,7 @@
 - not all possible commands in the parser have been tested!!  
 - turnout control from local UI broadcasted over xpnet
 - local UI syncs with commands over xpnet
+- PoM : loc byte write OK, accessories : testing TODO; byte read : testing TODO (needs railcom)
 
 ## Command Station CVs
 - for the moment it's not possible to read/write CommandStation CVs  

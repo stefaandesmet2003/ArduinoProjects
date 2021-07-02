@@ -287,10 +287,10 @@ static void build_nmra_extended_accessory(unsigned int addr, char aspect, t_mess
   new_message->dcc[2]  = aspect;
 }
 
-// SDS 2021 : voor de xpnet encapsulated msgs
+// for the xpnet encapsulated msgs (extended accessory + PoM)
 static void build_nmra_raw(unsigned char *msg, unsigned char msgSize, t_message *new_message) {
-  new_message->repeat = dcc_acc_repeat;
-  new_message->type = is_acc; // TODO CHECK!!
+  new_message->repeat = dcc_pom_repeat; // dcc_acc_repeat
+  new_message->type = is_prog; // PoM needs immediate repeat, accessories don't mind
   if (msgSize > 6) msgSize = 6;
   new_message->size = msgSize;
   for (unsigned char i=0; i< msgSize; i++) {
@@ -2055,28 +2055,20 @@ bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char
   retval = put_in_queue_low(locobuff_mes_ptr);
   return(retval);
 }
-// 
-// parameters: addr:     accessory decoder [0000-2047], 11-bit extended accessory DCC address
-//             aspect:   [0-31]
-bool do_extended_accessory(unsigned int decoderAddress, uint8_t signalAspect)
-{
-  unsigned char retval;
-  build_nmra_extended_accessory(decoderAddress, signalAspect, locobuff_mes_ptr);
-  retval = put_in_queue_low(locobuff_mes_ptr);
-  return(retval);
-}
 
-// SDS added, maybe replace build_nmra_extended_accessory because it's not used anymore (except unused lenz_parser)
 // decoder address : 9-bit accessory decoder DCC address
 // signalId : 2-bit head 0..3 (lower 2-bits of the 11-bit address)
 // signalAspect : 5-bits aspect
 bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
+  unsigned char retval;
   uint16_t decoderAddress11Bits;
   decoderAddress11Bits = (decoderAddress << 2) + (signalId & 0x3);
-  do_extended_accessory(decoderAddress11Bits,signalAspect);
+  build_nmra_extended_accessory(decoderAddress11Bits, signalAspect, locobuff_mes_ptr);
+  retval = put_in_queue_low(locobuff_mes_ptr);
+  return(retval);
 }
 
-// SDS voor de xpnet encapsulated msgs
+// for the xpnet encapsulated msgs (extended accessory + PoM)
 bool do_raw_msg(unsigned char *msg, unsigned char msgSize) {
   bool retval;
 

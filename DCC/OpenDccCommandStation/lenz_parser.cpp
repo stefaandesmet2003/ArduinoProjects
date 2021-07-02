@@ -854,16 +854,42 @@ static void pcintf_parser() {
           break;
         case 0x30:
         {
-          // 0xE?-0x30 zijn raw dcc msgs encapsulated in xpnet
-          // SDS TODO : check of de POM nu nog werkt (misschien doet do_pom_loco_xxx nog meer dan enkel dcc msg maken??)
+          /* this case covers programming on main commands (0xE6-0x30) and
+           * raw dcc msgs encapsulated in xpnet (0xE?-0x30), 
+           * raw dcc messages:
+           *   JMRI sends 0xE4-0x30 for extended accessory commands, 
+           *   rx_message[2..5] are the exact dcc message data
+           * PoM for loc decoders : 
+           *   JMRI always sends 2 address bytes (AddrH-AddrL) according xpnet spec
+           *   for short loc addresses dcc expects only AddrL (rx_message[3]), rx_message[4..5] correspond with the raw dcc message data
+           *   for long loc addresses rx_message[2..3] xpnet coding corresponds with dcc 14-bit address coding (11AA.AAAA.AAAA.AAAA),
+           *   and thus the complete rx_message[2..6] corresponds with the raw dcc message
+           * PoM for accessory & extended accessory decoders : 
+           *   is not specified in xpnet specification 3.6, but 
+           *   JMRI sends (extended) accessory decoder address in the exact dcc format, and
+           *   thus the complete rx_message[2..6] corresponds with the raw dcc message for PoM (extended) accessory
+           * 
+           * For PoM accessory/extended accessory opendcc defined 0xF0/0xF4/0xF8/0xFC instead of 0xE4/0xEC in rx_message[4],
+           * but JMRI also sends 0xE4/0xEC for accessory & extended accessory decoder PoM.
+           * So we discard the opendcc proprietary extension
+           * Similarly PoM Bit Write command seems proprietary, and is not used by JMRI
+           */
           uint8_t dccSize = (pcc[0] & 0xF) - 1;
-          do_raw_msg(&pcc[2], dccSize);
+          if ((dccSize == 5) && (pcc[2] == 0)) { // this covers PoM for loc decoders with short address
+            // JMRI sends the command only 1x (although accessory PoM commands are sent 2x ??)
+            // acc. DCC spec, decoder should only accept the command if it's sent 2x
+            // (my tams decoder is conform, if sent only 1x CV is not changed)
+            do_raw_msg(&pcc[3],4); // uses dcc_pom_repeat immediate repeat
+          }
+          else { // this covers all the rest
+            do_raw_msg(&pcc[2], dccSize);
+          }
           pcintf_SendMessage(tx_ptr = pcm_ack);
           return;
           break;
         }
 
-          // SDS 2021 TEMP commented
+          // old opendcc implementation
           /* 
           // Prog. on Main Read ab V3.6 0xE6 0x30 AddrH AddrL 0xE4 + C CV DAT [XOR] 
           // Prog. on Main Bit  ab V3   0xE6 0x30 AddrH AddrL 0xE8 + C CV DAT X-Or

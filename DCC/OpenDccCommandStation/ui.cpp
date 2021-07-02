@@ -46,18 +46,11 @@
 #define DIRECTION_REVERSE 0x0
 #define DIRECTION_BIT     0x80
 
-
 // for the lcd display
 // note: the whole UI code here is developed for a 20x4 char LCD
 #define DISPLAY_X_SIZE  20
 #define DISPLAY_Y_SIZE  4
 #define BACKLIGHTOFF_DELAY  10000
-
-#define ARROW_RIGHT_CHAR \x7E
-#define ARROW_LEFT_CHAR \x7F
-
-#define STR_(X) #X      // this converts to string
-#define STR(X) STR_(X)  // this makes sure the argument is expanded before converting to string
 
 // own glyphs
 #define GLYPH_LAMP_ON_NORMAL            (uint8_t) 0x00
@@ -73,6 +66,12 @@
 #define ARROW_RIGHT                     (uint8_t) 0x7E
 #define ARROW_LEFT                      (uint8_t) 0x7F
 #define FULL_BLOCK                      (uint8_t) 0xFF
+
+#define ARROW_RIGHT_CHAR                \x7E
+#define ARROW_LEFT_CHAR                 \x7F
+
+#define STR_(X) #X      // this converts to string
+#define STR(X) STR_(X)  // this makes sure the argument is expanded before converting to string
 
 // UI refresh settings
 #define DISPLAY_MANUAL_REFRESH_DELAY  200 // avoid a display refresh on every rotary key event
@@ -546,6 +545,37 @@ static bool ui_HomeMenuHandler (uint8_t event, uint8_t code) {
   }
   return (true);
 } // ui_HomeMenuHandler
+
+// TODO : oude keyup/keydown implementatie overnemen?
+// used with accessory decoder with pulse_duration CV = 0
+// ie. keydown sends 'coil activate', keyup sends 'coil deactivate'
+/*
+static bool ui_doTurnoutMenu (uint8_t key) {
+  uint8_t keyCode, keyEvent;
+  bool keyHandled = false;
+  bool activate;
+
+  keyCode = key & KEYCODEFILTER;
+  keyEvent = key & KEYEVENTFILTER;
+  if (keyEvent == KEYEVENT_DOWN) activate = true;
+  else activate = false; // KEYEVENT_UP & KEYEVENT_LONGDOWN
+  
+  if (ui_State == UISTATE_TURNOUT_PAGE1) {
+      keyHandled = true;
+      if (keyEvent == KEYEVENT_LONGDOWN) // ignore long key presses
+        return (keyHandled);
+      if ((keyCode == KEY_KEY1) && (keyEvent == KEYEVENT_DOWN)) {
+          if (ui_Page) ui_Page--;
+          else ui_State = UISTATE_HOME_PAGE1; // back // eventueel een long event gebruiken om direct terug te keren
+      }
+      else if (keyCode == KEY_KEY2) app_ToggleAccessory (ui_Page << 1,activate); // wissel 1 = turnoutAddr 0
+      else if (keyCode == KEY_KEY3) app_ToggleAccessory ((ui_Page << 1)+1,activate); // wissel 2 = turnoutAddr 1
+      else if ((keyCode == KEY_KEY4) && (keyEvent == KEYEVENT_DOWN)) ui_Page++; // door de 255 pagina's scrollen, daarmee hebben we 512 wissels
+      else keyHandled = false;
+  }
+  return (keyHandled);
+} // ui_doTurnoutMenu
+*/
 
 bool ui_RunMenuHandler (uint8_t event, uint8_t code) {
   bool keyHandled = false;

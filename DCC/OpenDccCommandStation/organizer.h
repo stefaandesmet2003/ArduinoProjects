@@ -86,7 +86,6 @@ unsigned char do_loco_func_grp3(unsigned char slot, unsigned int locAddress, uns
 
 void do_all_stop();
 bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate);
-bool do_extended_accessory(unsigned int addr, unsigned char aspect);
 bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect); // new SDS 2021
 bool do_raw_msg(unsigned char *msg, unsigned char msgSize); // new SDS 2021
 bool do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data);                     // program on the main; cv: 1...1024
