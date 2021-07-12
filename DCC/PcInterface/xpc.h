@@ -2,9 +2,8 @@
 #define _xpc_h_
 
 typedef enum { 
-  XPEVENT_POWER_OFF, XPEVENT_POWER_ON, XPEVENT_SERVICE_MODE_ON, 
-  XPEVENT_MAIN_SHORT, XPEVENT_PROG_SHORT, 
-  XPEVENT_LOC_STOLEN, 
+  XPEVENT_POWER_OFF, XPEVENT_POWER_ON, XPEVENT_EMERGENCY_STOP,
+  XPEVENT_SERVICE_MODE_ON,
   XPEVENT_CONNECTION_ERROR, XPEVENT_CONNECTION_OK, 
   XPEVENT_RX_TIMEOUT, XPEVENT_RX_ERROR, XPEVENT_MSG_ERROR, XPEVENT_TX_ERROR, 
   XPEVENT_ACK_REQUEST, XPEVENT_UNKNOWN_COMMAND, XPEVENT_BUSY 
@@ -68,14 +67,16 @@ void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble);
 void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data);
 
 // dit commando is enkel voor schakeldecoders!
-// turnoutAddr : 0..1023 (10bits) 
-// -> decAddr = hoogste 8-bits van het turnoutAddr
-// -> turnout = laagste 2-bits van het turnoutAddr (elke switching decoder controleert 4 wissels)
+// turnoutAddress : 0..1023 (10bits) 
+// -> decoderAddress = hoogste 8-bits van het turnoutAddress
+// -> turnout = laagste 2-bits van het turnoutAddress (elke switching decoder controleert 4 wissels)
 // position : 0 = rechtdoor (output 1), 1 = afslaan (output 2)
-// de sds switching decoder gaat ervoor zorgen dat de 2 outputs van een paar nooit tegelijk aan staan
-// een 'off' commando op de gepairde output hoeft dus niet (activate bit altijd 1)
-void xpc_send_SetTurnoutRequest(uint8_t turnoutAddr, uint8_t turnoutPosition);
-void xpc_send_SetSignalAspectRequest(uint16_t signalAddress, uint8_t signalAspect);
+// xpc_send_SetTurnoutRequest stuurt altijd 'activate=true'
+// -> de switching decoder gaat ervoor zorgen dat de 2 outputs van een paar nooit tegelijk aan staan
+// -> een 'off' commando op de gepairde output hoeft dus niet
+// note: JMRI stuurt wel 'on' & 'off' commands over xpnet
+void xpc_send_SetTurnoutRequest(uint8_t turnoutAddress, uint8_t turnoutPosition);
+void xpc_send_SetSignalAspectRequest(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect);
 
 // locAddr : 0 -> 9999 (xpnet range)
 // de CS antwoordt met speed info, en wie de loc bestuurt
@@ -112,8 +113,8 @@ void xpc_send_SetFastClock (xpcFastClock_t *newFastClock);
 /*** notify intf   *********************************************************************************************/
 /***************************************************************************************************************/
 
-extern void xpc_EventNotify( xpcEvent_t xpcEvent ) __attribute__ ((weak)); // de xpnet broadcasts
-extern void xpc_MessageNotify ( uint8_t *msg) __attribute__ ((weak)); // to notify a received message unparsed (for pcintf)
+extern void xpc_EventNotify(xpcEvent_t xpcEvent) __attribute__ ((weak)); // de xpnet broadcasts
+extern void xpc_MessageNotify (uint8_t *msg) __attribute__ ((weak)); // to notify a received message unparsed (for pcintf)
 extern void xpc_LocStolenNotify(uint16_t stolenLocAddress) __attribute__ ((weak));
 extern void xpc_FastClockNotify (xpcFastClock_t *newFastClock) __attribute__ ((weak));
 
@@ -124,21 +125,22 @@ extern void xpc_FastClockNotify (xpcFastClock_t *newFastClock) __attribute__ ((w
 extern void xpc_LocGetInfoResponse(uint8_t dccSpeed128, uint16_t locFuncs_f0_f12, bool isLocFree) __attribute__ ((weak));
 extern void xpc_LocGetFuncStatus_Response (uint16_t f0_f12) __attribute__ ((weak));
 extern void xpc_LocGetFuncStatus_F13_F28_Response (uint16_t f13_f28) __attribute__ ((weak));
-extern void xpc_CommandStationStatusResponse (uint8_t CsStatus) __attribute__ ((weak));
-extern void xpc_CommandStationSwVersionResponse(uint8_t CsVersion) __attribute__ ((weak));
+extern void xpc_CommandStationStatusResponse (uint8_t csStatus) __attribute__ ((weak));
+extern void xpc_CommandStationSwVersionResponse(uint8_t csVersion) __attribute__ ((weak));
 extern void xpc_ProgStatusResponse (progStatus_t progResponse) __attribute__ ((weak));
 // cvAddress : 1..1024
 extern void xpc_ProgResultResponse (uint16_t cvAddress, uint8_t cvData) __attribute__ ((weak));
 
 // xpnet specification 2.1.11
-#define DECODERTYPE_SWITCHING_DECODER_WITHOUT_FEEDBACK  (0)
-#define DECODERTYPE_SWITCHING_DECODER_WITH_FEEDBACK     (1)
-#define DECODERTYPE_FEEDBACK_DECODER                    (2)
-#define DECODERTYPE_FUTURE_USE                          (3)
-#define TURNOUTPOSITION_UNKNOWN (0) // wissel nog niet bediend tijdens deze sessie
-#define TURNOUTPOSITION_CLOSED  (1) // rechtdoor (output 1 'groen')
-#define TURNOUTPOSITION_THROWN  (2) // afslaan (output 2 'rood')
-#define TURNOUTPOSITION_INVALID (3)
+#define DECODERTYPE_SWITCHING_DECODER_WITHOUT_FEEDBACK  0b00
+#define DECODERTYPE_SWITCHING_DECODER_WITH_FEEDBACK     0b01
+#define DECODERTYPE_FEEDBACK_DECODER                    0b10
+#define DECODERTYPE_FUTURE_USE                          0b11
+
+#define TURNOUT_STATE_UNKNOWN   0b00 // wissel nog niet bediend tijdens deze sessie
+#define TURNOUT_STATE_CLOSED    0b01 // rechtdoor (output 1 'groen')
+#define TURNOUT_STATE_THROWN    0b10 // afslaan (output 2 'rood')
+#define TURNOUT_STATE_INVALID   0b11
 // decAddr : 0..255, 
 // met InfoRequest kan je maar 4 bits tegelijk opvragen, nibble : 0=laagste 4 bits, 1=hoogste 4 bits
 // nibble 0:inputs/outputs 0..3 van de decoder, 1:inputs/outputs 4..7 van de decoder
@@ -147,8 +149,8 @@ extern void xpc_ProgResultResponse (uint16_t cvAddress, uint8_t cvData) __attrib
 // schakeldecoder :  bits0..1 : wissel 1, bits2..3 : wissel 2
 // feedbackdecoder : 4 inputs van de feedback decoder
 // de applayer moet de requests organiseren om alle nodige info te bekomen dmv verschillende func calls
-// decBitsValid : a mask with the 4 bits that are valid from the received nibble
-void xpc_AccessoryDecoderInfoResponse (uint8_t decAddress, uint8_t decBits, uint8_t decBitsValid, uint8_t decType) __attribute__ ((weak));
+// decBitsMask : a mask with the 4 bits that are valid from the received nibble
+void xpc_AccessoryDecoderInfoResponse (uint8_t decAddress, uint8_t decBits, uint8_t decBitsMask, uint8_t decType) __attribute__ ((weak));
 
 // nextLocAddress : 0..9999 = valid, 10000 = invalid
 extern void xpc_FindNextLocAddressResponse(uint16_t nextLocAddress) __attribute__ ((weak));

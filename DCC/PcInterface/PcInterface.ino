@@ -32,6 +32,7 @@ uint8_t pcm_comms_error_xp[] = {0x01, 0x03};          // communication error PCI
 uint8_t pcm_ack[] = {0x01, 0x04};                     // ack
 uint8_t pcm_timeslot_error[] = {0x01, 0x05};          // Command Station is no longer providing us a timeslot for communication
 uint8_t pcm_overrun[] = {0x01, 0x06};                 // buffer overrun (voorlopig enkel aan de rs485c kant, geen idee hoe overruns aan de altSerial te detecteren)
+uint8_t pcm_timeslot_restored[] = {0x01, 0x07};       // Command Station is again receiving timeslots for communication, a strange undocumented command that seems to be used by JRMI to unlock after a timeslot_error ????
 
 // general fixed messages
 uint8_t pcm_datenfehler[] = {0x61, 0x80};             // xor wrong
@@ -217,7 +218,8 @@ void xpc_EventNotify(xpcEvent_t xpcEvent) {
       pc_SendMessage(pcm_timeslot_error);
       break;
     case XPEVENT_CONNECTION_OK : // connection with CS is restored
-      pc_SendMessage(pcm_ack);
+      pc_SendMessage(pcm_timeslot_restored);
+      //pc_SendMessage(pcm_ack);
       break;
   }
 } // xpc_EventNotify
@@ -225,7 +227,7 @@ void xpc_EventNotify(xpcEvent_t xpcEvent) {
 void setup() 
 {
   init_rs232(); // pc interface
-  init_rs485(RS485_DIRECTION_PIN);
+  rs485_Init(RS485_DIRECTION_PIN);
   xpc_Init(xpc_Address);
 } // setup
 
