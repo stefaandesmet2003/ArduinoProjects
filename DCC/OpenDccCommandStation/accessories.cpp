@@ -188,6 +188,6 @@ void turnout_getInfo (uint16_t turnoutAddress, unsigned char *msg) {
   unsigned char decoderAddress, nibble;
 
   decoderAddress = (unsigned char) (turnoutAddress>>2);
-  nibble = (unsigned char) turnoutAddress & 0x2;
+  nibble = (unsigned char) (turnoutAddress>>1) & 0x1; // 0 or 1
   accessory_getInfo(decoderAddress,nibble,msg);
 } // turnout_getInfo

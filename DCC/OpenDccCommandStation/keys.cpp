@@ -35,18 +35,6 @@ void isr () {
     turns++;
 } // ROT_CLK isr
 
-// aangeroepen bij elke falling edge van CLK
-/*
-void isrFalling () {
-  int dt;
-  dt = digitalRead(PIN_ROT_DT);
-  if (0 == dt)
-    turns--;
-  else
-    turns++;
-}
-*/
-
 /****************************************************************************************/
 /* HELPER FUNCTIONS                                                                     */
 /****************************************************************************************/
@@ -112,9 +100,9 @@ void keys_Init ()  {
   uint8_t keypins[NUMBER_OF_DEBOUNCED_KEYS] = KEYPINS;
   // de drukknoppen
   for (int i=0; i<NUMBER_OF_DEBOUNCED_KEYS; i++) {
-      keys[i].State = UP;
-      pinMode(keypins[i],INPUT_PULLUP); // er zit geen pullup weerstand op de module voor de SWITCH
-      keys[i].Pin = keypins[i];
+    keys[i].State = UP;
+    pinMode(keypins[i],INPUT_PULLUP); // er zit geen pullup weerstand op de module voor de SWITCH
+    keys[i].Pin = keypins[i];
   }  
 } // keys_Init
 

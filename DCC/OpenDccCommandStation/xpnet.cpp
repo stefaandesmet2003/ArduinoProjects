@@ -637,13 +637,16 @@ static void xp_parser() {
       // 0x9N loco_addr_1 loco_addr_2 etc. loco_addr N [XOR] "Emergency stop selected locomotives"
       if (rx_message[0] == 0x91) {
         addr = rx_message[1];           // only short addr
-        do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
+        retval = do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
         processed = 1;
       }
       else if (rx_message[0] == 0x92) {
         addr = ((rx_message[1] & 0x3F) * 256) + rx_message[2];
-        do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
+        retval = do_loco_speed(current_slot, addr, 1);         // 1 = emergency stop
         processed = 1;
+      }
+      if ((processed) && (retval & ORGZ_STOLEN)) {
+        xpnet_SendLocStolen(orgz_old_lok_owner,addr);
       }
       break;
 
@@ -720,10 +723,9 @@ static void xp_parser() {
           if (organizer_IsReady()) {
             unsigned char myspeed;
             myspeed = convert_speed_from_rail(speed, format); // map lenz to internal 0...127                      
-
             retval = do_loco_speed_f(current_slot, addr, myspeed, format);
             if (retval & ORGZ_STOLEN) {
-              xpnet_SendLocStolen(orgz_old_lok_owner , addr);
+              xpnet_SendLocStolen(orgz_old_lok_owner,addr);
             }
             processed = 1;
           }
@@ -740,7 +742,7 @@ static void xp_parser() {
                 retval = do_loco_func_grp0(current_slot, addr, rx_message[4]>>4); // light, f0
                 retval |= do_loco_func_grp1(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                  xpnet_SendLocStolen(orgz_old_lok_owner, addr);
+                  xpnet_SendLocStolen(orgz_old_lok_owner,addr);
                 } 
                 processed = 1;
               }
@@ -753,7 +755,7 @@ static void xp_parser() {
               if (organizer_IsReady()) {
                 retval = do_loco_func_grp2(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner,addr);
                 } 
                 processed = 1;
               }
@@ -766,7 +768,7 @@ static void xp_parser() {
               if (organizer_IsReady()) {
                 retval = do_loco_func_grp3(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner,addr);
                 } 
                 processed = 1;
               }
@@ -780,7 +782,7 @@ static void xp_parser() {
                 #if (DCC_F13_F28 == 1)
                 retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                  xpnet_SendLocStolen(orgz_old_lok_owner, addr);
+                  xpnet_SendLocStolen(orgz_old_lok_owner,addr);
                 }
                 #endif
                 processed = 1;
@@ -807,7 +809,7 @@ static void xp_parser() {
                 #if (DCC_F13_F28 == 1)
                 retval = do_loco_func_grp5(current_slot, addr, rx_message[4]);
                 if (retval & ORGZ_STOLEN) {
-                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner,addr);
                 }
                 #endif
                 processed = 1;
@@ -926,7 +928,7 @@ static void xp_parser() {
                   addr = ((rx_message[2] & 0x3F) * 256) + rx_message[3];
                   retval = do_loco_func_grp4(current_slot, addr, rx_message[4]);
                   if (retval & ORGZ_STOLEN) {
-                    xpnet_SendLocStolen(orgz_old_lok_owner, addr);
+                    xpnet_SendLocStolen(orgz_old_lok_owner,addr);
                   }
                 #endif
                 processed = 1;

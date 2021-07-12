@@ -1058,7 +1058,7 @@ static bool ui_LocSpeedHandler (uint8_t keyEvent, uint8_t keyCode) {
 void ui_Init () {
   lcd_Init();
   uiEvent.clockChanged = 1; // force a clock display at first ui_Update()
-  uiEvent.statusChanged = 1; // force a clock display at first ui_Update()
+  uiEvent.statusChanged = 1; // force a status display at first ui_Update()
 
   ui_State = UISTATE_RUN_MAIN;
   ui_CurLocAddress = 3; // default loc address ofwel te vervangen door een saved state in eeprom

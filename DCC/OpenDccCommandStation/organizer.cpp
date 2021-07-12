@@ -802,7 +802,7 @@ static void init_locobuffer() {
 } // init_locobuffer
 
 #if (XPRESSNET_ENABLED == 1)
-  unsigned char orgz_old_lok_owner; // on ORGZ_STOLEN, command station will inform this xpnet device that it's loc has been stolen
+  unsigned char orgz_old_lok_owner; // on ORGZ_STOLEN, command station will inform this xpnet device that its loc has been stolen
 #endif // XPRESSNET_ENABLED
 // not needed for LENZ PARSER version because owner is either CS or PC (slot 0 or 1)
 
@@ -1914,13 +1914,12 @@ unsigned char do_loco_speed(unsigned char slot, unsigned int locAddress, unsigne
   locomem *lbData;
 
   retval = enter_speed_to_locobuffer(slot, locAddress, speed, &lbData);
+  my_message = build_speed_message_from_locobuffer(lbData);
   if (retval & ORGZ_SLOW_DOWN) {  // slow down or direction change
-    my_message = build_speed_message_from_locobuffer(lbData);
     retval |= put_in_queue_hp(my_message);
     retval |= put_in_queue_low(my_message);
   }
   else {  // speed up
-    my_message = build_speed_message_from_locobuffer(lbData);
     retval |= put_in_queue_low(my_message);
   }
 
