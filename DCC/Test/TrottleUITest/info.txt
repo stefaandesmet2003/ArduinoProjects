@@ -1,4 +1,0 @@
-basic ui setup, met een graphic display & rotary encoder
-voorlopig geen xpnet interface
-cs stub nog niet geimplementeerd
-TODO 2021 : code is not working 2017 stuff
