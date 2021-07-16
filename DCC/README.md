@@ -1,9 +1,22 @@
 # DCC CommandStation
+![](CommandStation_small.jpg)
+
+## hardware
+- atmega328 + H-bridge + glue logic ...
+- a rotary key for controlling loc speed mainly
+- 4 buttons for navigating the menus
+- a 20x4 character display
+- separate main track & programming track outputs (top side)
+- 15V laptop power supply (left side)
+- external stop input (left side)
+- xpnet interface (right side)
+## software
 - built from the original opendcc code
 - comes in 2 main configurations :  with RS485 xpressnet, or direct RS232 PC interface. 
 --> Atmega328 has only 1 uart interface. The original opendcc cpu had 2 uarts.  
 --> Here,both xpressnet & pc-interface are implemented on uart1, and are therefore mutually exclusive  
 --> the PC interface is modelled following the Lenz specification (quasi identical to xpressnet, except for the missing call byte), and can be used to interface with e.g. JMRI.
+- ...
 
 ## Building xpressnet configuration
 - define XPRESSNET_ENABLED=1 and PARSER=NONE in config.h  
@@ -91,7 +104,6 @@
 - multiple xpnet devices can control the same loc decoder. A 'loc_stolen' event is sent to the device that lost control of a loc.
 - JMRI implements a polling of the loc status (speed & functions) and maintains these when taking over control  
 - local UI can steal a loc from another xpnet device, and takes over the current settings (speed & functions)
---> TODO for the throttle
 - when a new loc is chosen from the CommandStation local UI, the previous loc is 'released' (i.e. will appear as 'free' to other xpnet devices)    
 - release loco from xpnet device : 
 --> no specific xpnet command available for this function
@@ -119,6 +131,7 @@
 - fast clock configuration in CommandStation (is now fixed, starts at 8:00 and speed via CV, but this can be more flexible over UI config)
 
 # PcInterface
+![](PcInterface_small.jpg)
 - a sketch that implements a LI101 PC Interface  
 -> PC side : softSerial (pin 8=RX,9=TX) to usb-serial adapter, running default 19200 baud  
 -> XPNET side : atmega uart1  
@@ -139,6 +152,37 @@ issue with occasional RX_ERRORS solved; xpnet command is now copied to rs485c wi
 ## todo
 - version STM8, requires AltSoftSerial  
 -> port to STM8 TODO, not considered for now
+
+# Throttle
+![](throttle_small.jpg)
+a remote control for running trains similar to a LokMaus.  
+The throttle connects to the CommandStation over the xpnet bus and can independently control a loc, accessories, etc.  
+From the main screen the most common functions are controlled (loc speed, loc functions, accessories), and status is shown
+
+## hardware description
+- a arduino nano + graphical lcd 320x240 + rotary key + function buttons
+- max485 for xpnet interface
+- 4 yellow buttons for navigating the menus
+- rotary key for loc speed control mainly
+- red key for emergency stop
+- grey wire is a hot pluggable xpnet connection
+- black wire is temporary usb wire for programming the atmega328
+- the empty hole in the middle is .. well an empty hole
+
+## software description
+- using the incredibly fast PDQ library for the SPI display
+- the same xpnet client code as in PcInterface
+- fixed xpnet address for now (3)
+
+## tested functionality
+- loc control, accessory control
+- CS status display, fastclock display
+- notifications for loc stolen, status changes, accessory changes
+
+## todo
+- CV programming & programming on main
+- display feedback inputs
+
 
 # Accessory decoder (AVR + STM8)
 - 2 modes : turnout decoder mode & output decoder mode (see below)  
@@ -287,14 +331,6 @@ In software mode = 0 :
 - for STM8 blinking led & i2c are mutually exclusive! (same as signalDecoder todo)
 - STM8 version : has DCC code removed for now to fit in 8kB
 --> no possibility to program CV's over DCC (must be done by programming eeprom directly)
-
-# Throttle
-initial version with static xpnet address = 3.  
-throttle controls loc speed on dcc loc address = 3, and shows dcc fast clock  
-
-## todo
-- UI
-- encoder doesn't work well, probably linked to slow display refresh (compared to char-lcd)
 
 # SignalDecoder (AVR+STM8)
 an extended accessory decoder implementing various signal heads  
@@ -463,6 +499,37 @@ dcc address = 2, head 1
 - flag MY_ADDRESS_ONLY in nmradcc lib is not used to permit receiving DCC packets for all accessory addresses, including broadcast (accessory address 511).
 - added NOP packet (RCN-213) to nmradcc lib, not sure yet what to do with it
 --> CommandStation is not sending this packet anyway for now  
+
+# Coach Light Decoder
+a fun & useless project to have funky lighting in an model railway carriage
+
+## hardware
+attiny85 + dcc input circuit + neopixel led string
+
+## software
+reworked nmra dcc library + neopixel library (the attiny version)
+
+## functionality
+- the coach light decoder is a DCC mobile decoder. The different functions are controlled using standard mobile decoder packets (speed & functions)
+- F0 : lights on/off
+- F1 : with F1 active, the speed dial modifies the brightness
+- F2 : with F2 active, the speed dial chooses among different lighting presets (fixed colors at the moment)
+- F3/F4/F5 : with any of these functions active an arbitrary RGB color can be dialled
+- works best with 128 dcc speed steps, the 8 speed bits convert to a 0..255 value range for brightness, presets (only 35 used for now), and RGB
+- when F0 disactivated, the settings are written to eeprom (CV). After a power interruption the lighting settings are restored. 
+- The stored lighting mode is automatically activated at power on, DCC control is only needed to modify the settings
+- service mode programming : ack generated by pulsing the led string
+- programming on main is also supported by the nmra lib (writing only, no railcom ack)
+
+The RGB colors are gamma corrected for better color reproduction on the led strip
+
+## Configuration Variables
+CV33 : lighting mode : 1=PRESET, 2=RGB  
+CV34 : brightness : 0..255  
+CV35 : preset, used if CV33=1  
+CV36 : RGB red value, if CV33=2  
+CV37 : RGB green value, if CV33=2  
+CV38 : RGB blue value, if CV33=2  
 
 # RAILCOM
 - todo!

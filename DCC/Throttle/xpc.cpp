@@ -131,6 +131,15 @@ void xpc_send_PowerOffRequest() {
 void xpc_send_EmergencyStopRequest() {
   xpc_SendMessage(xpc_EmergencyStopRequest);
 }
+void xpc_send_EmergencyStopRequest (uint16_t locAddress) { // emergency stop a single loc
+  tx_message[0] = 0x92;
+  tx_message[1] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[2] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
+    tx_message[1] |= 0xC0;
+  xpc_SendMessage(tx_message);
+} 
+
 void xpc_send_ServiceModeResultsRequest() {
   xpc_SendMessage(xpc_ServiceModeResultsRequest);
 }
@@ -237,114 +246,114 @@ void xpc_send_SetSignalAspectRequest(uint16_t decoderAddress, uint8_t signalId, 
   xpc_SendMessage(tx_message);
 } // xpc_send_SetSignalAspectRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // de CS antwoordt met speed info, en wie de loc bestuurt
-void xpc_send_LocGetInfoRequest(uint16_t locAddr)
+void xpc_send_LocGetInfoRequest(uint16_t locAddress)
 {
   // 0xE3 0x00 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x00;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetInfoRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // voor functies F13 -> F28
-void xpc_send_LocGetFuncStatus_F13_F28_Request(uint16_t locAddr)
+void xpc_send_LocGetFuncStatus_F13_F28_Request(uint16_t locAddress)
 {
   // 0xE3 0x08 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x09;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetFuncStatus_F13_F28_Request
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // voor functies F0 -> F12
-void xpc_send_LocGetFuncModeRequest(uint16_t locAddr)
+void xpc_send_LocGetFuncModeRequest(uint16_t locAddress)
 {
   // 0xE3 0x07 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x07;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetFuncModeRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // voor functies F13 -> F28
-void xpc_send_LocGetFuncMode_F13_F28_Request(uint16_t locAddr)
+void xpc_send_LocGetFuncMode_F13_F28_Request(uint16_t locAddress)
 {
   // 0xE3 0x08 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x08;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetFuncMode_F13_F28_Request
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // we gaan 128speed steps gebruiken in de client (DCC128)
-void xpc_send_LocSetSpeedRequest(uint16_t locAddr, uint8_t locSpeed)
+void xpc_send_LocSetSpeedRequest(uint16_t locAddress, uint8_t locSpeed)
 {
   // 0xE4 0x13 Addr-H Addr-L  RV X-Or
   tx_message[0] = 0xE4;
   tx_message[1] = 0x13;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   tx_message[4] = locSpeed;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocSetSpeedRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // per func grp, de applayer moet zorgen dat alle bits in een grp correct worden doorgegeven!!
 // grp=1 (F1..F4,F0), 2 (F5..F8), 3 (F9..F12), 4 (F13..F20), 5 (F21..F28)
-void xpc_send_LocSetFuncRequest(uint16_t locAddr, uint8_t grp, uint8_t locFuncs) {
+void xpc_send_LocSetFuncRequest(uint16_t locAddress, uint8_t grp, uint8_t locFuncs) {
   if ((grp > 5) || (grp == 0))
     return;
   // 0xE4 0x20 Addr-H Addr-L  RV X-Or
   tx_message[0] = 0xE4;
   if (grp == 5) tx_message[1] = 0x28;
   else tx_message[1] = 0x20 + (grp - 1); // cases grp=1..4
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   tx_message[4] = locFuncs;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocSetFuncRequest
 
-void xpc_send_FindNextLocAddress (uint16_t locAddr, uint8_t searchDirection)
+void xpc_send_FindNextLocAddress (uint16_t locAddress, uint8_t searchDirection)
 {
   searchDirection &= 0x1; // 1-bit
   tx_message[0] = 0xE3;
   tx_message[1] = 0x05 + searchDirection;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_FindNextLocAddress
 
-void xpc_send_DeleteLocAddress (uint16_t locAddr)
+void xpc_send_DeleteLocAddress (uint16_t locAddress)
 {
   tx_message[0] = 0xE3;
   tx_message[1] = 0x44;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_DeleteLocAddress
@@ -487,13 +496,13 @@ static void xpc_parser()
       break;
     case 0x0E :
       if ((rx_message[1] & 0xF0) == 0x30) { // address retrieval response, KKKK gebruiken we voorlopig niet volledig
-        uint16_t locAddr;
+        uint16_t locAddress;
         if ((rx_message[1] & 0x0F) == 0x4) // KKKK=4 : not found
-          locAddr = 10000; // use an invalid address as return value
+          locAddress = 10000; // use an invalid address as return value
         else
-          locAddr = ((rx_message[2] & 0x3F) << 8) + rx_message[3];
+          locAddress = ((rx_message[2] & 0x3F) << 8) + rx_message[3];
         if (xpc_FindNextLocAddressResponse)
-          xpc_FindNextLocAddressResponse(locAddr);
+          xpc_FindNextLocAddressResponse(locAddress);
       }
       else if (rx_message[1] == 0x40) {
         uint16_t locStolenAddr;
@@ -643,7 +652,7 @@ void xpc_Run() {
           }
           else {
             // XOR is wrong! --> discard (volgens xpnet specification)
-            if (xpc_EventNotify) xpc_EventNotify(XPEVENT_RX_ERROR);
+            if (xpc_EventNotify) xpc_EventNotify(XPEVENT_RX_ERROR, rx_message);
           }
         }
         else {

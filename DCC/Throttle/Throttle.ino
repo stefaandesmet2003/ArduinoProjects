@@ -1,13 +1,21 @@
-#include <SPI.h>
-#include "Ucglib.h"
 #include "rs485c.h"
 #include "xpc.h"
 #include "keys.h"
 
+#include <SPI.h>
+#include <PDQ_GFX.h>				// PDQ: Core graphics library
+#define	ILI9341_CS_PIN		        16
+#define	ILI9341_DC_PIN		        14
+#define	ILI9341_RST_PIN		        15
+#define	ILI9341_SAVE_SPI_SETTINGS	0
+#include "PDQ_ILI9341.h"			// PDQ: Hardware-specific driver library
+
+#include <Fonts/FreeSans12pt7b.h>	// include fancy sans-serif font
+#include "bitmaps.h" // bitmaps used on UI
+
 #define RS485_DIRECTION_PIN      A3     // opgelet : dit is specifiek Throttle!!
 #define XPNET_MY_ADDRESS (3)
 uint8_t xpc_Address = XPNET_MY_ADDRESS; // voorlopig static
-
 
 #define EVENT_UI_UPDATE (EVENT_KEY_LASTEVENT + 1)
 
@@ -25,13 +33,17 @@ uint8_t xpc_Address = XPNET_MY_ADDRESS; // voorlopig static
 // alle ui pages
 #define UISTATE_HOME_PAGE1      0
 #define UISTATE_HOME_PAGE2      1 
-#define UISTATE_RUN_MAIN        2
-#define UISTATE_RUN_LOC_CHANGE  3
-#define UISTATE_RUN_LOC_FUNCS   4
-#define UISTATE_RUN_TURNOUTS    5
-#define UISTATE_PROG_PAGE1      8
+#define UISTATE_RUN_INIT        2
+#define UISTATE_RUN_MAIN        3
+#define UISTATE_RUN_LOC_CHANGE  4
+#define UISTATE_RUN_LOC_FUNCS   5
+#define UISTATE_RUN_TURNOUTS    6
 #define UISTATE_TEST_PAGE1      9
 #define UISTATE_SETUP_PAGE1     10
+#define UISTATE_PROG_INIT         11
+#define UISTATE_PROG_SELECT_CV    12
+#define UISTATE_PROG_SELECT_VAL   13
+#define UISTATE_PROG_SELECT_TRACK 14
 
 #define DCC_MINSPEED 2 // 0 en 1 zijn stops, 0 = STOP, 1 = EMERGENCY STOP
 #define DCC_MAXSPEED 127
@@ -39,6 +51,8 @@ uint8_t xpc_Address = XPNET_MY_ADDRESS; // voorlopig static
 #define DIRECTION_FORWARD 0x80
 #define DIRECTION_REVERSE 0x0
 #define DIRECTION_BIT     0x80
+
+#define UI_NUM_BUTTONS    4
 
 // state
 // command station state
@@ -85,7 +99,8 @@ typedef struct {
 } xpcRequests_t;
 
 // the lcd
-static Ucglib_ILI9341_18x240x320_HWSPI lcd(/*cd=*/ 14 , /*cs=*/ 16, /*reset=*/ 15);
+//static Ucglib_ILI9341_18x240x320_HWSPI lcd(/*cd=*/ 14 , /*cs=*/ 16, /*reset=*/ 15);
+static PDQ_ILI9341 lcd;			// PDQ: create LCD object (using pins in "PDQ_ILI9341_config.h")
 
 // app status
 static commandStationStatus_t commandStationStatus;
@@ -100,7 +115,6 @@ static xpcRequests_t xpcRequests;
 static uint8_t ui_State;
 static bool ui_Redraw = true;
 static uint32_t uiUpdateLastMillis; // controlling manual & automatic display refreshes
-static uint16_t ui_NewLocAddress; // loc addr geselecteerd in UI
 static bool ui_CurLocSpeedDoDelayedRefresh = true;
 static uint8_t curStartFunc = 0;
 static uint8_t curHighlightFunc = 0;
@@ -112,14 +126,29 @@ static uint32_t speedkeyLastMillis;
 
 // ui fixed text in progmem
 // TODO : betere oplossing dan spaties in flash te stockeren om de tekst te laten passen met de keys
-static const char navHomePage1[] PROGMEM    = "main   pwr        test      >";
-static const char navHomePage2[] PROGMEM    = "prog  setup        >";
-static const char navRunMain[] PROGMEM      = "menu    fx         loc    acc";
-static const char navRunLocChange[] PROGMEM = "back    <          >       OK";
-static const char navRunLocFuncOrTurnoutChange[] PROGMEM = "back    <          >    toggle";
-static const char navTest[] PROGMEM         = "back  sig1        sig2  DB-TX";
-static const char navPowerPage[] PROGMEM    = "back  main        prog";
-static const char navDummy[] PROGMEM        = "back";
+static const char btxtMain[] PROGMEM = "main";
+static const char btxtPower[] PROGMEM = "power";
+static const char btxtTest[] PROGMEM = "test";
+static const char btxtNext[] PROGMEM = ">";
+static const char btxtPrev[] PROGMEM = "<";
+static const char btxtProg[] PROGMEM = "prog";
+static const char btxtSetup[] PROGMEM = "setup";
+static const char btxtFuncs[] PROGMEM = "fx";
+static const char btxtLoc[] PROGMEM = "loc";
+static const char btxtAcc[] PROGMEM = "acc";
+static const char btxtOk[] PROGMEM = "OK";
+static const char btxtBack[] PROGMEM = "back";
+static const char btxtMenu[] PROGMEM = "menu";
+static const char btxtToggle[] PROGMEM = "toggle";
+static const char *navHomePage1[] = {btxtMain,btxtPower,btxtTest,btxtNext};
+static const char *navHomePage2[] = {btxtProg,btxtSetup,NULL,btxtNext};
+static const char *navRunMain[] = {btxtMenu,btxtFuncs,btxtLoc,btxtAcc};
+static const char *navRunLocChange[] = {btxtBack,btxtPrev,btxtNext,btxtOk};
+static const char *navRunLocFuncOrTurnoutChange[] = {btxtBack,btxtPrev,btxtNext,btxtToggle};
+static const char *navTest[] = {btxtBack,NULL,NULL,NULL}; // a dummy
+static const char *navProg[] = {btxtBack,btxtPrev,btxtNext,btxtOk};
+static const char *navPowerPage[] = {btxtBack,btxtMain,btxtProg,NULL};
+
 static const char defaultLocName[] PROGMEM  = "[no name] ";
 static const char evtLocStolenText[] PROGMEM          = "Loc Stolen! ";
 static const char evtMainTrackOkText[] PROGMEM        = "Main OK!    ";
@@ -130,6 +159,8 @@ static const char evtProgTrackShortText[] PROGMEM     = "Prog Short! ";
 static const char evtProgErrorText[] PROGMEM          = "Prog Error! ";
 static const char evtConnectionErrorText[] PROGMEM    = "xpnet connection error";
 static const char evtConnectionOkText[] PROGMEM       = "xpnet OK!";
+static const char txtLocFree[] PROGMEM                = "loc available";
+static const char txtLocInUse[] PROGMEM               = "loc in use";
 static const char mnuPowerHelpText[] PROGMEM          = "switch tracks on/off";
 
 // incoming events (key+ui update events) are first passed to the active menu handler
@@ -140,9 +171,86 @@ static bool ui_RunMenuHandler (uint8_t event, uint8_t code);
 static bool ui_PowerMenuHandler (uint8_t event, uint8_t code);
 static bool ui_TestMenuHandler (uint8_t event, uint8_t code);
 //static bool ui_SetupMenuHandler (uint8_t event, uint8_t code);
-//static bool ui_ProgMenuHandler (uint8_t event, uint8_t code);
+static bool ui_ProgMenuHandler (uint8_t event, uint8_t code);
 //static bool ui_EventHandler (uint8_t event, uint8_t code);
 static bool ui_LocSpeedHandler (uint8_t event, uint8_t code); // generic loc speed handling with rotary key, used by all menus that don't use the rotary key differently
+
+/*****************************************************************************/
+/*    HELPER FUNCTIONS FOR UI BUTTONS                                        */
+/*****************************************************************************/
+/*  based on code in PDQ_GFX.h, but text doesn't align properly with non-default font
+ * code below is hard coupled with the display type & font (<Fonts/FreeSans12pt7b.h>)
+ * font height is 23, and positions from 17 pix above baseline to 6 pix below baseline
+ * therefore use button of height=25, 1 pixel spare top/bottom
+ * therefore setCursor y+18 with x,y = upper left corner of button (setcursor sets baseline)
+ * x,y in initLabel = UL corner, not center like in PDQ_GFX.h!
+ * w,h in initLabel define button size, but text is centered within the rectangle
+ */
+
+class UI_Label {
+public:
+	UI_Label ();
+	void initLabel(PDQ_ILI9341 *gfx, coord_t x, coord_t y, coord_t w, coord_t h, color_t outline, color_t fill, color_t textcolor, const char *label /*, uint8_t textsize*/);
+	void drawLabel(bool vCentered = false, bool inverted = false);
+
+private:
+	PDQ_ILI9341	*_gfx;
+	int16_t		_x, _y;
+	int16_t		_w, _h;
+	//uint8_t		_textsize;
+	color_t		_outlinecolor, _fillcolor, _textcolor;
+	char		_label[10];
+}; // UI_Label
+
+UI_Label::UI_Label() {
+	_gfx = 0;
+}
+
+void UI_Label::initLabel(PDQ_ILI9341 *gfx, coord_t x, coord_t y, coord_t w, coord_t h, color_t outline, color_t fill, color_t textcolor, const char *label /*, uint8_t textsize */)
+{
+	_gfx			= gfx;
+	_x				= x;
+	_y				= y;
+	_w				= w;
+	_h				= h;
+	_outlinecolor	= outline;
+	_fillcolor		= fill;
+	_textcolor		= textcolor;
+	// _textsize		= textsize;
+	strncpy(_label, label, 9);
+	_label[9] = 0;
+} // initLabel
+
+void UI_Label::drawLabel(bool vCentered, bool inverted) {
+	uint16_t fill, outline, text;
+  int16_t x1,y1;
+  uint16_t tw,th;
+
+  lcd.getTextBounds(_label,20,20,&x1,&y1,&tw,&th); // (20,20) is only a reference point to avoid clipping
+
+	if (!inverted) {
+		fill	= _fillcolor;
+		outline = _outlinecolor;
+		text	= _textcolor;
+	}
+	else {
+		fill	= _textcolor;
+		outline = _outlinecolor;
+		text	= _fillcolor;
+	}
+
+	_gfx->fillRoundRect(_x, _y, _w, _h, min(_w,_h)/4, fill);
+	_gfx->drawRoundRect(_x, _y, _w, _h, min(_w,_h)/4, outline);
+  if (vCentered)
+	  _gfx->setCursor(_x - (x1 - 20) + (_w - tw) / 2, _y - (y1 - 20) + (_h - th) / 2);
+  else
+    _gfx->setCursor(_x - (x1 - 20) + (_w - tw) / 2, _y + 18); // all labels vertically aligned, but then text not vertically centered in button
+	_gfx->setTextColor(text);
+	//_gfx->setTextSize(_textsize); // not used for now, assume always =1
+	_gfx->print(_label);
+} // drawLabel
+
+UI_Label UI_Buttons[UI_NUM_BUTTONS];
 
 /*****************************************************************************/
 /*    HELPER FUNCTIONS FOR LOCAL TURNOUT BUFFER                              */
@@ -199,60 +307,120 @@ static void turnout_TriggerBufferRefresh() {
 } // turnout_TriggerBufferRefresh
 
 /*****************************************************************************/
+/*    HELPER FUNCTIONS FOR THE SPEED INDICATION                              */
+/*****************************************************************************/
+
+uint8_t isinTable8[] = { 
+  0, 4, 9, 13, 18, 22, 27, 31, 35, 40, 44, 
+  49, 53, 57, 62, 66, 70, 75, 79, 83, 87, 
+  91, 96, 100, 104, 108, 112, 116, 120, 124, 128, 
+  131, 135, 139, 143, 146, 150, 153, 157, 160, 164, 
+  167, 171, 174, 177, 180, 183, 186, 190, 192, 195, 
+  198, 201, 204, 206, 209, 211, 214, 216, 219, 221, 
+  223, 225, 227, 229, 231, 233, 235, 236, 238, 240, 
+  241, 243, 244, 245, 246, 247, 248, 249, 250, 251, 
+  252, 253, 253, 254, 254, 254, 255, 255, 255, 255, 
+  }; 
+
+// approximate sine * radius of 31 pixels (corresponds with speedo bitmap)
+// sine 1 corresponds to 255 -> 31/255 is 1/8
+// avoiding floating point, because we have to end up with pixel coordinates anyway
+int16_t rsin(int16_t x) {
+  bool pos = true;  // positive - keeps an eye on the sign.
+  if (x < 0) {
+    x = -x;
+    pos = !pos;  
+  }  
+  if (x >= 360) x %= 360;   
+  if (x > 180) {
+    x -= 180;
+    pos = !pos;
+  }
+  if (x > 90) x = 180 - x;
+  if (pos) return isinTable8[x] / 8; 
+  return -isinTable8[x] / 8;
+}
+
+int16_t rcos(int16_t x) {
+  return rsin(x+90);
+}
+
+/*****************************************************************************/
 /*    HELPER FUNCTIONS FOR DISPLAY WRITING                                   */
 /*****************************************************************************/
 static void display_Init() {
-  lcd.begin(UCG_FONT_MODE_TRANSPARENT); // UCG_FONT_MODE_SOLID
-  lcd.setFont(ucg_font_helvB18_hr);
-  lcd.setColor(0,255,255,255); // 0 = wit
-  lcd.setColor(1,0,0,0); // 1 = bg, zwart
-  lcd.clearScreen(); // niet nodig
-  lcd.setFontPosTop();
-  lcd.setRotate270();
+#if defined(ILI9341_RST_PIN)	// reset like Adafruit does
+	FastPin<ILI9341_RST_PIN>::setOutput();
+	FastPin<ILI9341_RST_PIN>::hi();
+	FastPin<ILI9341_RST_PIN>::lo();
+	delay(1);
+	FastPin<ILI9341_RST_PIN>::hi();
+#endif
+
+	lcd.begin();			// initialize LCD
+
+	lcd.setRotation(3);
+	lcd.fillScreen(ILI9341_BLACK);
+  lcd.setFont(&FreeSans12pt7b);
+	lcd.setTextColor(ILI9341_WHITE);
+	lcd.setTextSize(1);
 } // display_Init
 
 // graphic lcd : line = yPos (0..240), clear is done by drawing a black box of ySize=20
 static void clearLine (uint8_t line, uint8_t startPos=0) {
-  lcd.setColor(0,0,0);
-  lcd.drawBox(startPos,line,DISPLAY_X_SIZE-startPos,25);
-  lcd.setColor(255,255,255);
+  lcd.drawRect(startPos,line,DISPLAY_X_SIZE-startPos,25,ILI9341_BLACK);
 } // clearLine
 
-// current loc speed in a yellow circle
 static void ui_ShowLocSpeed(uint8_t dccSpeed) {
   uint8_t dccDirectionForward = dccSpeed & DIRECTION_FORWARD;
-  lcd.setColor(0,0,0);
-  lcd.drawBox(120,80,80,80);
-  lcd.setColor(255,255,0);
-  lcd.drawCircle(160,120,40,UCG_DRAW_ALL);
-  lcd.setPrintPos(125,113);
-
-  if (!dccDirectionForward) {
-    lcd.write('<');
-  }
+  int16_t speedAngle;
   dccSpeed = dccSpeed & 0x7F;
+
+  // redraw the needle
+  // the needle starts in the center of the speedometer (49,50) from UL corner
+  lcd.fillCircle(49+140,50+80,32,ILI9341_BLACK);
+  // rudimentary conversion from speed to angle
+  speedAngle = 217-2*dccSpeed; // roughly from 217° to -37°, the bitmap shows 210° to -30°
+
+  lcd.fillCircle(49+140,50+80,10,ILI9341_YELLOW); // speedo center
+  lcd.drawLine(49+140,50+80,49+140+rcos(speedAngle),50+80-rsin(speedAngle),ILI9341_YELLOW); // needle
+
+  lcd.fillRect(167,150,45,25,ILI9341_BLACK);
+  lcd.setCursor(167,168);
+  lcd.setTextColor(ILI9341_YELLOW);
+
+  if (dccDirectionForward) {
+    lcd.drawBitmap(237,80,epd_bitmap_arrow_right,23,20,ILI9341_YELLOW);
+    lcd.fillRect(120,80,23,20,ILI9341_BLACK);
+  }
+  else {
+    lcd.drawBitmap(120,80,epd_bitmap_arrow_left,23,20,ILI9341_YELLOW);
+    lcd.fillRect(237,80,23,20,ILI9341_BLACK);
+  }
+
   if (dccSpeed < 100) lcd.write('0');
   if (dccSpeed < 10) lcd.write('0');
   lcd.print(dccSpeed);
-  if (dccDirectionForward) {
-      lcd.write('>');
-  }
-  lcd.setColor(255,255,255);
+  lcd.setTextColor(ILI9341_WHITE);
 } // ui_ShowLocSpeed
 
-// op lijn 1, teken 12-15, of 10-15 (long addr)
-// 4 digits, default position (12,0)->(15,0) : "aaa:" with leading zeroes
 // TODO : not enough screen space to show locAddress > 999 (UI_MAX_LOC_ADDRESS)
-static void ui_ShowLocAddress (uint16_t locAddress, uint8_t xPos=5, uint8_t yPos=30) {
-  lcd.setPrintPos(xPos, yPos);
-  lcd.print("LOC:");
+static void ui_ShowLocAddress (uint16_t locAddress, bool highlight=false) {
+  uint16_t locBitmapColor = lcd.color565(0x7F,0xFF,0x00); // Chartreuse, iso. boring yellow
+  if (highlight)
+    lcd.drawBitmap(0,80,epd_bitmap_trein,100,80,locBitmapColor,ILI9341_BLUE);
+  else
+    lcd.drawBitmap(0,80,epd_bitmap_trein,100,80,locBitmapColor,ILI9341_BLACK);
+  lcd.setTextColor(locBitmapColor);
+  lcd.setCursor(25,126);
+
   if (locAddress > UI_MAX_LOC_ADDRESS) { // long addr
     locAddress = 0; // show an invalid address for now
   }
   if (locAddress < 100) lcd.write('0');
   if (locAddress < 10) lcd.write('0');
   lcd.print(locAddress);
-  lcd.write(':');
+  lcd.setTextColor(ILI9341_WHITE);
 } // ui_ShowLocAddress
 
 // shows locname at current cursor position, max len characters
@@ -271,31 +439,31 @@ static void ui_ShowLocName(uint8_t *locName, uint8_t len) {
 } // ui_ShowLocName
 
 // show 8 funcs allFuncs[startFunc,startFunc+7], highlight allFuncs[highlightFunc] or no highlight if highlightFunc outside [startFunc,startFunc+7] (eg. 0xRFF)
-// display position: (180,30)
+// display position: (192,30)
 // ofwel SOLID fontmode gebruiken, ofwel eerst de box clearen, anders overschrijven de letters elkaar
 static void ui_ShowLocFuncs (uint32_t allFuncs, uint8_t startFunc, uint8_t highlightFunc) { // startFunc : multiple of 8
   uint8_t cur8Funcs;
   startFunc = startFunc & 0xF8; // multiple of 8
   cur8Funcs = (allFuncs >> startFunc) & 0xFF;
-  lcd.setColor(0,0,0);
-  lcd.drawBox(180,30,319-180,25); // clear the drawing area
-  lcd.setColor(255,255,255);
-  lcd.setPrintPos(180,30);
   for (uint8_t func=0;func<8;func++) {
     uint8_t funcActive = (cur8Funcs >> func) & 0x1;
     if ((startFunc+func) == highlightFunc) {
-      if (funcActive) lcd.write('X');
-      else lcd.write('O');
+      if (funcActive) 
+        lcd.drawBitmap(192+func*16,30,epd_bitmap_lamp_aan,12,20,ILI9341_WHITE,ILI9341_BLUE);
+      else
+        lcd.drawBitmap(192+func*16,30,epd_bitmap_lamp_uit,12,20,ILI9341_WHITE,ILI9341_BLUE);
     }
     else {
-      if (funcActive) lcd.write('x');
-      else lcd.write('o');
+      if (funcActive)
+        lcd.drawBitmap(192+func*16,30,epd_bitmap_lamp_aan,12,20,ILI9341_WHITE,ILI9341_BLACK);
+      else
+        lcd.drawBitmap(192+func*16,30,epd_bitmap_lamp_uit,12,20,ILI9341_WHITE,ILI9341_BLACK);
     }
   }
 } // ui_ShowLocFuncs
 
 // show 8 turnouts [startTurnout,startTurnout+7], highlight [startTurnout,startTurnout+7] or 0xFFFF for no highlight
-// display position: (12,2)->(19,2)
+// display position: (192,54)
 static void ui_ShowTurnouts (uint16_t startTurnout, uint16_t highlightTurnout) { // startTurnout : multiple of 8
   uint8_t tbIdx;
   uint8_t decoderAddress; 
@@ -309,43 +477,43 @@ static void ui_ShowTurnouts (uint16_t startTurnout, uint16_t highlightTurnout) {
   }
 
   // now show data for decoderAddress & decoderAddress+1
-  lcd.setColor(0,0,0);
-  lcd.drawBox(180,55,319-180,25); // clear the drawing area
-  lcd.setColor(255,255,255);
-  lcd.setPrintPos(180,55);
-
   for (uint8_t i=0;i<8;i++) {
     uint8_t turnoutState;
     turnoutState = turnout_GetStatus(startTurnout+i);
     if ((startTurnout+i) == highlightTurnout) {
-      if (turnoutState == TURNOUT_STATE_CLOSED) lcd.write('C');
-      else if (turnoutState == TURNOUT_STATE_THROWN) lcd.write('T');
-      else lcd.write('?');
+      if (turnoutState == TURNOUT_STATE_CLOSED) 
+        lcd.drawBitmap(192+i*16,54,epd_bitmap_pijl_recht,12,20,ILI9341_BLACK,ILI9341_GREEN);
+      else if (turnoutState == TURNOUT_STATE_THROWN) 
+        lcd.drawBitmap(192+i*16,54,epd_bitmap_pijl_schuin,12,20,ILI9341_BLACK,ILI9341_RED);
+      else
+        lcd.drawBitmap(192+i*16,54,epd_bitmap_pijl_unknown,12,20,ILI9341_WHITE,ILI9341_BLUE);
     }
     else {
-      if (turnoutState == TURNOUT_STATE_CLOSED) lcd.write('c');
-      else if (turnoutState == TURNOUT_STATE_THROWN) lcd.write('t');
-      else lcd.write('.');
+      if (turnoutState == TURNOUT_STATE_CLOSED) 
+        lcd.drawBitmap(192+i*16,54,epd_bitmap_pijl_recht,12,20,ILI9341_GREEN,ILI9341_BLACK);
+      else if (turnoutState == TURNOUT_STATE_THROWN)
+        lcd.drawBitmap(192+i*16,54,epd_bitmap_pijl_schuin,12,20,ILI9341_RED,ILI9341_BLACK);
+      else
+        lcd.drawBitmap(192+i*16,54,epd_bitmap_pijl_unknown,12,20,ILI9341_WHITE,ILI9341_BLACK);
     }
   }
 } // ui_ShowTurnouts
 
 static void ui_ShowClock () {
   char myclock[] = "00:00";
-  uint16_t w = lcd.getStrWidth(myclock) + 20;
+  uint16_t x1,y1,w,h;
 
-  lcd.setFontMode(UCG_FONT_MODE_SOLID);
-  lcd.setColor(1,0,0,100);
-  lcd.setPrintPos(320-w+10,5);
+  lcd.getTextBounds("00:00",25,25,&x1,&y1,&w,&h);
+  lcd.fillRect(300-w,0,w+20,25,ILI9341_BLUE);
+  lcd.setCursor(310-w,20);
   if (fastClock.hour < 10) lcd.write('0'); // leading zero
   lcd.print(fastClock.hour);lcd.write(':');
   if (fastClock.minute < 10) lcd.write('0'); // leading zero  
   lcd.print(fastClock.minute);
-  lcd.setColor(1,0,0,0);
-  lcd.setFontMode(UCG_FONT_MODE_TRANSPARENT);
 } // ui_ShowClock
 
 // TODO : voorlopig enkel te gebruiken met flash strings
+// with eventText==NULL -> clears the event text line
 static void ui_ShowEventText(const char *eventText) {
   // TODO : getStrWidth werkt niet met flash strings
   /*
@@ -354,57 +522,61 @@ static void ui_ShowEventText(const char *eventText) {
   if (w > 320) w = 320;
   x = 160 - (w >> 1); // center text
   */
-  lcd.setColor(0,0,0);
-  lcd.drawBox(0,190,319,25); // TODO : w=20 leek niet genoeg
-  lcd.setColor(255,127,0);
-  //lcd.setPrintPos(x,190);
-  lcd.setPrintPos(0,190);
-  lcd.print((__FlashStringHelper*)eventText);
-  lcd.setColor(255,255,255);
+  lcd.fillRect(0,190,319,25,ILI9341_BLACK);
+  if (eventText) {
+    lcd.setTextColor(lcd.color565(255,127,0)); // TODO we hadden hier oranje 255,127,0
+    lcd.setCursor(0,208);
+    lcd.print((__FlashStringHelper*)eventText);
+    lcd.setTextColor(ILI9341_WHITE);
+  }
 } // ui_ShowEventText
 
-// navbar bottom screen in a lightblue background
-// TODO : align text with buttons
-static void ui_ShowNavText (const char *navText) {
-  lcd.setColor(0,0,255);
-  lcd.drawBox(0,215,319,25); // TODO : w=20 leek niet genoeg
-  lcd.setColor(0,255,255,0);
-  //lcd.setColor(1,0,0,255);
-  lcd.setPrintPos(0,215);
-  lcd.print((__FlashStringHelper*)navText);
-  //lcd.setColor(1,0,0,0);
-} // ui_ShowNavText
+static void ui_ShowNavButtons (const char **navButtons) {
+  int16_t buttonXPositions[UI_NUM_BUTTONS] = {0,80,160,240};
+  char label[10];
+  lcd.fillRect(0,215,319,25,ILI9341_BLACK);
+  for (uint8_t i=0; i<4;i++) {
+    if (navButtons[i]) {
+      strcpy_P(label, navButtons[i]);
+      UI_Buttons[i].initLabel(&lcd,buttonXPositions[i],215,75,25,ILI9341_WHITE, ILI9341_BLUE, ILI9341_YELLOW, label);
+      UI_Buttons[i].drawLabel();
+    }
+  }
+  lcd.setTextColor(ILI9341_WHITE);
+} // ui_ShowNavButtons
 
 // show on top line in center, white text on green/red/yellow background
 // TODO : pictos ?
 static void ui_ShowCsStatus() {
   const char *txt;
-  lcd.setPrintPos(80,5); // TODO : fixed x for now, text not centered
+  uint16_t bg = ILI9341_BLACK;
+  UI_Label csStatus;
+  lcd.setCursor(80,20); // TODO : fixed x for now, text not centered
   switch (commandStationStatus) {
     case RUN_OKAY:
-      lcd.setColor(0,100,0);
+      bg = ILI9341_GREEN; // was 0,100,0
       txt = "CS:OK";
       break;
     case RUN_STOP:
-      lcd.setColor(255,0,0);
+      bg = ILI9341_RED; // was 255,0,0
       txt = "CS:STOP";
       break;
     case RUN_OFF:
-      lcd.setColor(255,0,0);
+      bg = ILI9341_RED; // was 255,0,0
       txt = "CS:OFF";
       break;
     case PROG:
-      lcd.setColor(100,100,0);
+      bg = lcd.color565(100,100,0); // was 100,100,0 // ILI9341_YELLOW
       txt = "CS:PROG";
       break;
     case UNKNOWN:
-      lcd.setColor(100,100,0);
+      bg = lcd.color565(100,100,0); // was 100,100,0 // ILI9341_YELLOW
       txt = "CS:????";
       break;
   }
-  lcd.drawBox(80,5,120,25); // 120 = experimental 
-  lcd.setColor(255,255,255);
-  lcd.print(txt);
+  csStatus.initLabel(&lcd,80,0,120,25,ILI9341_WHITE,bg,ILI9341_WHITE,txt);
+  csStatus.drawLabel(true); // vCentered text
+
 } // ui_ShowCsStatus
 
 /*****************************************************************************/
@@ -483,11 +655,8 @@ static bool ui_HomeMenuHandler (uint8_t event, uint8_t code) {
 
   // ui events
   if ((event == EVENT_UI_UPDATE) && code) { // do only manual refresh
-    clearLine(30);
-    clearLine(55);
-    clearLine(215);
-    if (ui_State == UISTATE_HOME_PAGE1) ui_ShowNavText(navHomePage1);
-    else if (ui_State == UISTATE_HOME_PAGE2) ui_ShowNavText(navHomePage2);
+    if (ui_State == UISTATE_HOME_PAGE1) ui_ShowNavButtons(navHomePage1);
+    else if (ui_State == UISTATE_HOME_PAGE2) ui_ShowNavButtons(navHomePage2);
     return true;
   }
 
@@ -501,7 +670,7 @@ static bool ui_HomeMenuHandler (uint8_t event, uint8_t code) {
 
   if (ui_State == UISTATE_HOME_PAGE1) {
     if (keyCode == KEY_1) {
-      ui_State = UISTATE_RUN_MAIN;
+      ui_State = UISTATE_RUN_INIT;
       ui_ActiveMenuHandler = ui_RunMenuHandler;
     }
     else if (keyCode == KEY_2) {
@@ -515,9 +684,8 @@ static bool ui_HomeMenuHandler (uint8_t event, uint8_t code) {
   }
   else if (ui_State == UISTATE_HOME_PAGE2)  {
     if (keyCode == KEY_1) {
-      ui_State = UISTATE_PROG_PAGE1;
-      ui_ActiveMenuHandler = ui_TestMenuHandler;
-      //ui_ActiveMenuHandler = ui_ProgMenuHandler; 
+      ui_State = UISTATE_PROG_INIT;
+      ui_ActiveMenuHandler = ui_ProgMenuHandler; 
     }
     else if (keyCode == KEY_2) {
       ui_State = UISTATE_SETUP_PAGE1;
@@ -532,6 +700,15 @@ static bool ui_HomeMenuHandler (uint8_t event, uint8_t code) {
 bool ui_RunMenuHandler (uint8_t event, uint8_t code) {
   uint8_t keyCode;
   if (event == EVENT_UI_UPDATE) {
+    if ((ui_State == UISTATE_RUN_INIT) && code) {
+      // ui page screen setup
+      lcd.fillRect(0,25,320,190, ILI9341_BLACK);
+      // show speedo
+      lcd.drawBitmap(140,80,epd_bitmap_speedometer,100,80,ILI9341_YELLOW);
+      lcd.fillCircle(49+140,50+80,10,ILI9341_YELLOW);
+      ui_ShowLocAddress(curLoc.address);
+      ui_State = UISTATE_RUN_MAIN;
+    }
     // 1. auto+manual refresh
     // update loc speed/functions -> if loc stolen, update on every auto-refresh to keep display in sync with external control
     if (curLoc.speedChanged || code || ui_CurLocSpeedDoDelayedRefresh) {
@@ -546,6 +723,17 @@ bool ui_RunMenuHandler (uint8_t event, uint8_t code) {
         if (!curLoc.owned) { // our loc is stolen, poll its status at auto-refresh interval
           newLoc.address = curLoc.address; // need the newLoc shadow structure for that, because that's where the response data are stored
           newLoc.refresh = 1;
+        }
+      }
+      else {
+        if (newLoc.speedChanged) { // newLoc data available
+          ui_ShowLocSpeed(newLoc.speed);
+          ui_ShowLocFuncs(newLoc.funcs,0,0xFF); // no function highlighted
+          if (!newLoc.owned)
+            ui_ShowEventText(txtLocFree);
+          else
+            ui_ShowEventText(txtLocInUse);
+          newLoc.speedChanged = false;
         }
       }
 
@@ -564,28 +752,30 @@ bool ui_RunMenuHandler (uint8_t event, uint8_t code) {
     }
     // 3. manual refresh only
     if (ui_State == UISTATE_RUN_MAIN) {
+      lcd.fillRect(130,30,62,49,ILI9341_BLACK);
       ui_ShowLocFuncs(curLoc.funcs,curStartFunc,0xFF); // no function highlighted
       ui_ShowTurnouts(curStartTurnout,0xFFFF); // no turnouts highlighted
-      ui_ShowNavText(navRunMain);
+      ui_ShowNavButtons(navRunMain);
     }
     else if (ui_State == UISTATE_RUN_LOC_FUNCS) {
-      //lcd.setCursor(8,1);
-      //lcd.write('F');lcd.print(curHighlightFunc);lcd.write(':');
+      lcd.fillRect(130,30,62,25,ILI9341_BLACK);
+      lcd.setCursor(130,48);
+      lcd.write('F');lcd.print(curHighlightFunc);lcd.write(':');
       ui_ShowLocFuncs(curLoc.funcs,curStartFunc,curHighlightFunc);
       ui_ShowTurnouts(curStartTurnout,0xFFFF); // no turnouts highlighted
-      ui_ShowNavText(navRunLocFuncOrTurnoutChange);
+      ui_ShowNavButtons(navRunLocFuncOrTurnoutChange);
     }
     else if (ui_State == UISTATE_RUN_TURNOUTS) {
+      lcd.fillRect(130,54,62,25,ILI9341_BLACK);
+      lcd.setCursor(130,72);
+      lcd.write('W');lcd.print(curHighlightTurnout+1);lcd.write(':');
       ui_ShowLocFuncs(curLoc.funcs,curStartFunc,0xFF); // no function highlighted
-      //clearLine(2); // remove notification text
-      //lcd.setCursor(7,2);
-      //lcd.write('W');lcd.print(curHighlightTurnout+1);lcd.write(':');
       ui_ShowTurnouts(curStartTurnout,curHighlightTurnout);
-      ui_ShowNavText(navRunLocFuncOrTurnoutChange);
+      ui_ShowNavButtons(navRunLocFuncOrTurnoutChange);
     }
     else if (ui_State == UISTATE_RUN_LOC_CHANGE) {
-      // TODO complete
-      ui_ShowNavText(navRunLocChange);
+      ui_ShowLocAddress(newLoc.address,true);
+      ui_ShowNavButtons(navRunLocChange);
     }
     return true;
   }
@@ -627,20 +817,31 @@ bool ui_RunMenuHandler (uint8_t event, uint8_t code) {
 
   else if (ui_State == UISTATE_RUN_LOC_CHANGE) {
     if (keyCode == KEY_1) { // back
+      ui_ShowLocAddress(curLoc.address); // remove the highlight background
       ui_State = UISTATE_RUN_MAIN;
     }
     else if (keyCode == KEY_2) { // prev
-      if (ui_NewLocAddress > 1)
-        ui_NewLocAddress -= 1;
+      if (newLoc.address > 1) {
+        newLoc.address -= 1;
+        newLoc.refresh = 1; // trigger a loc info request
+        newLoc.speed = 0xFF; // this will trigger the .speedChanged flag when data arrive asynchronously, and we can update the display
+      }
     }
     else if (keyCode == KEY_3){ // next
-      if (ui_NewLocAddress < UI_MAX_LOC_ADDRESS) // can't show more than 3 digits loc address on display for now
-        ui_NewLocAddress += 1;
+      if (newLoc.address < UI_MAX_LOC_ADDRESS) { // can't show more than 3 digits loc address on display for now
+        newLoc.address += 1;
+        newLoc.refresh = 1; // trigger a loc info request
+        newLoc.speed = 0xFF;  // this will trigger the .speedChanged flag when data arrive asynchronously, and we can update the display
+      }
     }
     else if (keyCode == KEY_4) { // OK
       // bevestig de nieuwe loc selectie
       //TODO lb_ReleaseLoc(curLoc.address);
-      curLoc.address = ui_NewLocAddress;
+      curLoc.address = newLoc.address;
+      curLoc.speed = newLoc.speed;
+      curLoc.funcs = newLoc.funcs;
+      ui_ShowLocAddress(curLoc.address); // remove the highlight background
+      ui_ShowEventText(NULL);
       curStartFunc = 0;
       curHighlightFunc = 0;
       ui_State = UISTATE_RUN_MAIN;
@@ -680,14 +881,8 @@ static bool ui_PowerMenuHandler (uint8_t event, uint8_t code) {
 
   // ui events
   if ((event == EVENT_UI_UPDATE) && code) { // do only manual refresh
-    clearLine(30);
-    clearLine(55);
-    clearLine(215);
-    lcd.setColor(255,255,255); // wit
-    lcd.setPrintPos(0,30);
-    lcd.print ((__FlashStringHelper*)mnuPowerHelpText);
     ui_ShowCsStatus();
-    ui_ShowNavText(navPowerPage);
+    ui_ShowNavButtons(navPowerPage);
     return true;
   }
 
@@ -725,12 +920,7 @@ static bool ui_TestMenuHandler (uint8_t event, uint8_t code) {
 
   // ui events
   if ((event == EVENT_UI_UPDATE) && code) { // do only manual refresh
-    clearLine(30);
-    lcd.setColor(255,255,255); // wit
-    lcd.setPrintPos(0,30);
-    lcd.print ("menu not implemented");
-
-    ui_ShowNavText (navTest);
+    ui_ShowNavButtons (navTest);
     return true;
   }
 
@@ -747,6 +937,110 @@ static bool ui_TestMenuHandler (uint8_t event, uint8_t code) {
   ui_ActiveMenuHandler = ui_HomeMenuHandler;
   return (true);
 } // ui_TestMenuHandler
+
+typedef struct {
+  uint8_t cv;
+  uint8_t val;
+  uint8_t isPOM;
+} progContext_t;
+static progContext_t progContext;
+
+static void ui_ShowProgContext (uint8_t state) {
+  uint16_t bgColorCv, bgColorVal, bgColorTrack;
+  bgColorCv = ILI9341_BLACK;
+  bgColorVal = ILI9341_BLACK;
+  bgColorTrack = ILI9341_BLACK;
+  if ((state == UISTATE_PROG_INIT) || (state == UISTATE_PROG_SELECT_CV))
+    bgColorCv = ILI9341_BLUE; // highlight cv
+  else if (state == UISTATE_PROG_SELECT_VAL)
+    bgColorVal = ILI9341_BLUE; // highlight val
+  else if (state == UISTATE_PROG_SELECT_TRACK)
+    bgColorTrack = ILI9341_BLUE; // highlight track
+
+  if (state == UISTATE_PROG_INIT) {
+    lcd.fillRect(130,25,190,190,ILI9341_BLACK);
+    lcd.setCursor(140,50);lcd.print("program CV");
+    lcd.setCursor(150,75+18);lcd.print("CV:");
+    lcd.setCursor(150,100+18);lcd.print("value:");
+    lcd.setCursor(150,125+18);lcd.print("track:");
+  }
+  lcd.fillRect(220,75,100,25,bgColorCv);
+  lcd.fillRect(220,100,100,25,bgColorVal);
+  lcd.fillRect(220,125,100,25,bgColorTrack);
+
+  lcd.setCursor(220,75+18);lcd.print(progContext.cv);
+  lcd.setCursor(220,100+18);lcd.print(progContext.val);
+  lcd.setCursor(220,125+18);
+  if (progContext.isPOM) lcd.print("main");
+  else lcd.print("prog");
+} // ui_ShowProgContext
+
+static bool ui_ProgMenuHandler (uint8_t event, uint8_t code) {
+  uint8_t keyCode;
+
+  // ui events
+  if ((event == EVENT_UI_UPDATE) && code) { // do only manual refresh
+    if (ui_State == UISTATE_PROG_INIT) {
+      progContext.cv = 1;
+      progContext.val = 0;
+      progContext.isPOM = false;
+      // prepare the screen
+      ui_ShowProgContext(UISTATE_PROG_INIT);
+      ui_ShowNavButtons (navProg);
+      ui_State = UISTATE_PROG_SELECT_CV;
+    }
+    else 
+      ui_ShowProgContext(ui_State);
+    return true;
+  }
+
+  // handle key events
+  keyCode = code;
+
+  // don't handle key up/longdown
+  if ((keyCode == KEY_ENTER) ||
+      (event == EVENT_KEY_UP) || (event == EVENT_KEY_LONGDOWN))
+    return false;
+  if (keyCode == KEY_1) {
+    // back key returns to home menu
+    ui_State = UISTATE_HOME_PAGE1;
+    ui_ActiveMenuHandler = ui_HomeMenuHandler;
+    return true;
+  }
+  else if (keyCode == KEY_ROTARY) {
+    uint8_t *aVal;
+    // TODO : depending on state modify cv, val or track
+    if (ui_State == UISTATE_PROG_SELECT_CV) aVal = &progContext.cv;
+    else if (ui_State == UISTATE_PROG_SELECT_VAL) aVal = &progContext.val;
+    else aVal = &progContext.isPOM;
+    if (event == EVENT_ROTARY_UP) *aVal += 1;
+    else if (event == EVENT_ROTARY_DOWN) *aVal -= 1;
+    return true;
+  }
+
+  // navigate between stages of the programming
+  if (ui_State == UISTATE_PROG_SELECT_CV) {
+    if (keyCode == KEY_3)
+      ui_State = UISTATE_PROG_SELECT_VAL;
+  }
+  else if (ui_State == UISTATE_PROG_SELECT_VAL) {
+    if (keyCode == KEY_2)
+      ui_State = UISTATE_PROG_SELECT_CV;
+    else if (keyCode == KEY_3)
+      ui_State = UISTATE_PROG_SELECT_TRACK;
+    else if (keyCode == KEY_ROTARY) {
+      // TODO change CV value selection
+    }
+  }
+  else if (ui_State == UISTATE_PROG_SELECT_TRACK) {
+    if (keyCode == KEY_2)
+      ui_State = UISTATE_PROG_SELECT_VAL;
+    else if (keyCode == KEY_4) {
+      // TODO : do the programming
+    }
+  }
+  return (true);
+} // ui_ProgMenuHandler
 
 // updates the current loc speed
 static bool ui_LocSpeedHandler (uint8_t keyEvent, uint8_t keyCode) {
@@ -806,18 +1100,18 @@ static bool ui_LocSpeedHandler (uint8_t keyEvent, uint8_t keyCode) {
 void ui_Init() {
   display_Init(); // incl font mode, fg & bg color etc
 
-  ui_State = UISTATE_RUN_MAIN;
+  ui_State = UISTATE_RUN_INIT;
   ui_Redraw = true; // TODO : waarom niet nodig in CS?
   ui_ActiveMenuHandler = ui_RunMenuHandler;
 
-  lcd.setPrintPos(5,5);
-  lcd.print("XP:"); lcd.print(xpc_Address);
-
-  lcd.setPrintPos(5,30);
-  lcd.print("LOC:3");
+  // show xpnet address in a label
+  UI_Label lbXpcAddress;
+  lbXpcAddress.initLabel(&lcd,0,0,25,25,ILI9341_WHITE,ILI9341_BLACK, ILI9341_WHITE,"3");
+  lbXpcAddress.drawLabel(true); // vCentered text
 
   ui_ShowClock(); // clock
   ui_ShowCsStatus();
+
 } // ui_Init
 
 void ui_Update() {
@@ -849,6 +1143,22 @@ void keys_Handler (uint8_t keyEvent, uint8_t keyCode) {
   // TODO THROTTLE : hebben we dit?
   //triggerBacklight();
 
+  // voorlopig maar 1 functie : emergency stop locs
+  if (keyCode == KEY_RED) {
+    if (commandStationStatus == RUN_STOP) {
+      if (keyEvent == EVENT_KEY_DOWN) xpc_send_PowerOnRequest();
+    }
+    else {
+      if (keyEvent == EVENT_KEY_DOWN)
+        xpc_send_EmergencyStopRequest(curLoc.address); // emergency stop the current loc
+      else if (keyEvent == EVENT_KEY_LONGDOWN)
+        xpc_send_EmergencyStopRequest(); // emergency stop all locs
+      curLoc.speed = 1 | DIRECTION_FORWARD;
+      curLoc.speedChanged = 1; // trigger display update
+    }
+    return;
+  }
+
   // menu handles the key
   keyHandled = ui_ActiveMenuHandler (keyEvent, keyCode);
   if (keyHandled) { // for simplicity each handled key triggers a display refresh (ie. also if UP/LONGDOWN are handled!)
@@ -869,32 +1179,9 @@ void keys_Handler (uint8_t keyEvent, uint8_t keyCode) {
 /*****************************************************************************/
 /*    XPC CALLBACKS                                                          */
 /*****************************************************************************/
-/*
-void xpc_MessageNotify (uint8_t *msg) {
-  // TODO REMOVE
-  if (msg[0] == 0xE3) {
-    lcd.setColor(0,0,0);
-    lcd.drawBox(0,95,150,25);
-    lcd.setColor(255,255,255);
-    lcd.setPrintPos(0,95);
-    for (uint8_t i=0;i<4;i++) {
-      lcd.print(msg[i],HEX);
-      lcd.write(' ');
-    }
-  }
-}
-*/
 
-void xpc_EventNotify( xpcEvent_t xpcEvent ) {
+void xpc_EventNotify( xpcEvent_t xpcEvent, char *rxMsg ) {
   const char *msg = NULL;
-  // TODO REMOVE
-  /*
-  lcd.setColor(0,0,0);
-  lcd.drawBox(0,120,25,25);
-  lcd.setColor(255,255,255);
-  lcd.setPrintPos(0,120);
-  lcd.print(xpcEvent);
-  */
 
   if (xpcEvent == XPEVENT_CONNECTION_ERROR) msg = evtConnectionErrorText;
   else if (xpcEvent == XPEVENT_CONNECTION_OK) msg = evtConnectionOkText;
@@ -1010,11 +1297,6 @@ void xpc_AccessoryDecoderInfoResponse (uint8_t decoderAddress, uint8_t decoderBi
 /*****************************************************************************/
 
 void setup() {
-  rs485_Init(RS485_DIRECTION_PIN);
-  xpc_Init(xpc_Address);
-  keys_Init();
-  ui_Init ();
-
   commandStationStatus = UNKNOWN; // until we receive a broadcast or a response from xpc_send_CommandStationStatusRequest
   curLoc.address = 3;
   curLoc.funcs = 0;
@@ -1026,6 +1308,10 @@ void setup() {
   newLoc.speed = 0 | DIRECTION_FORWARD;
   newLoc.refresh = 1; // trigger initial refresh
 
+  rs485_Init(RS485_DIRECTION_PIN);
+  xpc_Init(xpc_Address);
+  keys_Init();
+  ui_Init ();
   turnout_TriggerBufferRefresh(); // trigger initial refresh
 } // setup
 
