@@ -272,8 +272,8 @@ static void xp_send_CommandStationStatusIndicationResponse() {
   unsigned char my_status = 0;
   tx_message[0] = 0x62;
   tx_message[1] = 0x22;
-  if (opendcc_state == RUN_OFF) my_status |= 0x01; //SDS bits omgewisseld
-  if (opendcc_state == RUN_STOP) my_status |= 0x02; //SDS bits omgewisseld
+  if (opendcc_state == RUN_OFF) my_status |= 0x01; //not acc. xpnet v3.6, but that's what JMRI wants!
+  if (opendcc_state == RUN_STOP) my_status |= 0x02; //not acc. xpnet v3.6, but that's what JMRI wants!
   // my_status &= ~0x04;  // manueller Start
   if ( (opendcc_state == PROG_OKAY)
       | (opendcc_state == PROG_SHORT)

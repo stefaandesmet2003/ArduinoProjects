@@ -134,7 +134,7 @@
 //      (may be altered by user)
 //------------------------------------------------------------------------
 
-#define DCC_DEFAULT_FORMAT     DCC28    // may be DCC14, DCC28, DCC128               (--> CV)
+#define DCC_DEFAULT_FORMAT     DCC128    // may be DCC14, DCC28, DCC128               (--> CV)
                                         // This Format is reported if loco was never used
                                         // before; is loco was used once, the previous
                                         // format is reported.

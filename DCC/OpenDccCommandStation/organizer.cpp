@@ -1002,8 +1002,6 @@ static unsigned char enter_func_to_locobuffer(unsigned char slot, unsigned int l
 //
 // Notes: Address handling: 1...DCC_SHORT_ADDR_LIMIT:          DCC short address
 //                          DCC_SHORT_ADDR_LIMIT+1 ... 10239: long address
-// SDS : i = index in locobuffer (omdat eerder al een lookup is gedaan van een locAddress)
-
 static t_message * build_speed_message_from_locobuffer(locomem *lbData) {
   unsigned char format, speed;
 
