@@ -25,12 +25,13 @@
 #ifndef __NMRADCC_H__
 #define __NMRADCC_H__
 
-// Uncomment the following Line to Enable Service Mode CV Programming
-#define NMRA_DCC_PROCESS_SERVICEMODE
+// these defines statically config the library
 
-// Uncomment the following line to Enable MultiFunction Decoder Operations
-// SDS : nodig voor coach light decoder (mobile decoder)
-#define NMRA_DCC_PROCESS_MULTIFUNCTION
+#define NMRA_DCC_MOBILE_DECODER // handle packets addressed to mobile decoder addresses
+//#define NMRA_DCC_ACCESSORY_DECODER // handle packets addressed to accessory decoder addresses
+// both defines can coexist, but some address CV settings are incompatible between MOB & ACC
+#define NMRA_DCC_PROCESS_SERVICEMODE // handle service mode packets
+#define NMRA_DCC_PROCESS_POM // handle programming on main packets
 
 #include "Arduino.h"
 
@@ -42,30 +43,11 @@ typedef struct {
   uint8_t Data[MAX_DCC_MESSAGE_LEN];
 } DCC_MSG;
 
-//--------------------------------------------------------------------------
-//  This section contains the NMRA Assigned DCC Manufacturer Id Codes that
-//  are used in projects
-//
-//  This value is to be used for CV8 
-//--------------------------------------------------------------------------
-#define MAN_ID_JMRI             0x12
-#define MAN_ID_DIY              0x0D
-#define MAN_ID_SILICON_RAILWAY  0x21
-//--------------------------------------------------------------------------
-//  This section contains the Product/Version Id Codes for projects
-//
-//  This value is to be used for CV7 
-//
-//  NOTE: Each Product/Version Id Code needs to be UNIQUE for that particular
-//  the DCC Manufacturer Id Code
-//--------------------------------------------------------------------------
-// VERSION_ID -> define in your sketch, and write to CV_VERSION_ID
-
 // Standard CV Addresses
 #define CV_ACCESSORY_DECODER_ADDRESS_LSB       	1
 #define CV_ACCESSORY_DECODER_ADDRESS_MSB       	9
 
-#define CV_MULTIFUNCTION_PRIMARY_ADDRESS       	1
+#define CV_MULTIFUNCTION_PRIMARY_ADDRESS       	1   // 7-bit address, msb=0
 #define CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB 	17
 #define CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB 	18
 
@@ -76,6 +58,15 @@ typedef struct {
 
 #define MAXCV                                 	E2END     // the upper limit of the CV value currently defined to max memory.
 
+// CV8 : NMRA Assigned DCC Manufacturer Id Codes
+#define MAN_ID_JMRI             0x12
+#define MAN_ID_DIY              0x0D
+#define MAN_ID_SILICON_RAILWAY  0x21
+
+// types of dcc speed packets supported
+#define DCC_SPEED_28STEPS   1
+#define DCC_SPEED_128STEPS  2
+
 typedef enum {
   FN_0_4 = 1,
   FN_5_8,
@@ -84,40 +75,6 @@ typedef enum {
   FN_21_28
 } FN_GROUP;
 
-#define FN_BIT_00	0x10
-#define FN_BIT_01	0x01
-#define FN_BIT_02	0x02
-#define FN_BIT_03	0x04
-#define FN_BIT_04	0x08
-
-#define FN_BIT_05	0x01
-#define FN_BIT_06	0x02
-#define FN_BIT_07	0x04
-#define FN_BIT_08	0x08
-
-#define FN_BIT_09	0x01
-#define FN_BIT_10	0x02
-#define FN_BIT_11	0x04
-#define FN_BIT_12	0x08
-
-#define FN_BIT_13	0x01
-#define FN_BIT_14	0x02
-#define FN_BIT_15	0x04
-#define FN_BIT_16	0x08
-#define FN_BIT_17	0x10
-#define FN_BIT_18	0x20
-#define FN_BIT_19	0x40
-#define FN_BIT_20	0x80
-
-#define FN_BIT_21	0x01
-#define FN_BIT_22	0x02
-#define FN_BIT_23	0x04
-#define FN_BIT_24	0x08
-#define FN_BIT_25	0x10
-#define FN_BIT_26	0x20
-#define FN_BIT_27	0x40
-#define FN_BIT_28	0x80
-
 class NmraDcc {
   private:
     DCC_MSG Msg;
@@ -125,12 +82,7 @@ class NmraDcc {
   public:
     NmraDcc();
 
-// Flag values to be logically ORed together and passed into the init() method
-#define FLAGS_MY_ADDRESS_ONLY				0x01	// Only process DCC Packets with My Address
-#define FLAGS_OUTPUT_ADDRESS_MODE		0x40  // CV 29/541 bit 6
-#define FLAGS_DCC_ACCESSORY_DECODER	0x80  // CV 29/541 bit 7
-  void pin (uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup); 
-  void init (uint8_t Flags, uint8_t OpsModeAddressBaseCV);
+  void init (uint8_t ExtIntNum = 0, uint8_t ExtIntPinNum = 2, uint8_t EnablePullup = true);
   uint8_t process();
   uint8_t getCV (uint16_t CV);
   uint8_t setCV (uint16_t CV, uint8_t Value);
@@ -140,9 +92,10 @@ class NmraDcc {
   void writeDccAddress(uint16_t dccAddress); // write to CV's
 };
 
+// callbacks
 extern void notifyDccReset(uint8_t hardReset) __attribute__ ((weak));
 extern void notifyDccIdle() __attribute__ ((weak));
-extern void notifyDccSpeed(uint16_t decoderAddress, uint8_t speed, uint8_t ForwardDir, uint8_t MaxSpeed) __attribute__ ((weak));
+extern void notifyDccSpeed(uint16_t decoderAddress, uint8_t speed, bool directionIsForward, uint8_t dccSpeedType) __attribute__ ((weak));
 extern void notifyDccFunc( uint16_t decoderAddress, FN_GROUP FuncGrp, uint8_t FuncState) __attribute__ ((weak));
 
 extern void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate) __attribute__ ((weak));

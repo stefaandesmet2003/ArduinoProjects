@@ -10,18 +10,41 @@
 // 
 //------------------------------------------------------------------------
 //
-// file:      NmraDcc.cpp
-// author:    Alex Shepherd
-// webpage:   http://opendcc.org/
-// history:   2011-06-26 Initial Version copied in from OpenDCC
-//
-//------------------------------------------------------------------------
-//
 // purpose:   Provide a simplified interface to decode NMRA DCC packets
 //			  and build DCC Mobile and Stationary Decoders
 //------------------------------------------------------------------------
 #include "NmraDcc.h"
 #include <avr/eeprom.h>
+
+/* handling of standard CV variables done here instead of user code (CV29, addresses vs POM etc)
+ * CV27 (autostop) : moet altijd 0 voor MOB
+ * CV28 (bidir) : altijd 0
+ * 
+ * CV29 defaults:
+ * bit0=0 : loco direction, allow writing (TODO), MOB only
+ * bit1=1 : 0=light function,1=speed bit -> always speed bit, don't do DCC14, MOB only
+ * bit2=0 : NMRA only, MOB only
+ * bit3=0 : bidir off
+ * bit4=0 : speed table (unused), MOB only
+ * bit5  : MOB : extended addressing : updated by lib based on decoder address (writeDccAddress)
+ * bit5  : ACC : extended accessory (signal decoder), allow writing
+ * bit6 : used for ACC decoder
+ * bit7 : 0=mobile decoder, 1=accessory decoder : updated by lib
+ * 
+ * CV31+32 : indexed CV : TODO check if supported, if not disallow writing
+ */
+
+#define CV29_ACCESSORY_DECODER    0x80  // CV 29/541 bit 7
+#define CV29_EXTENDED_ADDRESSING  0x20  // CV 29/541 bit 5
+
+#define CV28_DEFAULT 0
+#ifdef NMRA_DCC_MOBILE_DECODER
+#define CV27_DEFAULT 0
+#define CV29_DEFAULT 0x2
+#endif
+#ifdef NMRA_DCC_ACCESSORY_DECODER
+#define CV29_DEFAULT CV29_ACCESSORY_DECODER // basic accessory
+#endif
 
 //------------------------------------------------------------------------
 // DCC Receive Routine
@@ -74,10 +97,7 @@ typedef struct {
   DCC_MSG         PacketCopy;
 } DccRx_t;
 
-typedef struct
-{
-  uint8_t   Flags;
-  uint8_t   OpsModeAddressBaseCV;
+typedef struct {
   bool      inServiceMode;
   long      LastServiceModeMillis;
   uint8_t   PageRegister;  // Used for Paged Operations in Service Mode Programming
@@ -89,10 +109,9 @@ typedef struct
 
 static DccRx_t DccRx;
 static DCC_PROCESSOR_STATE DccProcState;
-static uint16_t dccFilterAddress = 1; // a default
+static uint16_t dccFilterAddress = 0; // 0 = no address filtering, all packets are callbacked
 
-void ExternalInterruptHandler()
-{
+void ExternalInterruptHandler() {
   OCR0B = TCNT0 + DCC_BIT_SAMPLE_PERIOD;
 
 #if defined(TIMSK0)
@@ -102,10 +121,9 @@ void ExternalInterruptHandler()
   TIMSK |= (1<<OCIE0B);  // Enable Timer0 Compare Match B Interrupt
   TIFR  |= (1<<OCF0B);   // Clear  Timer0 Compare Match B Flag 
 #endif
-}
+} // ExternalInterruptHandler
 
-ISR(TIMER0_COMPB_vect)
-{
+ISR(TIMER0_COMPB_vect) {
   uint8_t DccBitVal;
 
   // Read the DCC input value, if it's low then its a 1 bit, otherwise it is a 0 bit
@@ -182,20 +200,12 @@ ISR(TIMER0_COMPB_vect)
 // for prog track, implement a 60ms current pulse
 // for main track, this should be railcom: TODO
 static void ackCV() {
+  if (!DccProcState.inServiceMode)
+    return; // don't do ops mode ack for now
+
   if (notifyCVAck)
     notifyCVAck();
 } // ackCV
-
-static uint8_t readCV(uint16_t cv) {
-  uint8_t cvValue;
-
-  if (notifyCVRead)
-    return notifyCVRead(cv);
-
-  // and below a default implementation, when callback is not implemented
-  cvValue = eeprom_read_byte((uint8_t*) cv);
-  return cvValue;
-} // readCV
 
 // writable = true: function returns true if the CV can be written/modified
 // writable = false : function returns true if the CV can be read
@@ -214,8 +224,22 @@ static bool validCV(uint16_t cv, bool writable) {
   return isValidCV;
 } // validCV
 
+uint8_t readCV(uint16_t cv) {
+  uint8_t cvValue;
 
-static uint8_t writeCV(uint16_t cv, uint8_t cvValue) {
+  if (notifyCVRead)
+    return notifyCVRead(cv);
+
+  // and below a default implementation, when callback is not implemented
+  cvValue = eeprom_read_byte((uint8_t*) cv);
+  return cvValue;
+} // readCV
+
+uint8_t writeCV(uint16_t cv, uint8_t cvValue) {
+  if ((cv == 27) || (cv == CV_RAILCOM_CONFIGURATION))
+    return 0;
+  // TODO : can be extended to disallow writing to certain standard CVs, or certain CV29 bits
+
   if (notifyCVWrite)
     return notifyCVWrite(cv, cvValue);
 
@@ -225,116 +249,86 @@ static uint8_t writeCV(uint16_t cv, uint8_t cvValue) {
     if (notifyCVChange)
       notifyCVChange(cv, cvValue);
   }
-
   return eeprom_read_byte((uint8_t*) cv);
 } // writeCV
 
-
-// SDS : TODO 2021 : deze code doet ook gewoon ackCV (60mA stroompuls) in POM, dat mag toch niet?
-// dat is toch enkel voor programming track ??
-// nog checken want processDirectOpsOperation wordt ook vanuit processServiceModeOperation en processMultiFunctionMessage gecalled!!!
-// ack in POM moet via railcom
-static void processDirectOpsOperation(uint8_t Cmd, uint16_t cv, uint8_t cvValue)
-{
+// cmd : 1110CCVV
+// CC : 01 : verify byte, 11 : write byte, 10 : bit manipulation
+// VV : 2 MSb of cv-address, but caller has already assembled all bits in parameter [cv]
+static void processCvAccessInstruction(uint8_t cmd, uint16_t cv, uint8_t cvValue) {
   // is it a Byte Operation
-  if (Cmd & 0x04)
-  {
+  if (cmd & 0x04) {
     // Perform the Write Operation
-    if (Cmd & 0x08)
-    {
-      if (validCV(cv, true))
-      {
+    if (cmd & 0x08) {
+      if (validCV(cv, true)) {
         if (writeCV(cv, cvValue) == cvValue)
           ackCV();
       }
     }
-
-    else  // Perform the Verify Operation
-    {  
-      if (validCV(cv, false))
-      {
+    else { // Perform the Verify Operation
+      if (validCV(cv, false)) {
         if (readCV(cv) == cvValue)
           ackCV();
       }
     }
   }
   // Perform the Bit-Wise Operation
-  else
-  {
+  // special format for the data byte : 111CDBBB
+  // BBB : bit position within the CV
+  // D : value of bit to be verified/written
+  // C : 1= write bit, 0=verify bit
+  else {
     uint8_t BitMask = (1 << (cvValue & 0x07));
     uint8_t BitValue = cvValue & 0x08;
     uint8_t BitWrite = cvValue & 0x10;
-
     uint8_t tempValue = readCV(cv);  // Read the Current CV value
-
-    // Perform the Bit Write Operation
-    if (BitWrite)
-    {
-      if (validCV(cv, true))
-      {
+    
+    if (BitWrite) { // Perform the Bit Write Operation
+      if (validCV(cv, true)) {
         if (BitValue)
           tempValue |= BitMask;     // Turn the Bit On
-
         else
           tempValue &= ~BitMask;  // Turn the Bit Off
-
         if (writeCV(cv, tempValue) == tempValue)
           ackCV();
       }
     }
-
-    // Perform the Bit Verify Operation
-    else
-    {
-      if (validCV(cv, false))
-      {
-        if (BitValue) 
-        {
+    
+    else { // Perform the Bit Verify Operation
+      if (validCV(cv, false)) {
+        if (BitValue) {
           if (tempValue & BitMask)
             ackCV();
         }
-        else
-        {
+        else {
           if (!(tempValue & BitMask) )
             ackCV();
         }
       }
     }
   }
-} // processDirectOpsOperation
+} // processCvAccessInstruction
 
-#ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
-static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data1, uint8_t Data2) {
+#ifdef NMRA_DCC_MOBILE_DECODER
+// mobAddress is either 7-bit or 14-bit, pre-parsed before coming here
+static void processMultiFunctionMessage(uint16_t mobAddress, uint8_t cmd, uint8_t data1, uint8_t data2) {
   uint8_t  speed;
   uint16_t cv;
 
-  uint8_t  CmdMasked = Cmd & 0b11100000;
+  uint8_t  cmdMasked = cmd & 0b11100000;
 
-  // If we are an Accessory Decoder
-  if (DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER) {
-    // and this isn't an Ops Mode Write or we are NOT faking the Multifunction Ops mode address in CV 33+34 or
-    // it's not our fake address, then return
-    if ((CmdMasked != 0b11100000) || (DccProcState.OpsModeAddressBaseCV == 0))
-      return;
-
-    uint16_t FakeOpsAddr = readCV(DccProcState.OpsModeAddressBaseCV) | (readCV(DccProcState.OpsModeAddressBaseCV + 1) << 8);
-    uint16_t OpsAddr = Addr & 0x3FFF;
-
-    if (OpsAddr != FakeOpsAddr)
-      return;
-  }
-
-  // We are looking for FLAGS_MY_ADDRESS_ONLY but it does not match and it is not a Broadcast Address then return
-  else if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (Addr != dccFilterAddress) && (Addr != 0)) 
+  // we are filtering addresses and it's not our address nor broadcast -> discard
+  if ((dccFilterAddress != 0) && (mobAddress != dccFilterAddress) && (mobAddress != 0)) 
     return;
 
-  switch(CmdMasked) {
+  switch(cmdMasked) {
   case 0b00000000:  // Decoder Control
-    switch(Cmd & 0b00001110) {
-    case 0b00000000:  
-      if (notifyDccReset && (Cmd & 0b00000001)) // Hard Reset
-        if (notifyDccReset)
-          notifyDccReset(1);
+    // TODO SDS : dit is niet duidelijk in de spec. decoder reset : is dit als DDDDDDDD=00000000, of als F=0?
+    // de originele implementatie kijkt hier niet naar de D-bits, en stuurt hard reset als F=1, en stuurt geen soft reset
+    switch(cmd & 0b00001110) {
+    case 0b00000000:
+      if (notifyDccReset && (cmd & 0b00000001)) // Hard Reset
+        notifyDccReset(1);
       break;
     case 0b00000010:  // Factory Test
       break;
@@ -349,85 +343,149 @@ static void processMultiFunctionMessage(uint16_t Addr, uint8_t Cmd, uint8_t Data
     }
     break;
 
-  // SDS : TODO consist control?
+  // TODO : consist control
+  // according nmra spec CV19 is written on consist activation?
+  case 0b00010000:  
+    // consist activation & deactivation
+    // 0001.CCCC 0AAA.AAAA
+    // AAA.AAAA = 7-bit consist address, 0 = deactivate consist on this mobAddress
+    // CCCC = activate consist instruction : 0010 or 0011
+    break;
 
+  // DSSS.SSSS : 7-bit speed + direction
   case 0b00100000:  // Advanced Operations
-    switch (Cmd & 0b00011111) {
+    switch (cmd & 0b00011111) {
       case 0b00011111:
         if (notifyDccSpeed) {
-          switch(Data1 & 0b01111111) {
-            case 0b00000000:  
-              speed = 1;
-              break;
-            case 0b00000001:  
-              speed = 0;
-              break;
-            default:
-              speed = (Data1 & 0b01111111) - 1;
-              break;
-          }
-          notifyDccSpeed(Addr, speed, Data1 & 0b10000000, 127);
+          notifyDccSpeed(mobAddress, data1 & 0x7F, data1 & 0x80, DCC_SPEED_128STEPS);
         }
     }
     break;
 
+  // no support for DCC14, we don't check CV29 bit 1, too old to care
+  // 01DS.SSSS -> 5-bits speed + direction
+  // map similar to DCC128 : 0 = STOP (slow down), 1 = EmergencySTOP, 2..29 : 28 steps
   case 0b01000000: // speed & direction instructions
   case 0b01100000:
     if (notifyDccSpeed) {
-      switch(Cmd & 0b00011111) {
+      cmd = cmd & 0b00011111;
+      switch(cmd) {
         case 0b00000000:  
         case 0b00010000:
-          speed = 1;
+          speed = 0; // stop
           break;
 
         case 0b00000001:  
         case 0b00010001:
-          speed = 0;
+          speed = 1; // emergency stop
           break;
 
         default:
           // This speed is not quite right as 14 bit mode can happen and we should check CV29 but... 
-          speed = (((Cmd & 0b00001111) << 1) | ((Cmd & 0b00010000) >> 4)) - 2;
+          speed = (((cmd & 0b00001111) << 1) | ((cmd & 0b00010000) >> 4)) - 2;
       }
-      notifyDccSpeed(Addr, speed, Cmd & 0b00100000, 28);
+      notifyDccSpeed(mobAddress, speed, cmd & 0x20, DCC_SPEED_28STEPS);
     }
     break;
 
   case 0b10000000:  // Function Group 0..4
-    if (notifyDccFunc)
-      notifyDccFunc(Addr, FN_0_4, Cmd & 0b00011111);
+    if (notifyDccFunc) {
+      // for convenience we put F0 at bit0, F1 at bit1 etc
+      cmd = ((cmd >> 4) & 0x1) | ((cmd & 0xF) << 1);
+      notifyDccFunc(mobAddress, FN_0_4, cmd);
+    }
     break;
 
   case 0b10100000:  // Function Group 5..8
     if (notifyDccFunc) {
-      if (Cmd & 0b00010000)
-        notifyDccFunc(Addr, FN_5_8,  Cmd & 0b00001111);
+      if (cmd & 0b00010000)
+        notifyDccFunc(mobAddress, FN_5_8,  cmd & 0b00001111);
       else
-        notifyDccFunc(Addr, FN_9_12, Cmd & 0b00001111);
+        notifyDccFunc(mobAddress, FN_9_12, cmd & 0b00001111);
     }
     break;
 
+  // SDS: we don't do binary state control instructions
   case 0b11000000:  // Feature Expansion Instruction
-  	switch(Cmd & 0b00011111) {
-      case 0B00011110:
+  	switch(cmd & 0b00011111) {
+      case 0b00011110: // CCCCC=11110 F13-F20 function control
         if (notifyDccFunc)
-        notifyDccFunc(Addr, FN_13_20, Data1);
+        notifyDccFunc(mobAddress, FN_13_20, data1);
       break;
       
-      case 0B00011111:
+      case 0b00011111: // CCCCC=11111 F21-F28 function control
         if (notifyDccFunc)
-        notifyDccFunc(Addr, FN_21_28, Data1);
+        notifyDccFunc(mobAddress, FN_21_28, data1);
       break;
   	}
     break;
 
+#ifdef NMRA_DCC_PROCESS_POM
+  // 1110CCVV VVVVVVVV DDDDDDDD
+  // CC : 01 : verify byte, 11 : write byte, 10 : bit manipulation
+  // V : 10-bit cv address
+  // D : 8-bit value to write or verify
   case 0b11100000:  // CV Access
-    cv = (((Cmd & 0x03) << 8) | Data1) + 1;
-    processDirectOpsOperation(Cmd, cv, Data2);
+    cv = (((cmd & 0x03) << 8) | data1) + 1;
+    processCvAccessInstruction(cmd, cv, data2);
     break;
+#endif // NMRA_DCC_PROCESS_POM
   }
 } // processMultiFunctionMessage
-#endif // NMRA_DCC_PROCESS_MULTIFUNCTION
+#endif // NMRA_DCC_MOBILE_DECODER
+
+#ifdef NMRA_DCC_ACCESSORY_DECODER
+// 10AAAAAA 1AAACDDD : basic accessory packet
+// 10AAAAAA 0AAA0AA1 000XXXXX : extended accessory packet
+static void processAccessoryMessage(DCC_MSG * pDccMsg) {
+
+  uint16_t DecoderAddress; // SDS: 9-bit accessory decoder address 0..511
+  uint8_t  OutputId; // SDS : 3bits output 0..7
+  DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
+
+  // we are filtering addresses and it's not our address nor broadcast -> discard
+  if ((dccFilterAddress != 0) && (DecoderAddress != dccFilterAddress) && (DecoderAddress != 511))
+    return;
+
+  if (pDccMsg->Size == 3) { // 3 Byte Packets are accessory commands
+    OutputId = pDccMsg->Data[1] & 0x07;
+    if (pDccMsg->Data[1] & 0x80) { // basic accessory packet
+      if (notifyDccAccState)
+        notifyDccAccState(DecoderAddress, OutputId, pDccMsg->Data[1] & 0b00001000);
+    }
+
+    else { // extended accessory packet
+      // TODO check : is nop ook voor MOB decoders?
+      // RCN-213 : voorziet ook een NOP packet, we gaan dat voorlopig hier enkel capteren
+      // voor als we ooit railcom implementeren
+      if (pDccMsg->Data[1] & 0b00001000) { // NOP packet
+        // pDccMsg->Data[1] & 0x1 is T-bit, to indicate basic/extended accessory, not sure if we need this in the callback
+        if (notifyDccNop) {
+          notifyDccNop(DecoderAddress);
+        } 
+      }
+      else { // extended accessory packet
+        // NMRA-DCC : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
+        // RCN-213 :  laat nu wel 8 bits signal aspect toe
+        // en zelfde packet ook voor basic accessories waarbij pDccMsg->Data[2] de schakeltijd is voor de output (§2.3)
+        // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
+        uint8_t signalId = OutputId >> 1;
+        if (notifyDccSigState)
+          notifyDccSigState(DecoderAddress, signalId, pDccMsg->Data[2]);
+      }
+    }
+  }
+#ifdef NMRA_DCC_PROCESS_POM
+  else if (pDccMsg->Size == 6) { // 6 Byte Packets are POM Accessory commands (CV access instructions for accessory decoders)
+    // 10AAAAAA 1AAACDDD 1110CCVV VVVVVVVV DDDDDDDD xor
+    // CDDD : only 0000 = entire decoder is supported here
+    uint16_t cv = (((uint16_t) pDccMsg->Data[2] & 0x03L) << 8 | (uint16_t)pDccMsg->Data[3]) + 1;
+    processCvAccessInstruction(pDccMsg->Data[2], cv, pDccMsg->Data[4]);
+  }
+#endif // NMRA_DCC_PROCESS_POM
+
+} // processAccessoryMessage
+#endif // NMRA_DCC_ACCESSORY_DECODER
 
 #ifdef NMRA_DCC_PROCESS_SERVICEMODE
 static void processServiceModeOperation(DCC_MSG * pDccMsg) {
@@ -473,10 +531,9 @@ static void processServiceModeOperation(DCC_MSG * pDccMsg) {
   else if (pDccMsg->Size == 4) { // 4 Byte Packets are for Direct Byte & Bit Mode
     cv = (((pDccMsg->Data[0] & 0x03) << 8) | pDccMsg->Data[1]) + 1;
     cvValue = pDccMsg->Data[2];
-    processDirectOpsOperation(pDccMsg->Data[0] & 0b00001100, cv, cvValue);
+    processCvAccessInstruction(pDccMsg->Data[0] & 0b00001100, cv, cvValue);
   }
-}
-#endif // NMRA_DCC_PROCESS_SERVICEMODE
+} // processServiceModeOperation
 
 static void resetServiceModeTimer(bool inServiceMode) {
   // Set the Service Mode
@@ -485,7 +542,7 @@ static void resetServiceModeTimer(bool inServiceMode) {
 } // resetServiceModeTimer
 
 // TODO 2021: hernoem naar setServiceMode true/false of zoiets
-static void clearDccProcState(bool inServiceMode) {
+static void setServiceMode(bool inServiceMode) {
   resetServiceModeTimer(inServiceMode);
 
   // Set the Page Register to it's default of 1 only on the first Reset
@@ -494,112 +551,72 @@ static void clearDccProcState(bool inServiceMode) {
   // Clear the LastMsg buffer and DuplicateCount in preparation for possible CV programming
   DccProcState.DuplicateCount = 0;
   memset(&DccProcState.LastMsg, 0, sizeof(DCC_MSG));
-} // clearDccProcState
+} // setServiceMode
+
+#endif // NMRA_DCC_PROCESS_SERVICEMODE
 
 static void execDccProcessor(DCC_MSG * pDccMsg) {
   if ((pDccMsg->Data[0] == 0) && (pDccMsg->Data[1] == 0)) {
     if (notifyDccReset)
       notifyDccReset(0);
 
-#ifdef NMRA_DCC_PROCESS_SERVICEMODE
-    // If this is the first Reset then perform some one-shot actions as we maybe about to enter service mode
-    if (DccProcState.inServiceMode)
-      resetServiceModeTimer(1);
-    else
-      clearDccProcState(1);
-#endif
-  }
-
-  else {
-#ifdef NMRA_DCC_PROCESS_SERVICEMODE
-    if (DccProcState.inServiceMode && (pDccMsg->Data[0] >= 112) && (pDccMsg->Data[0] < 128)) {
-      resetServiceModeTimer(1);
-      if (memcmp(pDccMsg, &DccProcState.LastMsg, sizeof(DCC_MSG))) {
-        DccProcState.DuplicateCount = 0;
-        memcpy(&DccProcState.LastMsg, pDccMsg, sizeof(DCC_MSG));
-      }
-      else { // Wait until you see 2 identical packets before acting on a Service Mode Packet 
-        DccProcState.DuplicateCount++;
-        if (DccProcState.DuplicateCount == 1) //SDS : je hoeft het maar 1 keer uit voeren, ook al stuurt het commandstation 5x hetzelfde
-          processServiceModeOperation(pDccMsg);
-      }
-    }
-
-    else { // SDS : not service mode
+    #ifdef NMRA_DCC_PROCESS_SERVICEMODE
+      // If this is the first Reset then perform some one-shot actions as we maybe about to enter service mode
       if (DccProcState.inServiceMode)
-        clearDccProcState(0);	
-#endif
-      // Idle Packet
-      if ((pDccMsg->Data[0] == 0b11111111) && (pDccMsg->Data[1] == 0)) {
-        if (notifyDccIdle)
-          notifyDccIdle();
-      }
-
-#ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
-      // Multi Function Decoders (7-bit address)
-      else if (pDccMsg->Data[0] < 128)
-        processMultiFunctionMessage(pDccMsg->Data[0], pDccMsg->Data[1], pDccMsg->Data[2], pDccMsg->Data[3]);  
-
-      // Basic Accessory Decoders (9-bit) & Extended Accessory Decoders (11-bit)
-      else if (pDccMsg->Data[0] < 192)
-#else
-      else if ((pDccMsg->Data[0] >= 128) && (pDccMsg->Data[0] < 192))
-#endif
-      {
-        if (DccProcState.Flags & FLAGS_DCC_ACCESSORY_DECODER) {
-          uint16_t DecoderAddress; // SDS: 9-bit accessory decoder address 0..511
-          uint8_t  OutputId; // SDS : 3bits output 0..7
-          DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
-
-          // If we're filtering was it my board address or a broadcast address
-          if ((DccProcState.Flags & FLAGS_MY_ADDRESS_ONLY) && (DecoderAddress != dccFilterAddress) && (DecoderAddress != 511))
-            return;
-
-          OutputId = pDccMsg->Data[1] & 0b00000111;
-          // geen idee wat dit is -> weg ermee
-          //Address = (((DecoderAddress - 1) << 2) | OutputIndex) + 1;
-          if (pDccMsg->Data[1] & 0b10000000) { // basic accessory packet
-            if (notifyDccAccState)
-              notifyDccAccState(DecoderAddress, OutputId, pDccMsg->Data[1] & 0b00001000);
-          }
-
-          else { // not basic accessory packet
-            // dit staat in de extended packet formats spec, maar toch hier, handig
-            // zo hebben we NMRA_DCC_PROCESS_MULTIFUNCTION niet nodig (enkel locdecoder stuff)?
-            // of zit POM voor accessories daar ook onder? JA
-            // RCN-213 : voorziet ook een NOP packet, we gaan dat voorlopig hier enkel capteren
-            // voor als we ooit railcom implementeren
-            if (pDccMsg->Data[1] & 0b00001000) { // NOP packet
-              // pDccMsg->Data[1] & 0x1 is T-bit, to indicate basic/extended accessory, not sure if we need this in the callback
-              if (notifyDccNop) {
-                notifyDccNop(DecoderAddress);
-              } 
-            }
-            else { // extended accessory packet
-              // NMRA-DCC : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
-              // RCN-213 :  laat nu wel 8 bits signal aspect toe
-              // en zelfde packet ook voor basic accessories waarbij pDccMsg->Data[2] de schakeltijd is voor de output (§2.3)
-              // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
-              uint8_t signalId = OutputId >> 1;
-              if (notifyDccSigState)
-                notifyDccSigState(DecoderAddress, signalId, pDccMsg->Data[2]);
-            }
-          }
-        }
-      }
-
-#ifdef NMRA_DCC_PROCESS_MULTIFUNCTION
-      // Multi Function Decoders (14-bit address)
-      else if (pDccMsg->Data[0] < 232) {
-        uint16_t Address;
-        Address = (pDccMsg->Data[0] << 8) | pDccMsg->Data[1];
-        processMultiFunctionMessage(Address, pDccMsg->Data[2], pDccMsg->Data[3], pDccMsg->Data[4]);  
-      }
-#endif
-#ifdef NMRA_DCC_PROCESS_SERVICEMODE
-    }
-#endif
+        resetServiceModeTimer(true);
+      else
+        setServiceMode(true);
+    #endif // NMRA_DCC_PROCESS_SERVICEMODE
+    return;
   }
+
+#ifdef NMRA_DCC_PROCESS_SERVICEMODE
+  if (DccProcState.inServiceMode && (pDccMsg->Data[0] >= 112) && (pDccMsg->Data[0] < 128)) {
+    resetServiceModeTimer(true);
+    if (memcmp(pDccMsg, &DccProcState.LastMsg, sizeof(DCC_MSG))) {
+      DccProcState.DuplicateCount = 0;
+      memcpy(&DccProcState.LastMsg, pDccMsg, sizeof(DCC_MSG));
+    }
+    else { // Wait until you see 2 identical packets before acting on a Service Mode Packet 
+      DccProcState.DuplicateCount++;
+      if (DccProcState.DuplicateCount == 1) //SDS : je hoeft het maar 1 keer uit voeren, ook al stuurt het commandstation 5x hetzelfde
+        processServiceModeOperation(pDccMsg);
+    }
+    return;
+  }
+  // if we are in service mode and fall thru here, there is an unexpected packet in service mode
+  // we handle it by leaving service mode and parse it as ops mode packet
+  if (DccProcState.inServiceMode)
+    setServiceMode(false);	
+#endif // NMRA_DCC_PROCESS_SERVICEMODE
+
+  // Idle Packet
+  if ((pDccMsg->Data[0] == 0b11111111) && (pDccMsg->Data[1] == 0)) {
+    if (notifyDccIdle)
+      notifyDccIdle();
+  }
+
+#ifdef NMRA_DCC_MOBILE_DECODER
+  // Multi Function Decoders (7-bit address)
+  else if (pDccMsg->Data[0] < 128)
+    processMultiFunctionMessage(pDccMsg->Data[0], pDccMsg->Data[1], pDccMsg->Data[2], pDccMsg->Data[3]);  
+#endif // NMRA_DCC_MOBILE_DECODER
+
+#ifdef NMRA_DCC_ACCESSORY_DECODER
+  // Basic Accessory Decoders (9-bit) & Extended Accessory Decoders (11-bit)
+  else if ((pDccMsg->Data[0] >= 128) && (pDccMsg->Data[0] < 192)) {
+    processAccessoryMessage (pDccMsg);
+  }
+#endif // NMRA_DCC_ACCESSORY_DECODER
+
+#ifdef NMRA_DCC_MOBILE_DECODER
+// Multi Function Decoders (14-bit address)  
+  else if (pDccMsg->Data[0] < 232) { 
+    uint16_t mobAddress14;
+    mobAddress14 = (pDccMsg->Data[0] << 8) | pDccMsg->Data[1];
+    processMultiFunctionMessage(mobAddress14, pDccMsg->Data[2], pDccMsg->Data[3], pDccMsg->Data[4]);  
+  }
+#endif // NMRA_DCC_MOBILE_DECODER
 } // execDccProcessor
 
 /*****************************************************************************/
@@ -611,18 +628,17 @@ NmraDcc::NmraDcc()
 {
 }
 
-void NmraDcc::pin(uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup) {
+void NmraDcc::init(uint8_t ExtIntNum, uint8_t ExtIntPinNum, uint8_t EnablePullup) {
+  // Clear all the static member variables
+  memset(&DccRx, 0, sizeof(DccRx));
+
+  // setup external interrupt
   DccProcState.ExtIntNum = ExtIntNum;
   DccProcState.ExtIntPinNum = ExtIntPinNum;
 	
   pinMode(ExtIntPinNum, INPUT);
   if (EnablePullup)
     digitalWrite(ExtIntPinNum, HIGH);
-} // NmraDcc::pin
-
-void NmraDcc::init(uint8_t Flags, uint8_t OpsModeAddressBaseCV) {
-  // Clear all the static member variables
-  memset(&DccRx, 0, sizeof(DccRx));
 
 #ifdef TCCR0A
   // Change Timer0 Waveform Generation Mode from Fast PWM back to Normal Mode
@@ -632,18 +648,21 @@ void NmraDcc::init(uint8_t Flags, uint8_t OpsModeAddressBaseCV) {
 #endif
   attachInterrupt(DccProcState.ExtIntNum, ExternalInterruptHandler, RISING);
 
-  DccProcState.Flags = Flags;
-  DccProcState.OpsModeAddressBaseCV = OpsModeAddressBaseCV;
-  clearDccProcState(0);
+  #ifdef NMRA_DCC_PROCESS_SERVICEMODE
+    setServiceMode(false);
+  #endif // NMRA_DCC_PROCESS_SERVICEMODE
+
+  // TODO check default values for standard CVs?
+
 } // NmraDcc::init
 
 uint8_t NmraDcc::getCV(uint16_t cv) {
   return readCV(cv);
-}
+} // NmraDcc::getCV
 
 uint8_t NmraDcc::setCV(uint16_t cv, uint8_t cvValue) {
   return writeCV(cv,cvValue);
-}
+} // NmraDcc::setCV
 
 bool NmraDcc::isSetCVReady() {
   if (notifyIsSetCVReady)
@@ -653,16 +672,17 @@ bool NmraDcc::isSetCVReady() {
 }
 
 // let the lib filter this particular dcc address
-// only needed if FLAGS_MY_ADDRESS_ONLY flag is used
 void NmraDcc::setFilterAddress(uint16_t dccAddress) {
   dccFilterAddress = dccAddress;
 } // setFilterAddress
 
 uint8_t NmraDcc::process() {
+  #ifdef NMRA_DCC_PROCESS_SERVICEMODE
   if (DccProcState.inServiceMode) {
     if ((millis() - DccProcState.LastServiceModeMillis) > 20L)
-      clearDccProcState(0);
+      setServiceMode(false);
   }
+  #endif // NMRA_DCC_PROCESS_SERVICEMODE
 
   if (DccRx.DataReady) {
     // We need to do this check with interrupts disabled
@@ -691,23 +711,45 @@ uint8_t NmraDcc::process() {
 // helper functions to handle the CV address reading/writing
 uint16_t NmraDcc::readDccAddress() {
   uint16_t dccAddress;
-  uint8_t cv29Value;
+  uint8_t cv29;
 
-  cv29Value = getCV(CV_DECODER_CONFIGURATION);
-  if (cv29Value & 0b10000000)  // Accessory Decoder? 
-    dccAddress = (getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
+  cv29 = readCV(CV_DECODER_CONFIGURATION);
+  if (cv29 & CV29_ACCESSORY_DECODER)  // Accessory Decoder? 
+    dccAddress = (readCV(CV_ACCESSORY_DECODER_ADDRESS_MSB) << 6) | readCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
   else { // Multi-Function Decoder?
-    if (cv29Value & 0b00100000)  // Two Byte Address?
-      dccAddress = (getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | getCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
+    if (cv29 & CV29_EXTENDED_ADDRESSING)  // Two Byte Address?
+      dccAddress = (readCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB) << 8) | readCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB);
     else
-      dccAddress = getCV(1);
+      dccAddress = readCV(CV_MULTIFUNCTION_PRIMARY_ADDRESS);
   }
   return dccAddress;
 } // NmraDcc::readDccAddress
 
 void NmraDcc::writeDccAddress(uint16_t dccAddress) {
   // take the decoderAddress & program it as our own
-  // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
-  setCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,dccAddress & 0x3F);
-  setCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(dccAddress >> 6) & 0x7);
+  // mobile & accessory decoder have different incompatible uses of address CVs
+  // if both types are defined, we configure as mobile decoder
+  if (dccAddress == 0)
+    return; // invalid address
+
+  #ifdef NMRA_DCC_MOBILE_DECODER
+    uint8_t cv29 = readCV(CV_DECODER_CONFIGURATION);
+    if (dccAddress <= 127) { // one byte addressing
+      cv29 = cv29 & ~CV29_EXTENDED_ADDRESSING; // reset CV29.5
+      writeCV(CV_MULTIFUNCTION_PRIMARY_ADDRESS,(uint8_t)dccAddress);
+      writeCV(CV_DECODER_CONFIGURATION,cv29);
+    }
+    else { // extended addressing
+      cv29 = cv29 | CV29_EXTENDED_ADDRESSING; // set CV29.5
+      writeCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB,(uint8_t)(dccAddress & 0xFF)); // lower 8-bits
+      writeCV(CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB,(uint8_t)(0xC0 + ((dccAddress>>8)& 0x3F))); // upper 6-bits, highest bits=1
+      writeCV(CV_DECODER_CONFIGURATION,cv29);
+    }
+  #else
+  #ifdef NMRA_DCC_ACCESSORY_DECODER
+    // decoderAddress=9-bits, bits 0..5 go to CV_ACCESSORY_DECODER_ADDRESS_LSB, bits 6..8 to CV_ACCESSORY_DECODER_ADDRESS_MSB
+    writeCV(CV_ACCESSORY_DECODER_ADDRESS_LSB,dccAddress & 0x3F);
+    writeCV(CV_ACCESSORY_DECODER_ADDRESS_MSB,(dccAddress >> 6) & 0x7);
+  #endif
+  #endif 
 } // NmraDcc::writeDccAddress

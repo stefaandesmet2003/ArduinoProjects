@@ -1,3 +1,4 @@
+// configure NmraDcc for mobile decoder!
 #include "NmraDcc.h"
 #include "CoachLightDecoder.h"
 
@@ -15,24 +16,29 @@
 // compile for attiny85
 // a mobile decoder responding to functions to control the interior light in a coach
 // the light is a WS2812B led strip
-// TODO : geen programming mode via key zoals accessory decoder
-// TODO : is er uberhaupt plaats genoeg voor een ack circuit?
 
 /*
-// dcc.process() verwerkt exact 1 DCC packet. Vanuit dcc.process wordt de notify functie aangeroepen, die het packet verwerkt
-// als de processing langer dan 1 DCC packet duurt, dan gaan er packetten verloren. NmraDcc heeft een buffer van 1 pakket!! (dccRx.PacketCopy)
-De Rx ISR gaat gewoon door, en gaat op het einde van het pakket de bitbuffer in PacketCopy copiëren, ongeacht dataReady al op 0 stond
-
+ * dcc.process() verwerkt exact 1 DCC packet. Vanuit dcc.process wordt de notify functie aangeroepen, die het packet verwerkt
+ * als de processing langer dan 1 DCC packet duurt, dan gaan er packetten verloren. NmraDcc heeft een buffer van 1 pakket!! (dccRx.PacketCopy)
+ * De Rx ISR gaat gewoon door, en gaat op het einde van het pakket de bitbuffer in PacketCopy copiëren, ongeacht dataReady al op 0 stond
+ * DCC signaal ontvangen op pin D2
+ * setFilterAddress : let nmra lib filter on this address
+ * no filtering is useful for eg. a accessory decoder spanning 2 addresses, then the filtering has to be done outside nmra lib
+ * broadcast addresses are always callbacked (not filtered)
+ * om een factory reset te doen moet je een CV write naar CV8 doen
+ * writeDccAddress : use this change decoder address, lib handles writing the correct CVs
 */
-// DCC signaal ontvangen op pin D2
-// als je FLAGS_MY_ADDRESS_ONLY gebruikt worden enkel voor dit adres notifyDccAccState callbacks gedaan
-// de DCC isr ontvangt nog steeds alle pakketten, en notifyDccMsg dus ook (indien niet NULL)
-// zonder FLAGS_MY_ADDRESS_ONLY kan je voor alle accessory decoders  notifyDccAccState ontvangen
-// ihb accessory decoder pakketten voor 2 verschillende adressen, om bv een decoder voor 8 wissels te maken
-// om een factory reset te doen moet je een CV write naar CV8 doen
-// om het adres te wijzigen doe je CV write (direct byte) naar CV1 en/of CV9
 
 #define VersionId 0x1 // versie van deze software
+#define CV_LIGHTMODE  33
+#define CV_BRIGHTNESS 34
+#define CV_PRESET     35
+#define CV_RGB_R      36
+#define CV_RGB_G      37
+#define CV_RGB_B      38
+
+#define LIGHTMODE_PRESET 1
+#define LIGHTMODE_RGB    2
 
 // led strip stuff
 #define LEDPIN        3
@@ -43,52 +49,168 @@ De Rx ISR gaat gewoon door, en gaat op het einde van het pakket de bitbuffer in 
 #else
   Adafruit_NeoPixel pixels(NUMPIXELS, LEDPIN, NEO_GRB + NEO_KHZ800);
 #endif
-uint8_t brightness = 50; // dcc speed command sets brightness
-uint8_t funcs = 1;
-bool doLedUpdate = true; // for initial update
 
 // decoder global
 NmraDcc  Dcc;
 
 typedef enum {
-  DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM 
+  DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING 
 } decoderState_t;
 
 static decoderState_t decoderState;
 
-static uint16_t decoderAddress; // keep this local, other modules will use getter getDecoderAddress;
-//factory defaults
-#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB 	17
-#define CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB 	18
-
-// for a multifunction decoder (mobile decoder)
+//factory defaults for the mobile decoder
 static CVPair FactoryDefaultCVs [] = {
-  {CV_MULTIFUNCTION_PRIMARY_ADDRESS, 1},
-  {CV_MULTIFUNCTION_EXTENDED_ADDRESS_MSB, 0},
-  {CV_MULTIFUNCTION_EXTENDED_ADDRESS_LSB, 0},
+  {CV_MULTIFUNCTION_PRIMARY_ADDRESS, 5},
   {CV_VERSION_ID, VersionId},
   {CV_MANUFACTURER_ID, MAN_ID_DIY},
-  {CV_DECODER_CONFIGURATION,0x80}
+  {CV_LIGHTMODE,LIGHTMODE_PRESET},
+  {CV_PRESET,0},
+  {CV_BRIGHTNESS,50},
+  {CV_DECODER_CONFIGURATION,0x2} // temp, eigenlijk moet nmradcc lib dat doen
 };
 
-/******************************************************************/
-/*  OTHER LOCAL FUNCTIONS                                         */
-/******************************************************************/
+// params to set the coach lighting
+uint8_t lightMode;
+uint8_t presetId = 0;
+uint8_t rgb[3];
+uint8_t brightness;
+bool doLedUpdate;
+// inputs over dcc:
+uint8_t lightValue; // used to set overall brightness (F1), preset (F2), rgb values (F3,F4,F5)
+uint8_t lightFuncs = 1; // to force init with lights on in absence of dcc commands to our decoder
 
+// standard lighting colours (copied from fastled)
+static uint8_t stdColors[][3] = {
+  {255,147, 41},    // Candle
+  {255,197,143},    // Tungsten
+  {255,241,224},    // Halogen
+  {201,226,255},    // overcast sky
+  { 64,156,255},    // clear blue sky
+  {255,244,229},    // warm fluorescent
+  {212,235,255},    // cool white fluorescent
+  {255,239,247},    // grow light fluorescent
+  {216,247,255},    // mercury vapor
+  {255,209,178},    // sodium vapor
+  {255,183, 76},    // high pressure sodium
+  {255,105,180}     // HotPink just for fun
+};
+
+const uint8_t numStdColors = sizeof(stdColors) / 3;
+
+/*****************************************************************************/
+/*    LOCAL FUNCTIONS                                                        */
+/*****************************************************************************/
 // 0 = DONE, 1 = NOT DONE (eeprom not ready)
-static uint8_t accessory_FactoryResetCV() {
-  int i;
-  uint8_t swMode; // we gebruiken hier een read uit eeprom, niet de global var
-  
+static uint8_t decoder_FactoryResetCV() {
   if (!Dcc.isSetCVReady())
     return 1;
   // factory reset de algemene CV's (die niet afhangen van de software mode
-  for (i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++)
+  for (uint8_t i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++)
     Dcc.setCV( FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
 
   return 0;
-} // accessory_FactoryResetCV
+} // decoder_FactoryResetCV
 
+static void decoder_writeSettings() {
+  if (lightMode == LIGHTMODE_PRESET) {
+    Dcc.setCV(CV_LIGHTMODE,LIGHTMODE_PRESET);
+    Dcc.setCV(CV_PRESET,presetId);
+  }
+  else {
+    Dcc.setCV(CV_LIGHTMODE,LIGHTMODE_RGB);
+    Dcc.setCV(CV_RGB_R,rgb[0]);
+    Dcc.setCV(CV_RGB_G,rgb[1]);
+    Dcc.setCV(CV_RGB_B,rgb[2]);
+  }
+  Dcc.setCV(CV_BRIGHTNESS,brightness);
+} // decoder_writeSettings
+
+static void decoder_readSettings() {
+  lightMode = Dcc.getCV(CV_LIGHTMODE);
+  brightness = Dcc.getCV(CV_BRIGHTNESS);
+  presetId = Dcc.getCV(CV_PRESET);
+  rgb[0] = Dcc.getCV(CV_RGB_R);
+  rgb[1] = Dcc.getCV(CV_RGB_G);
+  rgb[2] = Dcc.getCV(CV_RGB_B);
+  #ifdef DEBUG
+    Serial.print("lightMode:");Serial.println(lightMode);
+    Serial.print("brightness:");Serial.println(brightness);
+    Serial.print("presetId:");Serial.println(presetId);
+  #endif
+} // decoder_readSettings
+
+// set a preset lighting mode (fixed colors for now)
+static void leds_setPreset(uint8_t presetId) {
+  uint8_t *preset;
+  uint8_t rainbow[][3] = {
+    {255,0,0},
+    {255,127,0},
+    {255,255,0},
+    {127,255,0},
+    {0,255,0},
+    {0,255,127},
+    {0,255,255},
+    {0,127,255},
+    {0,0,255},
+    {127,0,255},
+    {255,0,255},
+    {255,0,127}
+  };
+  
+  if (presetId < numStdColors) {
+    preset = stdColors[presetId];
+    for (uint8_t i=0;i<NUMPIXELS;i++) {
+      pixels.setPixelColor(i,pixels.Color(pixels.gamma8(preset[0]),
+                                          pixels.gamma8(preset[1]),
+                                          pixels.gamma8(preset[2])));
+    }
+  }
+  else if (presetId < 2*numStdColors) { // a range with half lighting
+    preset = stdColors[presetId-numStdColors];
+    for (uint8_t i=0;i<NUMPIXELS;i=i+2) {
+      pixels.setPixelColor(i,pixels.Color(pixels.gamma8(preset[0]),
+                                          pixels.gamma8(preset[1]),
+                                          pixels.gamma8(preset[2])));
+    }
+    for (uint8_t i=1;i<NUMPIXELS;i=i+2) 
+      pixels.setPixelColor(i,pixels.Color(0,0,0));
+  }
+  else {
+    switch (presetId) {
+      case 31 : // rainbow red->yellow
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(255,pixels.gamma8(23*i),0));
+        break;
+      case 32 : // rainbow yellow->green
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(pixels.gamma8(255 - 23*i),255,0));
+        break;
+      case 33 : // rainbow green->cyan
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(0,255,pixels.gamma8(23*i)));
+        break;
+      case 34 : // rainbow cyan->blue
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(0,pixels.gamma8(255 - 23*i),255));
+        break;
+      case 35 : // rainbow blue->pink
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(pixels.gamma8(23*i),0,255));
+        break;
+      case 36 : // rainbow pink->red
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(255,0,pixels.gamma8(255 - 23*i)));
+        break;
+      default:
+        break;
+    }
+  }
+} // leds_setPreset
+
+/*****************************************************************************/
+/*    MAIN                                                                   */
+/*****************************************************************************/
 void setup() {
   decoderState = DECODER_INIT;
   #ifdef DEBUG
@@ -105,77 +227,107 @@ void setup() {
   pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
   pixels.clear(); // Set all pixel colors to 'off'
 #endif
-  
-  // Configure the DCC CV Programing ACK pin for an output
-  //pinMode(PIN_ACKOUT, OUTPUT);
-  //digitalWrite(PIN_ACKOUT, LOW);
-  
-  // Setup which External Interrupt, the Pin it's associated with that we're using and enable the Pull-Up 
-  Dcc.pin(0, PIN_DCCIN, 1);
+  pixels.show();
   
   // Call the main DCC Init function to enable the DCC Receiver
-  // geen filtering FLAGS_MY_ADDRESS_ONLY !!
-  // Dcc.init(FLAGS_DCC_ACCESSORY_DECODER, 0);
-  Dcc.init(0, 0); // coach light decoder = mobile decoder, geen accessory decoder. TODO : FLAGS_MY_ADDRESS_ONLY nodig?
+  // use default ext int 0 on pin 2
+  Dcc.init();
 
   // check if factory defaults are written in eeprom
-  if (!Dcc.isSetCVReady()) {
-    // we kunnen geen CV's inlezen, dus weten we niet wat te doen!!
-    // goto safe mode --> alles outputs uit en wachten op progkey
+  if (!Dcc.isSetCVReady()) { // we kunnen geen CV's inlezen, dus weten we niet wat te doen!!
     return;
   }
+  Dcc.setFilterAddress(Dcc.readDccAddress());
   if (Dcc.getCV(CV_MANUFACTURER_ID) != MAN_ID_DIY)
     decoderState = DECODER_FACTORY_RESET;
   else
     decoderState = DECODER_INIT;
-
 } // setup
 
 void loop() {
   switch (decoderState) {
     case DECODER_FACTORY_RESET : 
-      if (accessory_FactoryResetCV () == 0){ // factory reset gelukt --> DECODER_INIT
+      if (decoder_FactoryResetCV () == 0){ // factory reset gelukt --> DECODER_INIT
         decoderState = DECODER_INIT;
       }
       break;
     case DECODER_INIT :
-      decoderAddress =  Dcc.readDccAddress(); // reread from eeprom
       decoderState = DECODER_RUNNING;
+      decoder_readSettings();
+      doLedUpdate = true;
       #ifdef DEBUG
-        Serial.print("my address is : "); Serial.println(getDecoderAddress());
+        Serial.print("my address is : "); Serial.println(Dcc.readDccAddress()); // read address from eeprom
       #endif
       break;
     case DECODER_RUNNING :
-    case DECODER_PROGRAM : 
-      // You MUST call the NmraDcc.process() method frequently from the Arduino loop() function 
-      // for correct library operation
       Dcc.process();
       break;
   }
+  // the coach lighting function
   if (doLedUpdate) {
-    // F1 -> R, F2 -> G, F3 -> B
-    uint8_t r,g,b;
-    r = (funcs & 0x1)*brightness;
-    g = ((funcs>>1)&0x1)*brightness;
-    b = ((funcs>>2)&0x1)*brightness;
-    for(int i=0; i<NUMPIXELS; i++) {
-      pixels.setPixelColor(i, pixels.Color(r,g,b));
+    if (lightFuncs & 0x4) { // F2 sets a preset
+      lightMode = LIGHTMODE_PRESET;
+      presetId = lightValue;
+    }
+    else if (lightFuncs & 0x38) { // F3-F4-F5 set a arbitrary rgb color
+      // we allow to set multiple values simultaneously
+      // F2 -> R, F3 -> G, F4 -> B
+      lightMode = LIGHTMODE_RGB;
+      brightness = 255; // for convenience
+      if (lightFuncs & 0x8) { // F3
+        rgb[0] = lightValue;
+      }
+      if (lightFuncs & 0x10) { // F4
+        rgb[1] = lightValue;
+      }
+      if (lightFuncs & 0x20) { // F5
+        rgb[2] = lightValue;
+      }
+    }
+    else if (lightFuncs & 0x2) { // F1 sets brightness if higher functions are off
+      brightness = lightValue;
+    }
+
+    if ((lightFuncs & 0x1)== 0) { // F0 off -> lights off & storing setting
+       pixels.clear();
+       decoder_writeSettings();
+      #ifdef DEBUG
+        Serial.println("storing settings!");
+        Serial.flush();
+      #endif
+    }
+    else { // now redraw the leds with the new settings
+      // note : all pixel values must also be recalculated (setPixelColor) everytime the brightness changes
+      #ifdef DEBUG
+        Serial.print("brightness:");Serial.println(brightness);
+      #endif
+      pixels.setBrightness(brightness);
+      if (lightMode == LIGHTMODE_PRESET) {
+        leds_setPreset(presetId);
+        #ifdef DEBUG
+          Serial.print("setPreset:");Serial.println(presetId);
+        #endif 
+      }
+      else {
+        for(uint8_t i=0; i<NUMPIXELS; i++) {
+          pixels.setPixelColor(i, pixels.Color(pixels.gamma8(rgb[0]),pixels.gamma8(rgb[1]),pixels.gamma8(rgb[2])));
+        }
+        #ifdef DEBUG
+          Serial.print("rgb=");Serial.print(rgb[0]);Serial.print(":");
+          Serial.print(rgb[1]);Serial.print(":");Serial.println(rgb[2]);
+          Serial.flush();
+        #endif
+        
+      }
     }
     pixels.show();
     doLedUpdate = false; // reset flag
   }
 } // loop
 
-/**********************************************************************************************/
-/* external interface                                                                         */
-/**********************************************************************************************/
-uint16_t getDecoderAddress(void) {
-  return decoderAddress;
-} // getDecoderAddress
-
-/**********************************************************************************************/
-/* notify functies uit Nmra layer                                                             */
-/**********************************************************************************************/
+/*****************************************************************************/
+/*    notify functions from Nmra layer                                       */
+/*****************************************************************************/
 void notifyDccReset(uint8_t hardReset) {
   (void) hardReset;
   // TODO : check, want er worden dcc resets gestuurd bij start programming mode, en dan is DECODER_INIT niet ok!!
@@ -185,86 +337,75 @@ void notifyDccReset(uint8_t hardReset) {
   */
 } // notifyDccReset
 
-//#define NOTIFY_DCC_MSG
-#ifdef  NOTIFY_DCC_MSG
-void notifyDccMsg( DCC_MSG * Msg)
-{
-  Serial.print("notifyDccMsg[ ");
-  Serial.print(millis());
-  Serial.print("] : ");
-  for(uint8_t i = 0; i < Msg->Size; i++)
-  {
-    Serial.print(Msg->Data[i], HEX);
-    Serial.write(' ');
-  }
-  Serial.println();
-}
-#endif
-
-
 // callbacks for multifunction (mobile) decoder
-// MaxSpeed : 28,127 (waarom niet 14?)
-void notifyDccSpeed(uint16_t decoderAddress, uint8_t speed, uint8_t ForwardDir, uint8_t MaxSpeed)
-{
-  if (speed != brightness) {
-    brightness = speed;
-    doLedUpdate = true;
+void notifyDccSpeed(uint16_t decoderAddress, uint8_t speed, bool directionIsForward, uint8_t speedType) {
+  // combine dir+speed to get light value in 0..255 range
+  // support DCC128 only
+  if (directionIsForward) speed += 0x80;
+  else if (speed) speed -= 1; // for convenience because we can't easily dial speed=1
+
+  if (speed != lightValue) {
+    lightValue = speed;
+    if (lightFuncs & 0x1) doLedUpdate = true; // avoid work if leds are off already
     #ifdef DEBUG
       Serial.print("notifyDccSpeed:");Serial.print(decoderAddress);Serial.print(":");
-      Serial.print(speed);Serial.print(":");
-      Serial.print(ForwardDir);Serial.print(":");Serial.println(MaxSpeed);
+      Serial.print(speed);Serial.print(":");Serial.print(directionIsForward);
+      Serial.print(":");Serial.println(speedType);
     #endif
   }
+
 } // notifyDccSpeed
 
 void notifyDccFunc( uint16_t decoderAddress, FN_GROUP FuncGrp, uint8_t FuncState) {
-  if ((FuncGrp == FN_0_4) && (FuncState != funcs)) {
-    funcs = FuncState;
+  if ((FuncGrp == FN_0_4) && (FuncState != (lightFuncs & 0x1F))) { // F0..F4
+    lightFuncs = (lightFuncs & 0xE0) | FuncState;
     doLedUpdate = true;
-    #ifdef DEBUG
-      Serial.print("notifyDccFunc:");Serial.print(decoderAddress);Serial.print(":");
-      Serial.print(FuncGrp);Serial.print(":");Serial.println(FuncState);
-    #endif
   }
+  else if ((FuncGrp == FN_5_8) && (FuncState != ((lightFuncs >> 5) & 0x1))) { // F5
+    lightFuncs = (lightFuncs & 0x1F) | ((FuncState & 0x1)<<5);
+    doLedUpdate = true;
+  }
+  #ifdef DEBUG
+  if (doLedUpdate) {
+    Serial.print("notifyDccFunc:");Serial.print(decoderAddress);Serial.print(":");
+    Serial.print(FuncGrp);Serial.print(":");Serial.println(FuncState);
+  }
+  #endif
 } // notifyDccFunc
 
 // This function is called by the NmraDcc library when a DCC ACK needs to be sent
 // Calling this function should cause an increased 60ma current drain on the power supply for 6ms to ACK a CV Read 
-void notifyCVAck(void) {
+void notifyCVAck() {
   #ifdef DEBUG
     Serial.println("ack");
   #endif
-  /* temp
-  digitalWrite(PIN_ACKOUT, HIGH);
-  delay(6);  
-  digitalWrite(PIN_ACKOUT, LOW);
-  */
+  // trigger an ack detection by pulsing the leds at max brightness
+  pixels.setBrightness(255);
+  for(uint8_t i=0; i<NUMPIXELS; i++)
+    pixels.setPixelColor(i, pixels.Color(255,255,255));
+  pixels.show();
+  delay(6);
+  pixels.clear();
+  pixels.show();
 } // notifyCVAck
 
-// enkel CV's schrijven als decoder niet 'live' is (INIT, FACTORY_RESET, PROGRAM)
+// Note! CoachLightDecoder version : we always allow writing cv's, independent of decoderState!
 uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
   #ifdef DEBUG
     Serial.print ("CVWrite ");
     Serial.print(cv);
     Serial.print(" = ");
     Serial.println(cvValue);
-    if (decoderState == DECODER_RUNNING)
-      Serial.println("no CVs written while decoder RUNNING");
   #endif
 
-  if (decoderState == DECODER_RUNNING) {
-    return eeprom_read_byte((uint8_t*) cv);
-  }
   if (cv == CV_MANUFACTURER_ID) { // writing the CV_MANUFACTURER_ID triggers a factory reset
     decoderState = DECODER_FACTORY_RESET;
     eeprom_update_byte((uint8_t*) cv, MAN_ID_DIY); // in case of empty eeprom
-    // timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     // misschien coach leds knipperen?
     return cvValue; // we pretend to write the value, but only to trigger an ackCV
   }
   else {
     eeprom_update_byte((uint8_t*) cv, cvValue);
-    //timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     // misschien coach leds knipperen?
     return eeprom_read_byte((uint8_t*) cv);
   }
@@ -273,18 +414,15 @@ uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
 // 0 = ongeldige schrijfactie gevraagd naar CV
 // 0 = lezen naar niet-geïmplementeerde CV's : todo SDS!
 // 1 = geldige actie
-// DECODER_PROGRAM : for now we only allow CV writes while decoder is in DECODER_PROGRAM
-bool notifyCVValid(uint16_t cv, uint8_t writable) {
+bool notifyCVValid(uint16_t cv, bool writable) {
   bool isValid = true;
 
-  // CV read/write only in programming mode
-  if( (cv > MAXCV) || (decoderState != DECODER_PROGRAM))
+  if(cv > MAXCV)
     isValid = false;
 
   // different from default, because we do allow writing CV_MANUFACTURER_ID to trigger a factory reset
-  if (writable && ((cv==CV_VERSION_ID)||(cv==CV_DECODER_CONFIGURATION)||(cv==CV_RAILCOM_CONFIGURATION)))
+  if (writable && ((cv==CV_VERSION_ID)||(cv==CV_RAILCOM_CONFIGURATION)))
     isValid = false;
 
-  // TODO : uitbreiden!! (ook afhankelijk van swMode CV33)
   return isValid;
 } // notifyCVValid
