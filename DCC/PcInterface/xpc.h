@@ -20,10 +20,11 @@ typedef enum {
   PROG_READY, PROG_SHORT, PROG_NOACK, PROG_BUSY
 } progStatus_t;
 
-// deze waarden komen overeen met xpnet spec 2.1.7 (v3.6; opgelet bit0 en bit1 zijn gewisseld in v3.6!! correct geimplementeerd in opendcc)
+// deze waarden komen overeen met xpnet spec v3 §2.1.7 
+//(in v3.6 zijn deze bits omgewisseld, maar JMRI/CS gebruiken deze interpretatie)
 #define COMMANDSTATION_STATUS_POWER_ON          0x0
-#define COMMANDSTATION_STATUS_EMERGENCY_STOP    0x1          
-#define COMMANDSTATION_STATUS_POWER_OFF         0x2
+#define COMMANDSTATION_STATUS_POWER_OFF         0x1
+#define COMMANDSTATION_STATUS_EMERGENCY_STOP    0x2
 #define COMMANDSTATION_STATUS_SERVICE_MODE_ON   0x8
 
 void xpc_Init(uint8_t slaveAddress);
@@ -34,7 +35,8 @@ void xpc_SendMessage(uint8_t *msg); // send a raw message, correctly formatted b
 
 void xpc_send_PowerOnRequest ();
 void xpc_send_PowerOffRequest ();
-void xpc_send_EmergencyStopRequest ();
+void xpc_send_EmergencyStopRequest (); // emergency stop all locs
+void xpc_send_EmergencyStopRequest (uint16_t locAddress); // emergency stop a single loc
 void xpc_send_ServiceModeResultsRequest (); // prog status/results request
 void xpc_send_CommandStationStatusRequest ();
 void xpc_send_CommandStationSwVersionRequest ();
@@ -113,7 +115,7 @@ void xpc_send_SetFastClock (xpcFastClock_t *newFastClock);
 /*** notify intf   *********************************************************************************************/
 /***************************************************************************************************************/
 
-extern void xpc_EventNotify(xpcEvent_t xpcEvent) __attribute__ ((weak)); // de xpnet broadcasts
+extern void xpc_EventNotify(xpcEvent_t xpcEvent, char *msg=NULL) __attribute__ ((weak)); // de xpnet broadcasts
 extern void xpc_MessageNotify (uint8_t *msg) __attribute__ ((weak)); // to notify a received message unparsed (for pcintf)
 extern void xpc_LocStolenNotify(uint16_t stolenLocAddress) __attribute__ ((weak));
 extern void xpc_FastClockNotify (xpcFastClock_t *newFastClock) __attribute__ ((weak));

@@ -224,6 +224,19 @@ static bool validCV(uint16_t cv, bool writable) {
   return isValidCV;
 } // validCV
 
+#ifdef NMRA_DCC_PROCESS_POM
+static bool validPoM(uint16_t decoderAddress, uint16_t cv, bool writable) {
+  if (notifyPoMValid)
+    return notifyPoMValid(decoderAddress, cv, writable);
+    
+  // and below a default implementation, when callback is not implemented
+  if (dccFilterAddress == 0) 
+    return false; // can't tell if this PoM is for us -> play safe
+  else
+    return validCV(cv,writable); 
+} // validPoM
+#endif // NMRA_DCC_PROCESS_POM
+
 uint8_t readCV(uint16_t cv) {
   uint8_t cvValue;
 
@@ -252,26 +265,32 @@ uint8_t writeCV(uint16_t cv, uint8_t cvValue) {
   return eeprom_read_byte((uint8_t*) cv);
 } // writeCV
 
+// decoderAddress : 0=service mode programming (broadcast), !=0 = POM
 // cmd : 1110CCVV
 // CC : 01 : verify byte, 11 : write byte, 10 : bit manipulation
 // VV : 2 MSb of cv-address, but caller has already assembled all bits in parameter [cv]
-static void processCvAccessInstruction(uint8_t cmd, uint16_t cv, uint8_t cvValue) {
-  // is it a Byte Operation
-  if (cmd & 0x04) {
-    // Perform the Write Operation
-    if (cmd & 0x08) {
-      if (validCV(cv, true)) {
-        if (writeCV(cv, cvValue) == cvValue)
-          ackCV();
-      }
-    }
-    else { // Perform the Verify Operation
-      if (validCV(cv, false)) {
-        if (readCV(cv) == cvValue)
-          ackCV();
-      }
+// we only support PoM write for now (no railcom)
+static void processCvAccessInstruction(uint16_t decoderAddress, uint8_t cmd, uint16_t cv, uint8_t cvValue) {
+  bool validAccess = false;
+  cmd = cmd & 0x0C;
+  if (cmd == 0xC) { // byte write operation
+    if (decoderAddress == 0)
+      validAccess = validCV(cv,true);
+  #ifdef NMRA_DCC_PROCESS_POM
+    else validAccess = validPoM(decoderAddress,cv, true);
+  #endif
+    if (validAccess) {
+      if (writeCV(cv, cvValue) == cvValue)
+        ackCV();
     }
   }
+  else if (cmd == 0x4) {
+    if (validCV(cv,false)) {
+      if (readCV(cv) == cvValue)
+        ackCV();
+    }
+  }
+
   // Perform the Bit-Wise Operation
   // special format for the data byte : 111CDBBB
   // BBB : bit position within the CV
@@ -427,7 +446,7 @@ static void processMultiFunctionMessage(uint16_t mobAddress, uint8_t cmd, uint8_
   // D : 8-bit value to write or verify
   case 0b11100000:  // CV Access
     cv = (((cmd & 0x03) << 8) | data1) + 1;
-    processCvAccessInstruction(cmd, cv, data2);
+    processCvAccessInstruction(mobAddress, cmd, cv, data2);
     break;
 #endif // NMRA_DCC_PROCESS_POM
   }
@@ -438,41 +457,39 @@ static void processMultiFunctionMessage(uint16_t mobAddress, uint8_t cmd, uint8_
 // 10AAAAAA 1AAACDDD : basic accessory packet
 // 10AAAAAA 0AAA0AA1 000XXXXX : extended accessory packet
 static void processAccessoryMessage(DCC_MSG * pDccMsg) {
-
-  uint16_t DecoderAddress; // SDS: 9-bit accessory decoder address 0..511
-  uint8_t  OutputId; // SDS : 3bits output 0..7
-  DecoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
+  uint16_t decoderAddress; // SDS: 9-bit accessory decoder address 0..511
+  decoderAddress = (((~pDccMsg->Data[1]) & 0b01110000) << 2) | (pDccMsg->Data[0] & 0b00111111);
 
   // we are filtering addresses and it's not our address nor broadcast -> discard
-  if ((dccFilterAddress != 0) && (DecoderAddress != dccFilterAddress) && (DecoderAddress != 511))
+  if ((dccFilterAddress != 0) && (decoderAddress != dccFilterAddress) && (decoderAddress != 511))
     return;
 
-  if (pDccMsg->Size == 3) { // 3 Byte Packets are accessory commands
+  if ((pDccMsg->Size == 3) && (pDccMsg->Data[1] & 0x80)) { // 3 Byte Packets are basic accessory commands
+    uint8_t  OutputId; // SDS : 3bits output 0..7
     OutputId = pDccMsg->Data[1] & 0x07;
-    if (pDccMsg->Data[1] & 0x80) { // basic accessory packet
-      if (notifyDccAccState)
-        notifyDccAccState(DecoderAddress, OutputId, pDccMsg->Data[1] & 0b00001000);
-    }
+    if (notifyDccAccState)
+      notifyDccAccState(decoderAddress, OutputId, pDccMsg->Data[1] & 0b00001000);
+  }
 
-    else { // extended accessory packet
-      // TODO check : is nop ook voor MOB decoders?
-      // RCN-213 : voorziet ook een NOP packet, we gaan dat voorlopig hier enkel capteren
-      // voor als we ooit railcom implementeren
-      if (pDccMsg->Data[1] & 0b00001000) { // NOP packet
-        // pDccMsg->Data[1] & 0x1 is T-bit, to indicate basic/extended accessory, not sure if we need this in the callback
-        if (notifyDccNop) {
-          notifyDccNop(DecoderAddress);
-        } 
-      }
-      else { // extended accessory packet
-        // NMRA-DCC : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
-        // RCN-213 :  laat nu wel 8 bits signal aspect toe
-        // en zelfde packet ook voor basic accessories waarbij pDccMsg->Data[2] de schakeltijd is voor de output (§2.3)
-        // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
-        uint8_t signalId = OutputId >> 1;
-        if (notifyDccSigState)
-          notifyDccSigState(DecoderAddress, signalId, pDccMsg->Data[2]);
-      }
+  else if (pDccMsg->Size == 4) { // 4 Byte Packets are extended accessory commands
+    // TODO check : is nop ook voor MOB decoders?
+    // RCN-213 : voorziet ook een NOP packet, we gaan dat voorlopig hier enkel capteren
+    // voor als we ooit railcom implementeren
+    if (pDccMsg->Data[1] & 0x08) { // NOP packet
+      // pDccMsg->Data[1] & 0x1 is T-bit, to indicate basic/extended accessory, not sure if we need this in the callback
+      if (notifyDccNop) {
+        notifyDccNop(decoderAddress);
+      } 
+    }
+    else {
+      // TODO : nog 1 bits checken?
+      // NMRA-DCC : signal aspect is 5 bits dus pDccMsg->Data[2] & 0x1F
+      // RCN-213 :  laat nu wel 8 bits signal aspect toe
+      // en zelfde packet ook voor basic accessories waarbij pDccMsg->Data[2] de schakeltijd is voor de output (§2.3)
+      // 4 signals per decoder address (compare turnoutId for basic accessory decoder)
+      uint8_t signalId = (pDccMsg->Data[1]>>1) & 0x03;
+      if (notifyDccSigState)
+        notifyDccSigState(decoderAddress, signalId, pDccMsg->Data[2]);
     }
   }
 #ifdef NMRA_DCC_PROCESS_POM
@@ -480,7 +497,7 @@ static void processAccessoryMessage(DCC_MSG * pDccMsg) {
     // 10AAAAAA 1AAACDDD 1110CCVV VVVVVVVV DDDDDDDD xor
     // CDDD : only 0000 = entire decoder is supported here
     uint16_t cv = (((uint16_t) pDccMsg->Data[2] & 0x03L) << 8 | (uint16_t)pDccMsg->Data[3]) + 1;
-    processCvAccessInstruction(pDccMsg->Data[2], cv, pDccMsg->Data[4]);
+    processCvAccessInstruction(decoderAddress, pDccMsg->Data[2], cv, pDccMsg->Data[4]);
   }
 #endif // NMRA_DCC_PROCESS_POM
 
@@ -531,7 +548,7 @@ static void processServiceModeOperation(DCC_MSG * pDccMsg) {
   else if (pDccMsg->Size == 4) { // 4 Byte Packets are for Direct Byte & Bit Mode
     cv = (((pDccMsg->Data[0] & 0x03) << 8) | pDccMsg->Data[1]) + 1;
     cvValue = pDccMsg->Data[2];
-    processCvAccessInstruction(pDccMsg->Data[0] & 0b00001100, cv, cvValue);
+    processCvAccessInstruction(0,pDccMsg->Data[0] & 0b00001100, cv, cvValue);
   }
 } // processServiceModeOperation
 

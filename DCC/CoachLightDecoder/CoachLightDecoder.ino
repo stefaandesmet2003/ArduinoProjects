@@ -178,6 +178,12 @@ static void leds_setPreset(uint8_t presetId) {
   }
   else {
     switch (presetId) {
+      case 30 : // rainbow
+        for (uint8_t i=0;i<NUMPIXELS;i++)
+          pixels.setPixelColor(i,pixels.Color(pixels.gamma8(rainbow[i][0]),
+                                              pixels.gamma8(rainbow[i][1]),
+                                              pixels.gamma8(rainbow[i][2])));
+        break;
       case 31 : // rainbow red->yellow
         for (uint8_t i=0;i<NUMPIXELS;i++)
           pixels.setPixelColor(i,pixels.Color(255,pixels.gamma8(23*i),0));

@@ -74,7 +74,8 @@ uint32_t db_lastMillis;                 // controls min delay between xpnet mess
 const locoentry_t locdb_defaults[] PROGMEM = {
   //  locAddress format        name
   {{ {  3, DCC128 }}, {"DIESEL\x00"} },
-  {{ {  4, DCC128 }}, {"STOOM\x00"}  },
+  {{ {  4, DCC128 }}, {"STEAM\x00"}  },
+  {{ {  5, DCC128 }}, {"FUNCOACH\x00"}  },
 };
 
 // we define locodb as a pointer, and make the compiler do all offset calculations
@@ -329,7 +330,8 @@ void database_ResetDefaults() {
 //=================================================================================
 
 void database_Init() {
-  dcc_default_format = eeprom_read_byte((uint8_t*)eadr_dcc_default_format); 
+  dcc_default_format = eeprom_read_byte((uint8_t*)eadr_dcc_default_format);
+  //database_ResetDefaults();
   database_Rewind();
 } // database_Init
 

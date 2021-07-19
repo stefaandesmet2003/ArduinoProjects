@@ -832,10 +832,10 @@ static void xp_parser() {
            * raw dcc msgs encapsulated in xpnet (0xE?-0x30), 
            * raw dcc messages:
            *   JMRI sends 0xE4-0x30 for extended accessory commands, 
-           *   rx_message[2..5] are the exact dcc message data
+           *   rx_message[2..4] are the exact dcc message data
            * PoM for loc decoders : 
            *   JMRI always sends 2 address bytes (AddrH-AddrL) according xpnet spec
-           *   for short loc addresses dcc expects only AddrL (rx_message[3]), rx_message[4..5] correspond with the raw dcc message data
+           *   for short loc addresses dcc expects only AddrL (rx_message[3]), rx_message[3..6] correspond with the raw dcc message data
            *   for long loc addresses rx_message[2..3] xpnet coding corresponds with dcc 14-bit address coding (11AA.AAAA.AAAA.AAAA),
            *   and thus the complete rx_message[2..6] corresponds with the raw dcc message
            * PoM for accessory & extended accessory decoders : 

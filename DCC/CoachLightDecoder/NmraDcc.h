@@ -105,6 +105,7 @@ extern void notifyDccMsg(DCC_MSG * msg) __attribute__ ((weak));
 extern void	notifyDccNop(uint16_t decoderAddress) __attribute__ ((weak)); // RCN-213 NOP packet for accessories
 
 extern bool     notifyCVValid(uint16_t cv, bool writable) __attribute__ ((weak));
+extern bool     notifyPoMValid(uint16_t decoderAddress, uint16_t cv, bool writable) __attribute__ ((weak));
 extern uint8_t  notifyCVWrite( uint16_t cv, uint8_t cvValue) __attribute__ ((weak));
 extern void    	notifyCVAck() __attribute__ ((weak));
 extern uint8_t 	notifyCVRead(uint16_t cv) __attribute__ ((weak));
