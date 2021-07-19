@@ -4,32 +4,35 @@
 #include "Timer.h"
 
 /*
-// dcc.process() verwerkt exact 1 DCC packet. Vanuit dcc.process wordt de notify functie aangeroepen, die het packet verwerkt
-// als de processing langer dan 1 DCC packet duurt, dan gaan er packetten verloren. NmraDcc heeft een buffer van 1 pakket!! (dccRx.PacketCopy)
-De Rx ISR gaat gewoon door, en gaat op het einde van het pakket de bitbuffer in PacketCopy copiëren, ongeacht dataReady al op 0 stond
-
-*/
-// DCC signaal ontvangen op pin D2
-// als je FLAGS_MY_ADDRESS_ONLY gebruikt worden enkel voor dit adres notifyDccAccState callbacks gedaan
-// de DCC isr ontvangt nog steeds alle pakketten, en notifyDccMsg dus ook (indien niet NULL)
-// zonder FLAGS_MY_ADDRESS_ONLY kan je voor alle accessory decoders  notifyDccAccState ontvangen
-// ihb accessory decoder pakketten voor 2 verschillende adressen, om bv een decoder voor 8 wissels te maken
-// om een factory reset te doen moet je een CV write naar CV8 doen
-// om het adres te wijzigen doe je CV write (direct byte) naar CV1 en/of CV9
+ * dcc.process() verwerkt exact 1 DCC packet. Vanuit dcc.process wordt de notify functie aangeroepen, die het packet verwerkt
+ * als de processing langer dan 1 DCC packet duurt, dan gaan er packetten verloren. NmraDcc heeft een buffer van 1 pakket!! (dccRx.PacketCopy)
+ * De Rx ISR gaat gewoon door, en gaat op het einde van het pakket de bitbuffer in PacketCopy copiëren, ongeacht dataReady al op 0 stond
+ * DCC signaal ontvangen op pin D2
+ * setFilterAddress : let nmra lib filter on this address
+ * no filtering is useful for eg. a accessory decoder spanning 2 addresses, then the filtering has to be done outside nmra lib
+ * can't use filtering here, otherwise learning mode won't work
+ * broadcast addresses are always callbacked (not filtered)
+ * om een factory reset te doen moet je een CV write naar CV8 doen
+ * writeDccAddress : use this change decoder address, lib handles writing the correct CVs
+ */
 
 #define VersionId 0x1 // versie van deze software
-
-// decoder global
-NmraDcc  Dcc;
 
 typedef enum {
   DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM 
 } decoderState_t;
 
-static decoderState_t decoderState;
-static uint8_t decoderSoftwareMode;
+typedef struct { // for the decoder state
+  decoderState_t state;
+  uint16_t address;
+  uint8_t softwareMode;
+} decoder_t;
 
-static uint16_t decoderAddress; // keep this local, other modules will use getter getDecoderAddress;
+static decoder_t decoder;
+
+// dcc receiver
+NmraDcc  Dcc;
+
 //factory defaults
 static CVPair FactoryDefaultCVs [] = {
   {CV_ACCESSORY_DECODER_ADDRESS_LSB, 1},
@@ -136,14 +139,14 @@ static void keyHandler (uint8_t keyEvent) {
     #endif
     
     if (keyEvent & KEYEVENT_LONGDOWN) {
-      if (decoderState != DECODER_PROGRAM) {
-        decoderState = DECODER_PROGRAM;
+      if (decoder.state != DECODER_PROGRAM) {
+        decoder.state = DECODER_PROGRAM;
         ledTimer = timer.oscillate(PIN_PROGLED, LED_SLOW_FLASH, HIGH, -1); //forever
       }
     }
     else if (keyEvent & KEYEVENT_DOWN) {
-      if (decoderState == DECODER_PROGRAM) {
-        decoderState = DECODER_INIT;
+      if (decoder.state == DECODER_PROGRAM) {
+        decoder.state = DECODER_INIT;
       }
       else
         turnout_ManualToggle (keyEvent >> 2,true); // key down -> send the 'on' command to the turnout/output
@@ -152,10 +155,10 @@ static void keyHandler (uint8_t keyEvent) {
       turnout_ManualToggle (keyEvent >> 2,false); // key up -> send the 'off' command
 
     #ifdef DEBUG
-      Serial.print ("decoderState = ");
-      if (decoderState == DECODER_INIT) Serial.println("DECODER_INIT");
-      else if (decoderState == DECODER_RUNNING) Serial.println("DECODER_RUNNING");
-      else if (decoderState == DECODER_PROGRAM) Serial.println("DECODER_PROGRAM");
+      Serial.print ("decoder.state = ");
+      if (decoder.state == DECODER_INIT) Serial.println("DECODER_INIT");
+      else if (decoder.state == DECODER_RUNNING) Serial.println("DECODER_RUNNING");
+      else if (decoder.state == DECODER_PROGRAM) Serial.println("DECODER_PROGRAM");
       else Serial.println("factory reset");
     #endif
 } // keyHandler
@@ -190,7 +193,7 @@ static uint8_t accessory_FactoryResetCV() {
 } // accessory_FactoryResetCV
 
 void setup() {
-  decoderState = DECODER_INIT;
+  decoder.state = DECODER_INIT;
   #ifdef DEBUG
     Serial.begin(115200);
     Serial.println("AccessoryDecoder AVR!");
@@ -200,12 +203,9 @@ void setup() {
   pinMode(PIN_ACKOUT, OUTPUT);
   digitalWrite(PIN_ACKOUT, LOW);
   
-  // Setup which External Interrupt, the Pin it's associated with that we're using and enable the Pull-Up 
-  Dcc.pin(0, PIN_DCCIN, 1);
-  
   // Call the main DCC Init function to enable the DCC Receiver
-  // geen filtering FLAGS_MY_ADDRESS_ONLY !!
-  Dcc.init(FLAGS_DCC_ACCESSORY_DECODER, 0);
+  // use default ext int 0 on pin 2
+  Dcc.init();
 
   // progled, progkey
   pinMode (PIN_PROGKEY, INPUT_PULLUP);
@@ -223,41 +223,40 @@ void setup() {
     // goto safe mode --> alles outputs uit en wachten op progkey
     return;
   }
+  // can't use setFilterAddress, because that breaks the learning mode!
   if (Dcc.getCV(CV_MANUFACTURER_ID) != MAN_ID_DIY)
-    decoderState = DECODER_FACTORY_RESET;
+    decoder.state = DECODER_FACTORY_RESET;
   else
-    decoderState = DECODER_INIT;
+    decoder.state = DECODER_INIT;
 
   // init key handling
   init_keys ();
 } // setup
 
 void loop() {
-  switch (decoderState) {
+  switch (decoder.state) {
     case DECODER_FACTORY_RESET : 
       if (accessory_FactoryResetCV () == 0){ // factory reset gelukt --> DECODER_INIT
-        decoderState = DECODER_INIT;
+        decoder.state = DECODER_INIT;
       }
       break;
     case DECODER_INIT :
       timer.stop (ledTimer); //stop de slow flashing led
-      decoderAddress =  Dcc.readDccAddress(); // reread from eeprom
-      decoderSoftwareMode = Dcc.getCV(CV_SoftwareMode);
-      switch (decoderSoftwareMode) {
+      decoder.address =  Dcc.readDccAddress(); // reread from eeprom
+      decoder.softwareMode = Dcc.getCV(CV_SoftwareMode);
+      switch (decoder.softwareMode) {
         case SOFTWAREMODE_TURNOUT_DECODER :
          case SOFTWAREMODE_OUTPUT_DECODER :
           turnout_Init ();
           break;
       }
-      decoderState = DECODER_RUNNING;
+      decoder.state = DECODER_RUNNING;
       #ifdef DEBUG
         Serial.print("my address is : "); Serial.println(getDecoderAddress());
       #endif
       break;
     case DECODER_RUNNING :
     case DECODER_PROGRAM : 
-      // You MUST call the NmraDcc.process() method frequently from the Arduino loop() function 
-      // for correct library operation
       Dcc.process();
       break;
   }
@@ -270,7 +269,7 @@ void loop() {
 /* external interface                                                                         */
 /**********************************************************************************************/
 uint16_t getDecoderAddress(void) {
-  return decoderAddress;
+  return decoder.address;
 } // getDecoderAddress
 
 /**********************************************************************************************/
@@ -280,44 +279,34 @@ void notifyDccReset(uint8_t hardReset) {
   (void) hardReset;
   // TODO : check, want er worden dcc resets gestuurd bij start programming mode, en dan is DECODER_INIT niet ok!!
   /*
-  decoderState = DECODER_INIT; // the loop() function will get the decoder to a reinitialize
+  decoder.state = DECODER_INIT; // the loop() function will get the decoder to a reinitialize
   // avr standard bootloader doesn't like a watchdog reset, so can't do a real reboot
   */
 } // notifyDccReset
 
-//#define NOTIFY_DCC_MSG
-#ifdef  NOTIFY_DCC_MSG
-void notifyDccMsg( DCC_MSG * Msg)
-{
-  Serial.print("notifyDccMsg[ ");
-  Serial.print(millis());
-  Serial.print("] : ");
-  for(uint8_t i = 0; i < Msg->Size; i++)
-  {
-    Serial.print(Msg->Data[i], HEX);
-    Serial.write(' ');
-  }
-  Serial.println();
-}
-#endif
-
-// This function is called by the NmraDcc library when a DCC ACK needs to be sent
-// Calling this function should cause an increased 60ma current drain on the power supply for 6ms to ACK a CV Read 
-void notifyCVAck(void) {
+#ifdef NOTIFY_DCC_MSG
+// a debug function to print all received dcc packets
+void notifyDccMsg( DCC_MSG * Msg) {
   #ifdef DEBUG
-    Serial.println("ack");
-  #endif
-  digitalWrite(PIN_ACKOUT, HIGH);
-  delay(6);  
-  digitalWrite(PIN_ACKOUT, LOW);
-} // notifyCVAck
+    if ((Msg->Data[0] == 0xFF) || (Msg->Data[0]<128)) return; // don't print idle or loc packets
+    Serial.print("notifyDccMsg[ ");
+    Serial.print(millis());
+    Serial.print("] : ");
+    for(uint8_t i = 0; i < Msg->Size; i++) {
+      Serial.print(Msg->Data[i], HEX);
+      Serial.write(' ');
+    }
+    Serial.println();
+  #endif // DEBUG
+} // notifyDccMsg
+#endif // NOTIFY_DCC_MSG
 
 // This function is called whenever a normal DCC Turnout Packet is received
-void notifyDccAccState(uint16_t dccAddress, uint8_t outputId, bool activate) {
-  if (decoderState == DECODER_PROGRAM) {
+void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate) {
+  if (decoder.state == DECODER_PROGRAM) {
     // take the decoderAddress & program it as our own
-    Dcc.writeDccAddress(dccAddress);
-    decoderAddress = dccAddress; // keep copy in RAM
+    Dcc.writeDccAddress(decoderAddress);
+    decoder.address = decoderAddress; // keep copy in RAM
     timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     #ifdef DEBUG
       Serial.print("CV1/CV9 rewritten, my address is now :");
@@ -326,10 +315,10 @@ void notifyDccAccState(uint16_t dccAddress, uint8_t outputId, bool activate) {
     return;
   }
 
-  if (decoderSoftwareMode == SOFTWAREMODE_TURNOUT_DECODER)
-    turnout_Handler (dccAddress, outputId, activate);
-  else if (decoderSoftwareMode == SOFTWAREMODE_OUTPUT_DECODER)
-    output_Handler (dccAddress, outputId, activate);
+  if (decoder.softwareMode == SOFTWAREMODE_TURNOUT_DECODER)
+    turnout_Handler (decoderAddress, outputId, activate);
+  else if (decoder.softwareMode == SOFTWAREMODE_OUTPUT_DECODER)
+    output_Handler (decoderAddress, outputId, activate);
   else {
     #ifdef DEBUG
       Serial.println("unsupported software mode!");
@@ -339,16 +328,27 @@ void notifyDccAccState(uint16_t dccAddress, uint8_t outputId, bool activate) {
 } // notifyDccAccState
 
 // This function is called whenever a DCC Signal Aspect Packet is received
-void notifyDccSigState(uint16_t dccAddress, uint8_t signalId, uint8_t signalAspect) {
+void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
   #ifdef DEBUG
-    Serial.print("notifyDccSigState: unsupported for now");
-    Serial.print(dccAddress);
+    Serial.print("notifyDccSigState: unsupported for now:");
+    Serial.print(decoderAddress);
     Serial.print(',');
     Serial.print(signalId);
     Serial.print(',');
     Serial.println(signalAspect);
   #endif 
 } // notifyDccSigState
+
+// This function is called by the NmraDcc library when a DCC ACK needs to be sent
+// Calling this function should cause an increased 60ma current drain on the power supply for 6ms to ACK a CV Read 
+void notifyCVAck() {
+  #ifdef DEBUG
+    Serial.println("ack");
+  #endif
+  digitalWrite(PIN_ACKOUT, HIGH);
+  delay(6);  
+  digitalWrite(PIN_ACKOUT, LOW);
+} // notifyCVAck
 
 // enkel CV's schrijven als decoder niet 'live' is (INIT, FACTORY_RESET, PROGRAM)
 uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
@@ -357,15 +357,15 @@ uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
     Serial.print(cv);
     Serial.print(" = ");
     Serial.println(cvValue);
-    if (decoderState == DECODER_RUNNING)
+    if (decoder.state == DECODER_RUNNING)
       Serial.println("no CVs written while decoder RUNNING");
   #endif
 
-  if (decoderState == DECODER_RUNNING) {
+  if (decoder.state == DECODER_RUNNING) {
     return eeprom_read_byte((uint8_t*) cv);
   }
   if (cv == CV_MANUFACTURER_ID) { // writing the CV_MANUFACTURER_ID triggers a factory reset
-    decoderState = DECODER_FACTORY_RESET;
+    decoder.state = DECODER_FACTORY_RESET;
     eeprom_update_byte((uint8_t*) cv, MAN_ID_DIY); // in case of empty eeprom
     timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 3); // 3 led flashes ter bevestiging van een CV write
     return cvValue; // we pretend to write the value, but only to trigger an ackCV
@@ -381,11 +381,11 @@ uint8_t notifyCVWrite( uint16_t cv, uint8_t cvValue) {
 // 0 = lezen naar niet-geïmplementeerde CV's : todo SDS!
 // 1 = geldige actie
 // DECODER_PROGRAM : for now we only allow CV writes while decoder is in DECODER_PROGRAM
-bool notifyCVValid(uint16_t cv, uint8_t writable) {
+bool notifyCVValid(uint16_t cv, bool writable) {
   bool isValid = true;
 
   // CV read/write only in programming mode
-  if( (cv > MAXCV) || (decoderState != DECODER_PROGRAM))
+  if( (cv > MAXCV) || (decoder.state != DECODER_PROGRAM))
     isValid = false;
 
   // different from default, because we do allow writing CV_MANUFACTURER_ID to trigger a factory reset
@@ -395,3 +395,11 @@ bool notifyCVValid(uint16_t cv, uint8_t writable) {
   // TODO : uitbreiden!! (ook afhankelijk van swMode CV33)
   return isValid;
 } // notifyCVValid
+
+// for now we require the decoder to be in programming mode for both service mode programming & PoM
+bool notifyPoMValid(uint16_t decoderAddress, uint16_t cv, bool writable) {
+  if (decoder.address == decoderAddress)
+    return notifyCVValid(cv,writable);
+  else
+    return false;
+} // notifyPoMValid
