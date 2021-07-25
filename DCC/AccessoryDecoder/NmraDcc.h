@@ -35,7 +35,7 @@
 
 #include "Arduino.h"
 
-#define MAX_DCC_MESSAGE_LEN 6    // including XOR-Byte
+#define MAX_DCC_MESSAGE_LEN 7    // including XOR-Byte, (note SDS fast clock message has 7 bytes)
 
 typedef struct {
   uint8_t	Size;
@@ -75,6 +75,13 @@ typedef enum {
   FN_21_28
 } FN_GROUP;
 
+typedef struct {
+  uint8_t minute; 
+  uint8_t hour;
+  uint8_t day_of_week;
+  uint8_t ratio;
+} dccFastClock_t;
+
 class NmraDcc {
   private:
     DCC_MSG Msg;
@@ -100,6 +107,8 @@ extern void notifyDccFunc( uint16_t decoderAddress, FN_GROUP FuncGrp, uint8_t Fu
 
 extern void notifyDccAccState(uint16_t decoderAddress, uint8_t outputId, bool activate) __attribute__ ((weak));
 extern void notifyDccSigState(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) __attribute__ ((weak));
+
+extern void notifyDccFastClock (dccFastClock_t *clock) __attribute__ ((weak));
 
 extern void notifyDccMsg(DCC_MSG * msg) __attribute__ ((weak));
 extern void	notifyDccNop(uint16_t decoderAddress) __attribute__ ((weak)); // RCN-213 NOP packet for accessories

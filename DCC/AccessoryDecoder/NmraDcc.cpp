@@ -111,6 +111,9 @@ static DccRx_t DccRx;
 static DCC_PROCESSOR_STATE DccProcState;
 static uint16_t dccFilterAddress = 0; // 0 = no address filtering, all packets are callbacked
 
+// keep track of fast clock 
+static dccFastClock_t dccFastClock;
+
 void ExternalInterruptHandler() {
   OCR0B = TCNT0 + DCC_BIT_SAMPLE_PERIOD;
 
@@ -198,7 +201,7 @@ ISR(TIMER0_COMPB_vect) {
 /***  LOCAL FUNCTIONS  *******************************************************/
 /*****************************************************************************/
 // for prog track, implement a 60ms current pulse
-// for main track, this should be railcom: TODO
+// for main track, this should be railcom: not supported
 static void ackCV() {
   if (!DccProcState.inServiceMode)
     return; // don't do ops mode ack for now
@@ -558,7 +561,6 @@ static void resetServiceModeTimer(bool inServiceMode) {
   DccProcState.LastServiceModeMillis = inServiceMode ? millis() : 0;
 } // resetServiceModeTimer
 
-// TODO 2021: hernoem naar setServiceMode true/false of zoiets
 static void setServiceMode(bool inServiceMode) {
   resetServiceModeTimer(inServiceMode);
 
@@ -607,10 +609,36 @@ static void execDccProcessor(DCC_MSG * pDccMsg) {
     setServiceMode(false);	
 #endif // NMRA_DCC_PROCESS_SERVICEMODE
 
-  // Idle Packet
-  if ((pDccMsg->Data[0] == 0b11111111) && (pDccMsg->Data[1] == 0)) {
+  if ((pDccMsg->Data[0] == 0b11111111) && (pDccMsg->Data[1] == 0)) { // idle packet
     if (notifyDccIdle)
       notifyDccIdle();
+  }
+
+  else if ((pDccMsg->Data[0] == 0x00) && (pDccMsg->Data[1] == 0xC1)) { // fast clock message
+    if (notifyDccFastClock) {
+      uint8_t aValue;
+      for (uint8_t i=2;i<pDccMsg->Size-1;i++) {
+        switch(pDccMsg->Data[i] & 0xC0) {
+          case 0x00:  
+            aValue = pDccMsg->Data[i] & 0x3F;
+            if (aValue < 60) dccFastClock.minute = aValue;
+            break;
+          case 0x80:  
+            aValue = pDccMsg->Data[i] & 0x3F;
+            if (aValue < 24) dccFastClock.hour = aValue;
+            break;
+          case 0x40:  
+            aValue = pDccMsg->Data[i] & 0x3F;
+            if (aValue < 7) dccFastClock.day_of_week = aValue;
+            break;
+          case 0xC0:  
+            aValue = pDccMsg->Data[i] & 0x3F;
+            if (aValue < 32) dccFastClock.ratio = aValue;
+            break;
+        }
+      }
+      notifyDccFastClock(&dccFastClock);
+    }
   }
 
 #ifdef NMRA_DCC_MOBILE_DECODER

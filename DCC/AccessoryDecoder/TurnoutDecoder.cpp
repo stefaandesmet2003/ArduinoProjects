@@ -5,12 +5,11 @@
 #include "NmraDcc.h"
 
 extern Timer timer;
-int8_t timerId;
+static int8_t timerId;
 
 extern NmraDcc  Dcc;
-uint8_t pulseDuration[4];
-uint8_t decoderOutputs[8] = {PIN_OUTPUT0,PIN_OUTPUT1,PIN_OUTPUT2,PIN_OUTPUT3,
-                             PIN_OUTPUT4,PIN_OUTPUT5,PIN_OUTPUT6,PIN_OUTPUT7}; // deze global zou beter in accessoryDecoder.ino staan zeker?
+static uint8_t pulseDuration[4];
+const static uint8_t decoderOutputs[8] = OUTPUTPINS;
 
 //void turnout_TimerCallback (void); // voorlopig laten we de timer library het werk doen
 uint8_t turnoutPositions[4]; // 0 = rechtdoor, 1 = afslaan; todo : aanpassen als er DCC commando's binnenkomen
@@ -49,7 +48,7 @@ void turnout_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
     Serial.println(activate);
   #endif
 
-  // not using FLAGS_MY_ADDRESS_ONLY in nmradcc lib
+  // no dcc packet filtering in nmradcc lib
   // so we get all basic accessory packets here, 
   // and need to filter the decoderAddresses we are interested in
   if ((decoderAddress != getDecoderAddress()) && (decoderAddress != 511)) { // 511 = broadcast
@@ -93,15 +92,14 @@ uint8_t turnout_FactoryResetCV () {
   return 0;
 } // turnout_FactoryResetCV 
 
-// turnoutId = 0..3, manuele bediening met de knoppen
-// in SOFTWAREMODE_OUTPUT_DECODER mode bedien je enkel outputs 0..3, want er zijn maar 3 knoppen
+// turnoutId = 0..3, manual toggling with the buttons
 void turnout_ManualToggle (uint8_t turnoutId, bool activate) {
   #ifdef DEBUG
     Serial.print ("manual toggle : ");
     Serial.print(turnoutPositions[turnoutId]);
     if (activate) Serial.println(",ON");
     else Serial.println(",OFF");
-  #endif 
+  #endif
   if (activate)
     turnoutPositions[turnoutId] = (!turnoutPositions[turnoutId]) & 0x1;
   turnout_Handler(getDecoderAddress(),(turnoutId << 1) + turnoutPositions[turnoutId],activate);
@@ -127,7 +125,8 @@ void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
     Serial.println(activate);
   #endif
 
-  // not using FLAGS_MY_ADDRESS_ONLY in nmradcc lib
+
+  // no dcc packet filtering in nmradcc lib
   // so we get all basic accessory packets here, 
   // and need to filter the decoderAddresses we are interested in
   if ((decoderAddress != getDecoderAddress()) && 
@@ -146,7 +145,7 @@ void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
   if (decoderAddress == getDecoderAddress() + 1) physicalOutput =+ 4;
 
   if (activate) { // 'on' command
-    digitalWrite(decoderOutputs[physicalOutput], HIGH);
+    digitalWrite(decoderOutputs[physicalOutput], (outputId & 0x1) == 0); // green (even) coil = output on, red (odd) coil = output off
     // TODO : nog checken of dit zin heeft om 4 pulseDurations te gebruiken voor 8 outputs; of eventueel andere CV's?
     /*
     if (pulseDuration[outputId>>1]) // switch output auto-off after pulseDuration
@@ -158,3 +157,16 @@ void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
     // ignore for this decoder type
   }
 } // output_Handler
+
+// in SOFTWAREMODE_OUTPUT_DECODER mode only outputs 0..3 can be manually toggled, because we have only 3 buttons
+void output_ManualToggle (uint8_t outputId) {
+  uint8_t pin = decoderOutputs[outputId];
+  #ifdef DEBUG
+    Serial.print ("manual toggle output ");
+    Serial.println(outputId);
+  #endif
+
+  digitalWrite(pin,!digitalRead(pin));
+  timer.oscillate(PIN_PROGLED, LED_FAST_FLASH, LOW, 1); // 1 led flashes ter bevestiging van een turnout commando
+
+} // output_ManualToggle

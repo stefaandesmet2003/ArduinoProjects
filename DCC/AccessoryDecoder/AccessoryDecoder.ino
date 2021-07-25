@@ -16,7 +16,7 @@
  * writeDccAddress : use this change decoder address, lib handles writing the correct CVs
  */
 
-#define VersionId 0x1 // versie van deze software
+#define VERSION_ID 0x2 // this software version
 
 typedef enum {
   DECODER_FACTORY_RESET,DECODER_INIT,DECODER_RUNNING, DECODER_PROGRAM 
@@ -33,27 +33,53 @@ static decoder_t decoder;
 // dcc receiver
 NmraDcc  Dcc;
 
+typedef struct {
+  uint16_t  CV;
+  uint8_t   Value;
+} CVPair;
+
 //factory defaults
 static CVPair FactoryDefaultCVs [] = {
   {CV_ACCESSORY_DECODER_ADDRESS_LSB, 1},
   {CV_ACCESSORY_DECODER_ADDRESS_MSB, 0},
-  {CV_VERSION_ID, VersionId},
+  {CV_VERSION_ID, VERSION_ID},
   {CV_MANUFACTURER_ID, MAN_ID_DIY},
   {CV_DECODER_CONFIGURATION,0x80},
-  {CV_SoftwareMode, 0} 
+  {CV_SOFTWARE_MODE, SOFTWAREMODE_TURNOUT_DECODER} 
 };
 
 // keyhandling
+// keyCode moet bruikbaar zijn als idx in een interne array, daarom geen enum type
+#define KEY_1       0 // also programming key
+#define KEY_2       1
+#define KEY_3       2
+#define KEY_4       3
+#define NUMBER_OF_DEBOUNCED_KEYS 4
+
 #define DEBOUNCE_DELAY 50
-#define LONGPRESS_DELAY 3000
-#define NUMBER_OF_KEYS 4
-typedef enum {UP, DEBOUNCING_DOWN, DOWN, LONG_DOWN, DEBOUNCING_UP} keyState_t;
+#define LONGPRESS_DELAY 1000
+
+// key events
+#define EVENT_NULL          0
+#define EVENT_KEY_DOWN      1
+#define EVENT_KEY_UP        2
+#define EVENT_KEY_LONGDOWN  3
+#define EVENT_ROTARY_UP     4
+#define EVENT_ROTARY_DOWN   5
+#define EVENT_KEY_LASTEVENT 5 // app can add events after this
+typedef enum {
+  UP, DEBOUNCING_DOWN, DOWN, LONG_DOWN, DEBOUNCING_UP
+} keyState_t;
+
 typedef struct {
   uint8_t Pin;
   keyState_t State;
   uint32_t LastMillis;
-} key_t;
-key_t keys[NUMBER_OF_KEYS]; // 4 keys, key1 = progkey
+} debouncedKey_t;
+
+// de index in deze array komt overeen met de keyCode 
+static debouncedKey_t keys[NUMBER_OF_DEBOUNCED_KEYS]; // 4 keys, key1 = progkey
+static void keys_Handler (uint8_t keyEvent, uint8_t keyCode);
 
 // timers
 Timer timer;
@@ -62,105 +88,114 @@ int8_t ledTimer;
 /******************************************************************/
 /*  KEY HANDLING                                                  */
 /******************************************************************/
-static void init_keys (void) {
-    keys[0].Pin = PIN_PROGKEY;
-    keys[0].State = UP;
-    keys[1].Pin = PIN_KEY2;
-    keys[1].State = UP;
-    keys[2].Pin = PIN_KEY3;
-    keys[2].State = UP;
-    keys[3].Pin = PIN_KEY4;
-    keys[3].State = UP;
-    // keys[0].Lastmillis = 0; //init overbodig
-} // init_keys
+static void keys_Init () {
+  uint8_t keypins[NUMBER_OF_DEBOUNCED_KEYS] = KEYPINS;
+  // de drukknoppen
+  for (int i=0; i<NUMBER_OF_DEBOUNCED_KEYS; i++) {
+    keys[i].State = UP;
+    pinMode(keypins[i],INPUT_PULLUP); // er zit geen pullup weerstand op de module voor de SWITCH
+    keys[i].Pin = keypins[i];
+  }  
+} // keys_Init
 
-static void detect_keys (void) {
-  int i;
-  for (i=0;i<NUMBER_OF_KEYS;i++) {
-    switch(keys[i].State) {
+static void keys_Update () {
+  uint8_t keyCode;
+  for (keyCode=0;keyCode<NUMBER_OF_DEBOUNCED_KEYS;keyCode++) {
+    switch(keys[keyCode].State) {
       case UP : 
-        if (digitalRead(keys[i].Pin) == LOW ) {
-          keys[i].LastMillis = millis();
-          keys[i].State = DEBOUNCING_DOWN;
+        if (digitalRead(keys[keyCode].Pin) == LOW) {
+          keys[keyCode].LastMillis = millis();
+          keys[keyCode].State = DEBOUNCING_DOWN;
         }
         break;
       case DEBOUNCING_DOWN :
-        if (digitalRead(keys[i].Pin) != LOW )
-          keys[i].State = UP;
-        else if ( (millis() - keys[i].LastMillis) > DEBOUNCE_DELAY ) {
-          keys[i].State = DOWN;
-          keyHandler ((i<<2) | KEYEVENT_DOWN); // gebruik index in de keys[] array als keycode
+        if (digitalRead(keys[keyCode].Pin) != LOW) {
+          keys[keyCode].State = UP;
+        }
+        else if ((millis() - keys[keyCode].LastMillis) > DEBOUNCE_DELAY) {
+          keys[keyCode].State = DOWN;
+          if (keys_Handler)
+            keys_Handler (EVENT_KEY_DOWN,keyCode);
         }
         break;
       case DOWN :
-        if (digitalRead(keys[i].Pin) != LOW ) {
-          keys[i].State = DEBOUNCING_UP;
-          keys[i].LastMillis = millis();
+        if (digitalRead(keys[keyCode].Pin) != LOW) {
+          keys[keyCode].State = DEBOUNCING_UP;
+          keys[keyCode].LastMillis = millis();
         }
-        else if ( (millis() - keys[i].LastMillis) > LONGPRESS_DELAY ) {
-          keys[i].State = LONG_DOWN;
-          keyHandler ((i<<2) | KEYEVENT_DOWN | KEYEVENT_LONGDOWN );
+        else if ((millis() - keys[keyCode].LastMillis) > LONGPRESS_DELAY) {
+          keys[keyCode].State = LONG_DOWN;
+          if (keys_Handler)
+            keys_Handler (EVENT_KEY_LONGDOWN,keyCode);
         }
         break;
       case LONG_DOWN :
-        if (digitalRead(keys[i].Pin) != LOW ) {
-          keys[i].State = DEBOUNCING_UP;
-          keys[i].LastMillis = millis();
+        if (digitalRead(keys[keyCode].Pin) != LOW) {
+          keys[keyCode].State = DEBOUNCING_UP;
+          keys[keyCode].LastMillis = millis();
         }
         break;
       case DEBOUNCING_UP :
-        if (digitalRead(keys[i].Pin) == LOW )
-          keys[i].LastMillis = millis();
-        else if ( (millis() - keys[i].LastMillis) > DEBOUNCE_DELAY ) {
-          keys[i].State = UP;
-          keyHandler ((i<<2) | KEYEVENT_UP);
+        if (digitalRead(keys[keyCode].Pin) == LOW) {
+          keys[keyCode].LastMillis = millis();
+        }
+        else if ((millis() - keys[keyCode].LastMillis) > DEBOUNCE_DELAY) {
+          keys[keyCode].State = UP;
+          if (keys_Handler)
+            keys_Handler (EVENT_KEY_UP, keyCode);
         }
         break;
     }
   }
-} // detect_keys
+} // keys_Update
 
-static void keyHandler (uint8_t keyEvent) {
-    // debug info
-    #ifdef DEBUG
-      switch (keyEvent & 0x3) {
-        case KEYEVENT_UP :
-          Serial.print("key up");
-          break;
-        case KEYEVENT_DOWN :
-          Serial.print("key down");
-          break;
-        case KEYEVENT_LONGDOWN :
-          Serial.print("long key down");
-          break;
-      }
-      Serial.print (" on key : ");
-      Serial.println(keyEvent>>2);
-    #endif
-    
-    if (keyEvent & KEYEVENT_LONGDOWN) {
-      if (decoder.state != DECODER_PROGRAM) {
-        decoder.state = DECODER_PROGRAM;
-        ledTimer = timer.oscillate(PIN_PROGLED, LED_SLOW_FLASH, HIGH, -1); //forever
-      }
+static void keys_Handler (uint8_t keyEvent, uint8_t keyCode) {
+  #ifdef DEBUG
+    switch (keyEvent) {
+      case EVENT_KEY_UP :
+        Serial.print("key up");
+        break;
+      case EVENT_KEY_DOWN :
+        Serial.print("key down");
+        break;
+      case EVENT_KEY_LONGDOWN :
+        Serial.print("long key down");
+        break;
     }
-    else if (keyEvent & KEYEVENT_DOWN) {
-      if (decoder.state == DECODER_PROGRAM) {
-        decoder.state = DECODER_INIT;
-      }
+    Serial.print (" on key : ");
+    Serial.println(keyCode);
+  #endif
+  
+  if (keyEvent == EVENT_KEY_LONGDOWN) {
+    if (decoder.state != DECODER_PROGRAM) {
+      decoder.state = DECODER_PROGRAM;
+      ledTimer = timer.oscillate(PIN_PROGLED, LED_SLOW_FLASH, HIGH, -1); //forever
+    }
+  }
+  else if (keyEvent == EVENT_KEY_DOWN) {
+    if (decoder.state == DECODER_PROGRAM) {
+      decoder.state = DECODER_INIT;
+    }
+    else {
+      if (decoder.softwareMode == SOFTWAREMODE_TURNOUT_DECODER)
+        turnout_ManualToggle (keyCode,true); // key down -> send the 'on' command to the turnout/output
       else
-        turnout_ManualToggle (keyEvent >> 2,true); // key down -> send the 'on' command to the turnout/output
+        output_ManualToggle(keyCode);
     }
-    else
-      turnout_ManualToggle (keyEvent >> 2,false); // key up -> send the 'off' command
+  }
+  else {
+    if (decoder.softwareMode == SOFTWAREMODE_TURNOUT_DECODER)
+      turnout_ManualToggle (keyCode,false); // key up -> send the 'off' command
+    // else : don't bother with manual output toggle
+  }
 
-    #ifdef DEBUG
-      Serial.print ("decoder.state = ");
-      if (decoder.state == DECODER_INIT) Serial.println("DECODER_INIT");
-      else if (decoder.state == DECODER_RUNNING) Serial.println("DECODER_RUNNING");
-      else if (decoder.state == DECODER_PROGRAM) Serial.println("DECODER_PROGRAM");
-      else Serial.println("factory reset");
-    #endif
+  #ifdef DEBUG
+    Serial.print ("decoder.state = ");
+    if (decoder.state == DECODER_INIT) Serial.println("DECODER_INIT");
+    else if (decoder.state == DECODER_RUNNING) Serial.println("DECODER_RUNNING");
+    else if (decoder.state == DECODER_PROGRAM) Serial.println("DECODER_PROGRAM");
+    else Serial.println("factory reset");
+  #endif
 } // keyHandler
 
 /******************************************************************/
@@ -177,7 +212,7 @@ static uint8_t accessory_FactoryResetCV() {
   // factory reset de algemene CV's (die niet afhangen van de software mode
   for (i=0; i < sizeof(FactoryDefaultCVs)/sizeof(CVPair); i++)
     Dcc.setCV( FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
-  swMode = Dcc.getCV(CV_SoftwareMode);
+  swMode = Dcc.getCV(CV_SOFTWARE_MODE);
   switch(swMode) {
     case SOFTWAREMODE_TURNOUT_DECODER :
     case SOFTWAREMODE_OUTPUT_DECODER :
@@ -185,7 +220,7 @@ static uint8_t accessory_FactoryResetCV() {
       break;
     default :
       // er staat een unsupported software mode in CV33 --> we gaan die terugzetten naar TURNOUT_DECODER en de TURNOUT_DECODER factory defaults zetten
-      Dcc.setCV(CV_SoftwareMode,SOFTWAREMODE_TURNOUT_DECODER);
+      Dcc.setCV(CV_SOFTWARE_MODE,SOFTWAREMODE_TURNOUT_DECODER);
       turnout_FactoryResetCV();
       break;
   }
@@ -207,13 +242,7 @@ void setup() {
   // use default ext int 0 on pin 2
   Dcc.init();
 
-  // progled, progkey
-  pinMode (PIN_PROGKEY, INPUT_PULLUP);
-  // key2-4
-  pinMode (PIN_KEY2, INPUT_PULLUP);
-  pinMode (PIN_KEY3, INPUT_PULLUP);
-  pinMode (PIN_KEY4, INPUT_PULLUP);
-  // led
+  // progled
   pinMode (PIN_PROGLED, OUTPUT);
   digitalWrite(PIN_PROGLED, LOW); //LED uit
 
@@ -230,7 +259,7 @@ void setup() {
     decoder.state = DECODER_INIT;
 
   // init key handling
-  init_keys ();
+  keys_Init ();
 } // setup
 
 void loop() {
@@ -243,7 +272,7 @@ void loop() {
     case DECODER_INIT :
       timer.stop (ledTimer); //stop de slow flashing led
       decoder.address =  Dcc.readDccAddress(); // reread from eeprom
-      decoder.softwareMode = Dcc.getCV(CV_SoftwareMode);
+      decoder.softwareMode = Dcc.getCV(CV_SOFTWARE_MODE);
       switch (decoder.softwareMode) {
         case SOFTWAREMODE_TURNOUT_DECODER :
          case SOFTWAREMODE_OUTPUT_DECODER :
@@ -253,6 +282,7 @@ void loop() {
       decoder.state = DECODER_RUNNING;
       #ifdef DEBUG
         Serial.print("my address is : "); Serial.println(getDecoderAddress());
+        Serial.print("softwaremode = "); Serial.println(decoder.softwareMode);
       #endif
       break;
     case DECODER_RUNNING :
@@ -261,14 +291,14 @@ void loop() {
       break;
   }
 
-  detect_keys();  // check key input
+  keys_Update();  // check key input
   timer.update();  // run timers
 } // loop
 
 /**********************************************************************************************/
 /* external interface                                                                         */
 /**********************************************************************************************/
-uint16_t getDecoderAddress(void) {
+uint16_t getDecoderAddress() {
   return decoder.address;
 } // getDecoderAddress
 
@@ -403,3 +433,14 @@ bool notifyPoMValid(uint16_t decoderAddress, uint16_t cv, bool writable) {
   else
     return false;
 } // notifyPoMValid
+
+// for test
+#ifdef DEBUG
+void notifyDccFastClock (dccFastClock_t *clock){
+  Serial.print("fast clock update:");
+  Serial.print(clock->hour);Serial.print(":");
+  Serial.print(clock->minute);Serial.print(":");
+  Serial.print(clock->ratio);Serial.print(":");
+  Serial.println(clock->day_of_week);
+} // notifyDccFastClock
+#endif
