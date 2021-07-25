@@ -19,5 +19,6 @@ uint8_t turnout_FactoryResetCV();
 
 // SOFTWAREMODE_OUTPUT_DECODER
 void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate);
+void output_ManualToggle (uint8_t outputId);
 
 #endif //TurnoutDecoder_h

@@ -7,8 +7,7 @@
 int8_t timerId;
 
 uint8_t pulseDuration[4];
-uint8_t decoderOutputs[8] = {PIN_OUTPUT0,PIN_OUTPUT1,PIN_OUTPUT2,PIN_OUTPUT3,
-                             PIN_OUTPUT4,PIN_OUTPUT5,PIN_OUTPUT6,PIN_OUTPUT7}; // deze global zou beter in accessoryDecoder.ino staan zeker?
+uint8_t decoderOutputs[8] = OUTPUTPINS;
 
 //void turnout_TimerCallback (void); // voorlopig laten we de timer library het werk doen
 uint8_t turnoutPositions[4]; // 0 = rechtdoor, 1 = afslaan; todo : aanpassen als er DCC commando's binnenkomen
@@ -35,7 +34,6 @@ void turnout_Init() {
   #endif
 
 } // turnout_Init
-
 
 // OutputId : 0..7
 // activate = true : activate output, 0 = deactivate output (voorlopig gebeurt dit automatisch door de handler)
@@ -149,7 +147,7 @@ void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
   if (decoderAddress == getDecoderAddress() + 1) physicalOutput =+ 4;
 
   if (activate) { // 'on' command
-    digitalWrite(decoderOutputs[physicalOutput], HIGH);
+    digitalWrite(decoderOutputs[physicalOutput], (outputId & 0x1) == 0); // green (even) coil = output on, red (odd) coil = output off
     // TODO : nog checken of dit zin heeft om 4 pulseDurations te gebruiken voor 8 outputs; of eventueel andere CV's?
     /*
     if (pulseDuration[outputId>>1]) // switch output auto-off after pulseDuration
@@ -161,3 +159,17 @@ void output_Handler(uint16_t decoderAddress, uint8_t outputId, bool activate) {
     // ignore for this decoder type
   }
 } // output_Handler
+
+// in SOFTWAREMODE_OUTPUT_DECODER mode only outputs 0..3 can be manually toggled, because we have only 3 buttons
+void output_ManualToggle (uint8_t outputId) {
+  uint8_t pin = decoderOutputs[outputId];
+  /*
+  #ifdef DEBUG
+    Serial.print ("manual toggle output ");
+    Serial.println(outputId);
+  #endif
+  */
+  digitalWrite(pin,!digitalRead(pin));
+  Timer_oscillate(PIN_PROGLED, LED_FAST_FLASH, HIGH, 1); // 1 led flashes ter bevestiging van een turnout commando
+
+} // output_ManualToggle
