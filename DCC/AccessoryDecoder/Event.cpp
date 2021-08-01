@@ -36,8 +36,8 @@ Event::Event(void)
 
 void Event::update(void)
 {
-    unsigned long now = millis();
-    update(now);
+	unsigned long now = millis();
+	update(now);
 }
 
 void Event::update(unsigned long now)
@@ -46,20 +46,20 @@ void Event::update(unsigned long now)
 	{
 		switch (eventType)
 		{
-			case EVENT_EVERY:
-				(*callback)();
-				break;
+		case EVENT_EVERY:
+			(*callback)();
+			break;
 
-			case EVENT_OSCILLATE:
-				pinState = ! pinState;
-        /*
+		case EVENT_OSCILLATE:
+			pinState = !pinState;
+			/*
         Serial.print("Event.update : ");
         Serial.print(pin,DEC);
         Serial.print(" = ");
         Serial.println(pinState,DEC);
         */
-				digitalWrite(pin, pinState);
-				break;
+			digitalWrite(pin, pinState);
+			break;
 		}
 		lastEventTime = now;
 		count++;
