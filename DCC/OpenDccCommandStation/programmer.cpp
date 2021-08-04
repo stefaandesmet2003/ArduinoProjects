@@ -447,7 +447,6 @@ static void build_register_mode_write(unsigned char regadr, unsigned data) {
 // input:   prog_ctrl must be loaded with the desired operation
 //          (mode and no. of cycles for each state)
 // output:  pi_result is updated
-static uint32_t ackDetectTimeout;
 static void run_prog_inner_task() {
   switch (prog_inner_state) {
     case PI_IDLE:                                       // ready
@@ -1000,6 +999,8 @@ void programmer_Reset() {
   prog_inner_state = PI_IDLE;
   prog_byte_state = PB_IDLE;
   prog_seq_state = PS_IDLE;
+  prog_result = PT_OKAY;
+  prog_data = 0;
 } // programmer_Reset
 
 //===========================================================================================

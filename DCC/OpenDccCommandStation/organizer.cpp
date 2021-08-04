@@ -2014,7 +2014,7 @@ bool do_loco_restricted_speed(unsigned int locAddress, unsigned char data)
 // parameters: addr:     loco
 //             cv:       config var in this loco
 //             data:     value to be written
-bool do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data)
+uint8_t do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data)
 {
   unsigned char retval;
 
@@ -2030,7 +2030,7 @@ bool do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data)
 //
 // parameters: addr:     loco
 //             cv:       config var in this loco
-bool do_pom_loco_cvrd(unsigned int addr, unsigned int cv)
+uint8_t do_pom_loco_cvrd(unsigned int addr, unsigned int cv)
 {
   unsigned char retval;
 
@@ -2045,7 +2045,7 @@ bool do_pom_loco_cvrd(unsigned int addr, unsigned int cv)
 // parameters: turnoutAddress:  turnout decoder [0000-4095]
 //             coil:          coil (red, green) [0,1]
 //             activate:        off, on = [0,1]; 
-bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate) {
+uint8_t do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate) {
   unsigned char retval;
   if (activate) turnout_UpdateStatus(turnoutAddress, coil);
   build_nmra_basic_accessory(turnoutAddress, coil, activate, locobuff_mes_ptr);
@@ -2056,7 +2056,7 @@ bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char
 // decoder address : 9-bit accessory decoder DCC address
 // signalId : 2-bit head 0..3 (lower 2-bits of the 11-bit address)
 // signalAspect : 5-bits aspect
-bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
+uint8_t do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
   unsigned char retval;
   uint16_t decoderAddress11Bits;
   decoderAddress11Bits = (decoderAddress << 2) + (signalId & 0x3);
@@ -2066,7 +2066,7 @@ bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t sign
 }
 
 // for the xpnet encapsulated msgs (extended accessory + PoM)
-bool do_raw_msg(unsigned char *msg, unsigned char msgSize) {
+uint8_t do_raw_msg(unsigned char *msg, unsigned char msgSize) {
   bool retval;
 
   build_nmra_raw(msg, msgSize, locobuff_mes_ptr);
@@ -2079,7 +2079,7 @@ bool do_raw_msg(unsigned char *msg, unsigned char msgSize) {
 // parameters: addr:     accessory decoder addr (not turnout!)
 //             cv:       config var in this accessory
 //             data:     value to be written 
-bool do_pom_accessory(unsigned int addr, unsigned int cv, unsigned char data)
+uint8_t do_pom_accessory(unsigned int addr, unsigned int cv, unsigned char data)
 {
   unsigned char retval;
 
@@ -2088,7 +2088,7 @@ bool do_pom_accessory(unsigned int addr, unsigned int cv, unsigned char data)
   return(retval);
 }
 
-bool do_pom_accessory_cvrd(unsigned int addr, unsigned int cv)
+uint8_t do_pom_accessory_cvrd(unsigned int addr, unsigned int cv)
 {
   unsigned char retval;
 
@@ -2097,7 +2097,7 @@ bool do_pom_accessory_cvrd(unsigned int addr, unsigned int cv)
   return(retval);
 }
 
-bool do_pom_ext_accessory(unsigned int addr, unsigned int cv, unsigned char data)
+uint8_t do_pom_ext_accessory(unsigned int addr, unsigned int cv, unsigned char data)
 {
   unsigned char retval;
   build_pom_ext_accessory(addr, cv, data, locobuff_mes_ptr);
@@ -2105,7 +2105,7 @@ bool do_pom_ext_accessory(unsigned int addr, unsigned int cv, unsigned char data
   return(retval);
 }
 
-bool do_pom_ext_accessory_cvrd(unsigned int addr, unsigned int cv)
+uint8_t do_pom_ext_accessory_cvrd(unsigned int addr, unsigned int cv)
 {
   unsigned char retval;
   build_pom_ext_accessory_cvrd(addr, cv, locobuff_mes_ptr);
@@ -2114,7 +2114,7 @@ bool do_pom_ext_accessory_cvrd(unsigned int addr, unsigned int cv)
 }
 
 #if (DCC_FAST_CLOCK == 1)
-bool do_fast_clock(t_fast_clock* my_clock) {
+uint8_t do_fast_clock(t_fast_clock* my_clock) {
   unsigned char retval;
   build_dcc_fast_clock(my_clock, locobuff_mes_ptr);
   retval = put_in_queue_low(locobuff_mes_ptr);

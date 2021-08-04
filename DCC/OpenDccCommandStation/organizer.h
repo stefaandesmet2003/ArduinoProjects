@@ -85,18 +85,18 @@ unsigned char do_loco_func_grp3(unsigned char slot, unsigned int locAddress, uns
 #endif
 
 void do_all_stop();
-bool do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate);
-bool do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect); // new SDS 2021
-bool do_raw_msg(unsigned char *msg, unsigned char msgSize); // new SDS 2021
-bool do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data);                     // program on the main; cv: 1...1024
-bool do_pom_loco_cvrd(unsigned int addr, unsigned int cv);                                    // cv 1...1024
-bool do_pom_accessory(unsigned int addr, unsigned int cv, unsigned char data);                // program on the main
-bool do_pom_accessory_cvrd(unsigned int addr, unsigned int cv);
-bool do_pom_ext_accessory(unsigned int addr, unsigned int cv, unsigned char data);
-bool do_pom_ext_accessory_cvrd(unsigned int addr, unsigned int cv);
+uint8_t do_accessory(unsigned int turnoutAddress, unsigned char coil, unsigned char activate);
+uint8_t do_signal_accessory(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect); // new SDS 2021
+uint8_t do_raw_msg(unsigned char *msg, unsigned char msgSize); // new SDS 2021
+uint8_t do_pom_loco(unsigned int addr, unsigned int cv, unsigned char data);                     // program on the main; cv: 1...1024
+uint8_t do_pom_loco_cvrd(unsigned int addr, unsigned int cv);                                    // cv 1...1024
+uint8_t do_pom_accessory(unsigned int addr, unsigned int cv, unsigned char data);                // program on the main
+uint8_t do_pom_accessory_cvrd(unsigned int addr, unsigned int cv);
+uint8_t do_pom_ext_accessory(unsigned int addr, unsigned int cv, unsigned char data);
+uint8_t do_pom_ext_accessory_cvrd(unsigned int addr, unsigned int cv);
 
 #if (DCC_FAST_CLOCK == 1)
- bool do_fast_clock(t_fast_clock* my_clock);
+ uint8_t do_fast_clock(t_fast_clock* my_clock);
 #endif
 
 // TODO SDS2021 : cleanup! set_next_message is eigenlijk een interne organizer functie, moet static
