@@ -125,7 +125,6 @@ static bool turnoutPositionsChanged = true; // flag to trigger display update TO
 static uint32_t speedkeyLastMillis;
 
 // ui fixed text in progmem
-// TODO : betere oplossing dan spaties in flash te stockeren om de tekst te laten passen met de keys
 static const char btxtMain[] PROGMEM = "main";
 static const char btxtPower[] PROGMEM = "power";
 static const char btxtTest[] PROGMEM = "test";
@@ -1130,7 +1129,6 @@ void ui_Update() {
   // do the auto-refresh part
   if ((ui_Redraw) || ((millis() - uiUpdateLastMillis) > DISPLAY_AUTO_REFRESH_DELAY)) {
     ui_ActiveMenuHandler(EVENT_UI_UPDATE,(uint8_t) ui_Redraw); // handler can decide if it performs auto-refresh or not
-
     uiUpdateLastMillis = millis();
     ui_Redraw = false;
   }
