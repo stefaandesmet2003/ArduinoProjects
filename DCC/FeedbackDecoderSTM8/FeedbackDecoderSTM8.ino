@@ -30,6 +30,7 @@
 #include "Wire.h"
 
 #undef INCLUDE_DCC // temp
+//#define INCLUDE_DCC // temp
 #ifdef INCLUDE_DCC
 #include "NmraDcc.h"
 
@@ -325,7 +326,7 @@ static uint8_t accessory_FactoryResetCV() {
 void setup() {
 
   Wire_begin(); // for the i/o expanders
-  init_rs485(RS485_DIRECTION_PIN);
+  rs485_Init(RS485_DIRECTION_PIN);
 
   // Configure the DCC CV Programing ACK pin for an output
   pinMode(PIN_ACKOUT, OUTPUT);
@@ -334,7 +335,7 @@ void setup() {
    // Setup which External Interrupt, the Pin it's associated with that we're using and enable the Pull-Up 
   // + enable the DCC Receiver
   #ifdef INCLUDE_DCC
-  DCC_init(FLAGS_DCC_ACCESSORY_DECODER, 0, true);
+  DCC_init();
   #endif
 
   // progled, progkey

@@ -38,26 +38,24 @@ static uint8_t xpc_MyAddress = 0; // 0 = broadcast address, so is safe
 static xpcState_t xpc_state;
 
 // fixed messages
-// TODO : hoe zorgen we ervoor dat die in ROM zitten, ipv RAM ?
-
 // fixed messages Command Station -> client
-uint8_t xp_datenfehler[] = {0x61,0x80};             // xor wrong
-uint8_t xp_busy[] = {0x61,0x81};                    // busy
-uint8_t xp_unknown[] = {0x61,0x82};                 // unknown command
+static const uint8_t xp_datenfehler[] = {0x61,0x80};             // xor wrong
+static const uint8_t xp_busy[] = {0x61,0x81};                    // busy
+static const uint8_t xp_unknown[] = {0x61,0x82};                 // unknown command
 
 // fixed messages client -> Command Station
-static uint8_t xpc_AcknowledgementResponse[] = {0x20};                // 2.2.1
+static const uint8_t xpc_AcknowledgementResponse[] = {0x20};                // 2.2.1
 #ifndef MINIMAL_XPC
-  static uint8_t xpc_PowerOnRequest[] = {0x21,0x81};                    // 2.2.2 Resume operations request
-  static uint8_t xpc_PowerOffRequest[] = {0x21,0x80};                   // 2.2.3 (emergency off)
-  static uint8_t xpc_EmergencyStopRequest[] = {0x80};                   // 2.2.4
-  static uint8_t xpc_ServiceModeResultsRequest[] = {0x21,0x10};         // 2.2.x
-  static uint8_t xpc_CommandStationSwVersionRequest[] = {0x21,0x21};    // 2.2.x
-  static uint8_t xpc_CommandStationStatusRequest[] = {0x21,0x24};       // 2.2.x
-  static uint8_t xpc_GetFastClockRequest[] = {0x01,0xF2};               // undocumented xpnet
+  static const uint8_t xpc_PowerOnRequest[] = {0x21,0x81};                    // 2.2.2 Resume operations request
+  static const uint8_t xpc_PowerOffRequest[] = {0x21,0x80};                   // 2.2.3 (emergency off)
+  static const uint8_t xpc_EmergencyStopRequest[] = {0x80};                   // 2.2.4
+  static const uint8_t xpc_ServiceModeResultsRequest[] = {0x21,0x10};         // 2.2.x
+  static const uint8_t xpc_CommandStationSwVersionRequest[] = {0x21,0x21};    // 2.2.x
+  static const uint8_t xpc_CommandStationStatusRequest[] = {0x21,0x24};       // 2.2.x
+  static const uint8_t xpc_GetFastClockRequest[] = {0x01,0xF2};               // undocumented xpnet
 #endif 
 static bool xpc_isConnectionError = false; // als we geen callbytes ontvangen van de commandStation
-static uint32_t rxLastMillis;
+static uint32_t rxLastMillis = 0;
 
 uint8_t tx_message[17]; // current message from client ready to transmit (queue voor 1 msg)
 uint8_t rx_message[17]; // current message from master
@@ -67,8 +65,7 @@ uint8_t rx_size;
 static void xpc_parser();
 
 // ret 0 = identical, 1 = not identical
-static uint8_t xpc_compareMessage (uint8_t *msg1, uint8_t *msg2)
-{
+static uint8_t xpc_compareMessage (uint8_t *msg1, uint8_t *msg2) {
   uint8_t msgSize; 
   msgSize = (msg1[0] & 0x0F) + 1;
   for (int i=0; i<msgSize; i++)
@@ -80,9 +77,14 @@ static uint8_t xpc_compareMessage (uint8_t *msg1, uint8_t *msg2)
 
 // deze functie copieert de msg naar de rs485 transmit buffer
 // rs485c zal de transmit starten na een callbyte
-void xpc_SendMessage(uint8_t *msg)
-{
+void xpc_SendMessage(uint8_t *msg) {
   uint8_t n, total, my_xor;
+
+  // TODO : better solution needed? timeout iso. busy wait?
+  // avoid blocking on the busy wait rs485_tx_empty
+  // if there is no connection, no point filling the TX buffer
+  if (xpc_isConnectionError)
+    return;
 
   n = 0;
   my_xor = msg[0];
@@ -90,22 +92,22 @@ void xpc_SendMessage(uint8_t *msg)
 
   // TODO : voorlopig doen we maar 1 msg tegelijk naar de TxBuffer
   // we doen busy wait totdat de vorige msg is verstuurd
-  while (!XP_tx_empty());
+  while (!rs485_tx_empty());
 
-  // alternatief : hiermee kunnen we meerdere msg in de TxBuffer steken:
-  // while (!XP_tx_ready());
+  // this is not OK : otherwise we send multiple messages in 1 slot!
+  // while (!rs485_tx_ready());
 
   // we copy all msg bytes to the TxBuffer under disabled ints because
   // we had occasional data errors when the first byte was in transmission (UDRE) before all bytes of the msg were copied to rs485c
   // UDRE int comes immediately after the 1st byte, and UDRIE=0.
   disableInterrupts(); 
-  XP_send_byte(msg[0]); // send header
+  rs485_send_byte(msg[0]); // send header
   while (n != total) {
     n++;
     my_xor ^= msg[n];
-    XP_send_byte(msg[n]); // send data
+    rs485_send_byte(msg[n]); // send data
   }    
-  XP_send_byte(my_xor); // send xor
+  rs485_send_byte(my_xor); // send xor
   enableInterrupts();
 } // xpc_SendMessage
 
@@ -119,7 +121,16 @@ void xpc_send_PowerOffRequest () {
 void xpc_send_EmergencyStopRequest () {
   xpc_SendMessage(xpc_EmergencyStopRequest);
 }
-void xpc_send_ServiceModeResultsRequest () {
+void xpc_send_EmergencyStopRequest1 (uint16_t locAddress) { // emergency stop a single loc
+  tx_message[0] = 0x92;
+  tx_message[1] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[2] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
+    tx_message[1] |= 0xC0;
+  xpc_SendMessage(tx_message);
+} 
+
+void xpc_send_ServiceModeResultsRequest() {
   xpc_SendMessage(xpc_ServiceModeResultsRequest);
 }
 void xpc_send_CommandStationStatusRequest () {
@@ -131,24 +142,24 @@ void xpc_send_CommandStationSwVersionRequest () {
 } // xpc_send_CommandStationSwVersionRequest
 
 // cv : 1..1024, 1024 wordt als 0 getransmit
-void xpc_send_DirectModeCVReadRequest(uint16_t cvAddr) {
+void xpc_send_DirectModeCVReadRequest(uint16_t cvAddress) {
   // 0x22 0x15 CV X-Or --> oud formaat, voor CV1..256
   // 0x22 0x18 en verder voor CV1..1024
-  cvAddr = cvAddr & 0x3FF; // houd 10 bits over van de cv, en 1024 wordt 0)
+  cvAddress = cvAddress & 0x3FF; // houd 10 bits over van de cv, en 1024 wordt 0)
   tx_message[0] = 0x22;
-  tx_message[1] = 0x18 | ((cvAddr >> 8) & 0x3); // hoogste 2 bits van de CV
-  tx_message[2] = cvAddr & 0xFF; // laagste 8 bits van de CV
+  tx_message[1] = 0x18 | ((cvAddress >> 8) & 0x3); // hoogste 2 bits van de CV
+  tx_message[2] = cvAddress & 0xFF; // laagste 8 bits van de CV
   xpc_SendMessage(tx_message);
 } // xpc_send_DirectModeCVReadRequest
 
 // cv : 1..1024, 1024 wordt als 0 getransmit
-void xpc_send_DirectModeCVWriteRequest(uint16_t cvAddr, uint8_t cvData) {
+void xpc_send_DirectModeCVWriteRequest(uint16_t cvAddress, uint8_t cvData) {
   // 0x23 0x16 CV X-Or --> oud formaat, voor CV1..256
   // 0x23 0x1C en verder voor CV1..1024
-  cvAddr = cvAddr & 0x3FF; // houd 10 bits over van de cv, en 1024 wordt 0)
+  cvAddress = cvAddress & 0x3FF; // houd 10 bits over van de cv, en 1024 wordt 0)
   tx_message[0] = 0x23;
-  tx_message[1] = 0x1C | ((cvAddr >> 8) & 0x3); // hoogste 2 bits van de CV
-  tx_message[2] = cvAddr & 0xFF; // laagste 8 bits van de CV
+  tx_message[1] = 0x1C | ((cvAddress >> 8) & 0x3); // hoogste 2 bits van de CV
+  tx_message[2] = cvAddress & 0xFF; // laagste 8 bits van de CV
   tx_message[3] = cvData;
   xpc_SendMessage(tx_message);
 } // xpc_send_DirectModeCVWriteRequest
@@ -170,163 +181,160 @@ void xpc_send_PomCVWriteRequest(uint16_t pomAddress, uint16_t cvAddress, uint8_t
   xpc_SendMessage(tx_message);
 } // xpc_send_PomCVWriteRequest
 
-// decAddr : 0..255, 
-// schakeldecoder :  elk decAddr heeft 8 outputs (4wissels)
-// feedbackdecoder : elk decAddr heeft 8 inputs
+// decoderAddress : 0..255, 
+// schakeldecoder :  elk decoderAddress heeft 8 outputs (4wissels)
+// feedbackdecoder : elk decoderAddress heeft 8 inputs
 // met InfoRequest kan je maar 4 bits tegelijk opvragen, nibble : 0=laagste 4 bits, 1=hoogste 4 bits
 // de applayer moet de requests organiseren om alle nodige info te bekomen dmv verschillende func calls
-void xpc_send_AccessoryDecoderInfoRequest(uint8_t decAddr, uint8_t nibble) {
+void xpc_send_AccessoryDecoderInfoRequest(uint8_t decoderAddress, uint8_t nibble) {
   // 0x42 Addr Nibble X-Or
   tx_message[0] = 0x42;
-  tx_message[1] = decAddr;
+  tx_message[1] = decoderAddress;
   tx_message[2] = 0x80 + (nibble & 0x1);
   xpc_SendMessage(tx_message);
 } // xpc_send_AccessoryDecoderInfoRequest
 
-
-
 // dit commando is enkel voor schakeldecoders!
-// turnoutAddr : 0..1023 (10bits) 
-// -> decAddr = hoogste 8-bits van het turnoutAddr
-// -> turnout = laagste 2-bits van het turnoutAddr (elke switching decoder controleert 4 wissels)
+// turnoutAddress : 0..1023 (10bits) 
+// -> decoderAddress = hoogste 8-bits van het turnoutAddress
+// -> turnout = laagste 2-bits van het turnoutAddress (elke switching decoder controleert 4 wissels)
 // position : 0 = rechtdoor (output 1), 1 = afslaan (output 2)
 // de sds switching decoder gaat ervoor zorgen dat de 2 outputs van een paar nooit tegelijk aan staan
 // een 'off' commando op de gepairde output hoeft dus niet (activate bit altijd 1)
-void xpc_send_SetTurnoutRequest(uint8_t turnoutAddr, uint8_t turnoutPosition)
+void xpc_send_SetTurnoutRequest(uint8_t turnoutAddress, uint8_t turnoutPosition)
 {
   // 0x52 Addr 1000DBBD X-Or
   tx_message[0] = 0x52;
-  tx_message[1] = (uint8_t)((turnoutAddr >> 2) & 0xFF);
-  tx_message[2] = 0x88 + ((turnoutAddr & 0x3) < 1) + (turnoutPosition & 0x1); // activate bit = 1 altijd
+  tx_message[1] = (uint8_t)((turnoutAddress >> 2) & 0xFF);
+  tx_message[2] = 0x88 + ((turnoutAddress & 0x3) < 1) + (turnoutPosition & 0x1); // activate bit = 1 altijd
   xpc_SendMessage(tx_message);
 } // xpc_send_SetTurnoutRequest
 
-// undocumented xpnet, maar aanwezig in opendcc
-// geen command station response
-// signalAdress : 11 bits
-// signalAspect : 5 bits code
-void xpc_send_SetSignalAspectRequest(uint16_t signalAddress, uint8_t signalAspect)
-{
-  // 0x13 0x01 B+AH AL X-Or
-  tx_message[0] = 0x13;
-  tx_message[1] = 0x01;
-  signalAspect &= 0x1F; // houd 5 bits over just in case
-  signalAddress &= 0x7FF;
-  tx_message[2] = (signalAspect << 3) | (uint8_t)(signalAddress>>8); // signal aspect & higher 3bits of signalAddress
-  tx_message[3] = signalAddress & 0xFF; // lower 8bits of signalAddress
+// undocumented xpnet, but implemented by opendcc & JMRI
+// no command station response
+// decoder address : 9-bit accessory decoder DCC address (8-bit xpnet range)
+// signalId : 2-bit head 0..3 (lower 2-bits of the 11-bit address)
+// signalAspect : 5-bits aspect
+void xpc_send_SetSignalAspectRequest(uint16_t decoderAddress, uint8_t signalId, uint8_t signalAspect) {
+  // 0xE4 0x30 + 3 bytes dcc msg
+  tx_message[0] = 0xE4;
+  tx_message[1] = 0x30;
+  // next 3 bytes are plain dcc
+  tx_message[2] = 0x80 | (decoderAddress & 0x3C);
+  tx_message[3] = (((decoderAddress >> 6) ^ 0x07) << 4);    // shift down, invert, shift up
+  tx_message[3] |= (signalId << 1) | 0x01;
+  tx_message[4] = signalAspect;
   xpc_SendMessage(tx_message);
 } // xpc_send_SetSignalAspectRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // de CS antwoordt met speed info, en wie de loc bestuurt
-void xpc_send_LocGetInfoRequest(uint16_t locAddr)
+void xpc_send_LocGetInfoRequest(uint16_t locAddress)
 {
   // 0xE3 0x00 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x00;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetInfoRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // voor functies F13 -> F28
-void xpc_send_LocGetFuncStatus_F13_F28_Request(uint16_t locAddr)
+void xpc_send_LocGetFuncStatus_F13_F28_Request(uint16_t locAddress)
 {
   // 0xE3 0x08 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x09;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetFuncStatus_F13_F28_Request
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // voor functies F0 -> F12
-void xpc_send_LocGetFuncModeRequest(uint16_t locAddr)
+void xpc_send_LocGetFuncModeRequest(uint16_t locAddress)
 {
   // 0xE3 0x07 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x07;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetFuncModeRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // voor functies F13 -> F28
-void xpc_send_LocGetFuncMode_F13_F28_Request(uint16_t locAddr)
+void xpc_send_LocGetFuncMode_F13_F28_Request(uint16_t locAddress)
 {
   // 0xE3 0x08 Addr-H Addr-L X-Or
   tx_message[0] = 0xE3;
   tx_message[1] = 0x08;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocGetFuncMode_F13_F28_Request
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // we gaan 128speed steps gebruiken in de client (DCC128)
-void xpc_send_LocSetSpeedRequest(uint16_t locAddr, uint8_t locSpeed)
+void xpc_send_LocSetSpeedRequest(uint16_t locAddress, uint8_t locSpeed)
 {
   // 0xE4 0x13 Addr-H Addr-L  RV X-Or
   tx_message[0] = 0xE4;
   tx_message[1] = 0x13;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   tx_message[4] = locSpeed;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocSetSpeedRequest
 
-// locAddr : 0 -> 9999 (xpnet range)
+// locAddress : 0 -> 9999 (xpnet range)
 // per func grp, de applayer moet zorgen dat alle bits in een grp correct worden doorgegeven!!
 // grp=1 (F0..F4), 2 (F5..F8), 3 (F9..F12), 4 (F13..F20), 5 (F21..F28)
-void xpc_send_LocSetFuncRequest(uint16_t locAddr, uint8_t grp, uint8_t locFuncs)
-{
-  if ((grp > 5) || (grp ==0))
-      return;
+void xpc_send_LocSetFuncRequest(uint16_t locAddress, uint8_t grp, uint8_t locFuncs) {
+  if ((grp > 5) || (grp == 0))
+    return;
   // 0xE4 0x20 Addr-H Addr-L  RV X-Or
   tx_message[0] = 0xE4;
-  tx_message[1] = 0x20 + (grp - 1);
   if (grp == 5) tx_message[1] = 0x28;
   else tx_message[1] = 0x20 + (grp - 1); // cases grp=1..4
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   tx_message[4] = locFuncs;
   xpc_SendMessage(tx_message);
 } // xpc_send_LocSetFuncRequest
 
-void xpc_send_FindNextLocAddress (uint16_t locAddr, uint8_t searchDirection)
+void xpc_send_FindNextLocAddress (uint16_t locAddress, uint8_t searchDirection)
 {
   searchDirection &= 0x1; // 1-bit
   tx_message[0] = 0xE3;
   tx_message[1] = 0x05 + searchDirection;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_FindNextLocAddress
 
-void xpc_send_DeleteLocAddress (uint16_t locAddr)
+void xpc_send_DeleteLocAddress (uint16_t locAddress)
 {
   tx_message[0] = 0xE3;
   tx_message[1] = 0x44;
-  tx_message[2] = (uint8_t) ((locAddr & 0xFF00)>>8); // hoogste 8-bits van locAddr
-  tx_message[3] = (uint8_t) (locAddr & 0xFF); // laagste 8-bits van locAddr
-  if (locAddr > XP_SHORT_DCC_ADDR_LIMIT)
+  tx_message[2] = (uint8_t) ((locAddress & 0xFF00)>>8); // hoogste 8-bits van locAddress
+  tx_message[3] = (uint8_t) (locAddress & 0xFF); // laagste 8-bits van locAddress
+  if (locAddress > XP_SHORT_DCC_ADDR_LIMIT)
     tx_message[2] |= 0xC0;
   xpc_SendMessage(tx_message);
 } // xpc_send_DeleteLocAddress
@@ -352,17 +360,15 @@ void xpc_send_SetFastClock(xpcFastClock_t *newFastClock)
 #endif // MINIMAL_XPC
 
 // our own xpnet extension
-void xpc_send_AccessoryDecoderInfoNotify(uint8_t decAddr, uint8_t data) {
+void xpc_send_AccessoryDecoderInfoNotify(uint8_t decoderAddress, uint8_t data) {
   tx_message[0] = 0x72; 
-  tx_message[1] = decAddr;
+  tx_message[1] = decoderAddress;
   tx_message[2] = data;
   xpc_SendMessage(tx_message);
 } // xpc_send_AccessoryDecoderInfoNotify
 
 static void xpc_parser()
 {
-  xpcFastClock_t newFastClock;
-
   // rx_message[0] = header byte (de callbyte is al gestript door xpc_run)
   switch(rx_message[0] >> 4) {
     #ifndef MINIMAL_XPC
@@ -370,6 +376,7 @@ static void xpc_parser()
       switch(rx_message[1]) {
         case 0xF1:
           // set clock
+          xpcFastClock_t newFastClock;
           for (uint8_t field = 2; field <= (rx_message[0] & 0x0F); field++ ) {
             uint8_t val;
             switch(rx_message[field] & 0xC0) {
@@ -404,20 +411,15 @@ static void xpc_parser()
       // [0]   [1]  [2]   [3]   [4] ...
       // 0x4? ADR1 DATA1 ADR2 DATA2 ...
       // the callback is called for every addr/data pair
-      //not STM8 
-      /*
-      if (xpc_AccessoryDecoderInfoResponse) {
-        uint8_t nbrBytes = rx_message[0] & 0x0F;
-        for (int i=1;i<nbrBytes;i+=2) { // handle all addr/data pairs
-          uint8_t addr = rx_message[i]; // accessory decoder address 0..127
-          uint8_t data = rx_message[i+1];
-          if (data & 0x10) // high nibble
-            xpc_AccessoryDecoderInfoResponse (addr, (data&0x0F)<<4, 0xF0, ((data>>5)&0x3));
-          else // low nibble
-            xpc_AccessoryDecoderInfoResponse (addr, (data&0x0F), 0x0F, ((data>>5)&0x3));
-        }
+      uint8_t nbrBytes = rx_message[0] & 0x0F;
+      for (int i=1;i<nbrBytes;i+=2) { // handle all addr/data pairs
+        uint8_t addr = rx_message[i]; // accessory decoder address 0..127
+        uint8_t data = rx_message[i+1];
+        if (data & 0x10) // high nibble
+          xpc_AccessoryDecoderInfoResponse (addr, (data&0x0F)<<4, 0xF0, ((data>>5)&0x3));
+        else // low nibble
+          xpc_AccessoryDecoderInfoResponse (addr, (data&0x0F), 0x0F, ((data>>5)&0x3));
       }
-      */
       break;
     #endif // MINIMAL_XPC
     case 0x06 :
@@ -448,17 +450,17 @@ static void xpc_parser()
         //not STM8 if (xpc_ProgStatusResponse) xpc_ProgStatusResponse (PROG_READY);
       }
       else if (rx_message[1] == 0x14) {
-        uint16_t cvAddr;
-        cvAddr = ((rx_message[1] - 0x14) & 0x3) << 8;
-        cvAddr |= rx_message[2];
-        if (cvAddr == 0) cvAddr = 1024;
-        //not STM8 if (xpc_ProgResultResponse) xpc_ProgResultResponse (cvAddr,rx_message[3]);
+        uint16_t cvAddress;
+        cvAddress = ((rx_message[1] - 0x14) & 0x3) << 8;
+        cvAddress |= rx_message[2];
+        if (cvAddress == 0) cvAddress = 1024;
+        xpc_ProgResultResponse (cvAddress,rx_message[3]);
       }
       else if (rx_message[1] == 0x21) { // command station sw version response
-        //not STM8 if (xpc_CommandStationSwVersionResponse) xpc_CommandStationSwVersionResponse (rx_message[2]);
+        xpc_CommandStationSwVersionResponse (rx_message[2]);
       }
       else if (rx_message[1] == 0x22) { // command station status response
-        //not STM8 if (xpc_CommandStationStatusResponse) xpc_CommandStationStatusResponse (rx_message[2]);
+        xpc_CommandStationStatusResponse (rx_message[2]);
       }
       #endif // MINIMAL_XPC
       break;
@@ -472,29 +474,24 @@ static void xpc_parser()
       break;
     case 0x0E :
       if ((rx_message[1] & 0xF0) == 0x30) { // address retrieval response, KKKK gebruiken we voorlopig niet volledig
-        uint16_t locAddr;
+        uint16_t locAddress;
         if ((rx_message[1] & 0x0F) == 0x4) // KKKK=4 : not found
-          locAddr = 10000; // use an invalid address as return value
+          locAddress = 10000; // use an invalid address as return value
         else
-          locAddr = ((rx_message[2] & 0x3F) << 8) + rx_message[3];
-        //not STM8 
-        //if (xpc_FindNextLocAddressResponse)
-        //  xpc_FindNextLocAddressResponse(locAddr);
+          locAddress = ((rx_message[2] & 0x3F) << 8) + rx_message[3];
+          xpc_FindNextLocAddressResponse(locAddress);
       }
       else if (rx_message[1] == 0x40) {
         uint16_t locStolenAddr;
         locStolenAddr = ((rx_message[2] & 0x3F) << 8) + rx_message[3];
-        //not STM8 
-        //if ((locStolenAddr >=0) && (locStolenAddr < 10000) && (xpc_LocStolenNotify)) 
-        //  xpc_LocStolenNotify(locStolenAddr);
+        if ((locStolenAddr >=0) && (locStolenAddr < 10000))
+          xpc_LocStolenNotify(locStolenAddr);
       }
       else if (rx_message[1] == 0x52) { // function status F13..F28 response
         uint16_t f13_f28;
         f13_f28 = (uint16_t) rx_message[3];
         f13_f28 = (f13_f28 << 8) | rx_message[2];
-        //not STM8 
-        //if (xpc_LocGetFuncStatus_F13_F28_Response)
-        //  xpc_LocGetFuncStatus_F13_F28_Response(f13_f28);
+        xpc_LocGetFuncStatus_F13_F28_Response(f13_f28);
       }
       else if ((rx_message[1] & 0xF0) == 0x00) { // loc information normal locomotive 2.1.14.1
         uint8_t dccSpeed128;
@@ -502,9 +499,7 @@ static void xpc_parser()
         dccSpeed128 = rx_message[2]; // todo : uitbreiden als de speedstep != 128, herrekenen naar DCC128
         locFuncs = ((uint16_t)rx_message[4]) << 8;
         locFuncs |= (rx_message[3] << 1) | ((rx_message[3] & 0x10) >> 4); // func0 op bit0 zetten
-        //not STM8 
-        //if (xpc_LocGetInfoResponse)
-        //  xpc_LocGetInfoResponse(dccSpeed128, locFuncs, ((rx_message[1] & 0x8)== 0) );
+        xpc_LocGetInfoResponse(dccSpeed128, locFuncs, ((rx_message[1] & 0x8)== 0));
       }
       else if ((rx_message[1] & 0xF0) == 0x01) // loc information for a loc in multi-unit 2.1.14.2 --> TODO
       {
@@ -522,17 +517,15 @@ static void xpc_parser()
   }
 } // xpc_parser
 
-void xpc_Init(uint8_t slaveAddress)
-{
+void xpc_Init(uint8_t slaveAddress) {
   xpc_state = XPC_INIT;
   xpc_MyAddress = slaveAddress;
-  XP_setAddress (slaveAddress);
+  rs485_SetSlaveAddress (slaveAddress);
 } // xpc_Init
 
-void xpc_Run(void)
-{
+void xpc_Run() {
   if ((!xpc_isConnectionError) & (millis() - rxLastMillis > CONNECTION_TIMEOUT)) {
-    XP_tx_clear(); // clear TX buffer, can't send anyway
+    rs485_tx_clear(); // clear TX buffer, can't send anyway
     xpc_isConnectionError = true;
     xpc_state = XPC_WAIT_FOR_CALL;
     xpc_EventNotify(XPEVENT_CONNECTION_ERROR);
@@ -544,10 +537,10 @@ void xpc_Run(void)
       break;
 
     case XPC_WAIT_FOR_CALL:
-      if (XP_rx_ready()) {
+      if (rs485_rx_ready()) {
         // niet hier, want we hebben i2c nodig
         //digitalWrite(LED_BUILTIN,!digitalRead(LED_BUILTIN)); //toggle pin13 for test
-        uint16_t callbyte = XP_rx_read(); // the call byte ?
+        uint16_t callbyte = rs485_rx_read(); // the call byte ?
         rxLastMillis = millis(); // rx timeout manager
         if (!(callbyte & 0x100)) return; // we heben een byte in het midden van een conversatie opgepikt; we gaan hersynchroniseren en wachten op een call byte
 
@@ -587,8 +580,8 @@ void xpc_Run(void)
       break;
 
     case XPC_WAIT_FOR_MESSAGE: 
-      if (XP_rx_ready()) {
-        rx_message[0] = (uint8_t) (XP_rx_read() & 0xFF); // header
+      if (rs485_rx_ready()) {
+        rx_message[0] = (uint8_t) (rs485_rx_read() & 0xFF); // header
         rx_size = rx_message[0] & 0x0F;  // length is without xor 
         rx_size++;                       // now including xor; (er volgen nog rx_size bytes na de header : rx_message[1] .. rx_message[rx_size];  rx_message[rx_size] = XOR
         rx_index = 1;        
@@ -602,8 +595,8 @@ void xpc_Run(void)
         xpc_EventNotify(XPEVENT_RX_TIMEOUT);
         xpc_state = XPC_WAIT_FOR_CALL;
       }
-      else if (XP_rx_ready()) {
-        rx_message[rx_index] = (uint8_t) (XP_rx_read() & 0xFF);
+      else if (rs485_rx_ready()) {
+        rx_message[rx_index] = (uint8_t) (rs485_rx_read() & 0xFF);
         if (rx_index == rx_size) {
           uint8_t i, my_check = 0;
           xpc_state = XPC_WAIT_FOR_CALL; 

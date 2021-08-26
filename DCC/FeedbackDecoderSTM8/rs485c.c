@@ -19,6 +19,23 @@
 #include "Arduino.h"
 #include "rs485c.h"
 
+// STM8S103 has UART1, STMS105 has UART2, pff
+#if defined(UART1)
+# define UARTx			UART1
+# define UARTx_RX_IRQHandler	UART1_RX_IRQHandler
+# define ITC_IRQ_UARTx_RX	ITC_IRQ_UART1_RX
+# define UARTx_TX_IRQHandler	UART1_TX_IRQHandler
+# define ITC_IRQ_UARTx_TX	ITC_IRQ_UART1_TX
+#elif defined(UART2)
+# define UARTx			UART2
+# define UARTx_RX_IRQHandler	UART2_RX_IRQHandler
+# define ITC_IRQ_UARTx_RX	ITC_IRQ_UART2_RX
+# define UARTx_TX_IRQHandler	UART2_TX_IRQHandler
+# define ITC_IRQ_UARTx_TX	ITC_IRQ_UART2_TX
+#else
+# error "no UART definition found."
+#endif
+
 #define RS485Transmit    HIGH
 #define RS485Receive     LOW
 
@@ -31,9 +48,6 @@
 // the slave address we will be listening on
 static uint8_t X_slaveAddress = 0; // 1..31 xpnet slave, 0 = broadcast
 static uint8_t rs485DirectionPin;
-
-static uint8_t sreg; // TODO : need a better solution
-
 
 // FIFO objects for RX and TX
 // max. Size: 255
@@ -50,31 +64,20 @@ static uint8_t X_tx_write_ptr = 0;
 static uint8_t X_tx_fill = 0;
 static volatile uint8_t X_slotAddress;       // active slot on the xpnet, discard all data if X_slotAddress != X_slaveAddress or broadcast
 
-static inline void set_XP_to_receive(void)
+static void XP_flush_rx() // Flush Receive-Buffer
 {
-  digitalWrite(rs485DirectionPin,RS485Receive);
-}
-
-static inline void set_XP_to_transmit(void)
-{
-  digitalWrite(rs485DirectionPin,RS485Transmit);
-}
-
-static void XP_flush_rx(void) // Flush Receive-Buffer
-{
-  //uint8_t sreg;
   //sreg = SREG;
   //__asm__("push cc\npop _sreg");
 
   //disableInterrupts();
   do {
-    UART1->DR;
+    UARTx->DR;
   }
-  while (UART1->SR & UART1_SR_RXNE);
+  while (UARTx->SR & UART1_SR_RXNE);
 
   // toggle receiver enable off & back on, nodig voor STM8?
-  UART1->CR2 &= ~UART1_CR2_REN;
-  UART1->CR2 |= UART1_CR2_REN;
+  UARTx->CR2 &= ~UART1_CR2_REN;
+  UARTx->CR2 |= UART1_CR2_REN;
   X_rx_read_ptr = 0;      
   X_rx_write_ptr = 0;
 
@@ -84,10 +87,9 @@ static void XP_flush_rx(void) // Flush Receive-Buffer
   
 } // XP_flush_rx
 
-void init_rs485(uint8_t enablePin)
+void rs485_Init(uint8_t enablePin)
 {
   uint16_t ubrr;
-  //uint8_t sreg;
 
   rs485DirectionPin = enablePin;
   digitalWrite(rs485DirectionPin,RS485Receive); // low = default anyway
@@ -96,24 +98,24 @@ void init_rs485(uint8_t enablePin)
   //sreg = SREG;
   //__asm__("push cc\npop _sreg");
 
-  UART1->CR2 = 0; // stop everything
-  UART1->SR = 0; // clear TX/RXNE
+  UARTx->CR2 = 0; // stop everything
+  UARTx->SR = 0; // clear TX/RXNE
 
   ubrr = (uint16_t) (F_CPU/62500L);
-  UART1->BRR2 = (uint8_t) ((ubrr & 0x0F) + ((ubrr & 0xF000) >> 8)); // 4LSB & 4MSB together, see refman
-  UART1->BRR1 = (uint8_t) ((ubrr & 0x0FF0) >> 4); // bits 4..11 here
+  UARTx->BRR2 = (uint8_t) ((ubrr & 0x0F) + ((ubrr & 0xF000) >> 8)); // 4LSB & 4MSB together, see refman
+  UARTx->BRR1 = (uint8_t) ((ubrr & 0x0FF0) >> 4); // bits 4..11 here
 
-  UART1->CR1 = UART1_CR1_M;         // 9-bit data mode, other bits 0 = ok default
+  UARTx->CR1 = UART1_CR1_M;         // 9-bit data mode, other bits 0 = ok default
                                     // UART1_CR1_T8 = 0, slave always sends 0 for bit8
-  UART1->CR3 = 0;                    // defaults ok (1stop bit)
+  UARTx->CR3 = 0;                    // defaults ok (1stop bit)
 
   // enable receiver & transmitter without interrupts
-  UART1->CR2 = UART1_CR2_TEN | UART1_CR2_REN;
+  UARTx->CR2 = UART1_CR2_TEN | UART1_CR2_REN;
   delay(1); // needed to avoid TXE/TC flags being set, without ever sending data! with this delay the next statement works correctly.
-  UART1->SR = 0; // and now clearing TXE/TC flags works ok
+  UARTx->SR = 0; // and now clearing TXE/TC flags works ok
   XP_flush_rx();
   // enable interrupts (the TIEN interrupt is activated only when we are sending data)
-  UART1->CR2 |= UART1_CR2_TCIEN | UART1_CR2_RIEN;
+  UARTx->CR2 |= UART1_CR2_TCIEN | UART1_CR2_RIEN;
 
   // FIFOs fur Ein- und Ausgabe initialisieren
   X_tx_read_ptr = 0;
@@ -132,46 +134,46 @@ void init_rs485(uint8_t enablePin)
 //
 
 // this will override the sduino default ISRs
-INTERRUPT_HANDLER(UART1_TX_IRQHandler, ITC_IRQ_UART1_TX) {
+INTERRUPT_HANDLER(UARTx_TX_IRQHandler, ITC_IRQ_UARTx_TX) {
   // 1 isr for TXE & TC
-  if (UART1->SR & UART1_SR_TC) {
-    set_XP_to_receive();
-    UART1->SR &= ~UART1_SR_TC; // reset TC flag
+  if (UARTx->SR & UART1_SR_TC) {
+    digitalWrite(rs485DirectionPin,RS485Receive);
+    UARTx->SR &= ~UART1_SR_TC; // reset TC flag
   }
 
   // We transmit 9 bits --> sds : client tx altijd 9de bit = 0 (9de bit wordt in de RX introutine nooit gelezen door de master)
   // transmit register empty
-  if (UART1->SR & UART1_SR_TXE) {
+  if (UARTx->SR & UART1_SR_TXE) {
     if (X_tx_read_ptr != X_tx_write_ptr)
     {
       // moeten we hier telkens T8 op 0 zetten in CR1?
-      UART1->DR = X_TxBuffer[X_tx_read_ptr++];
+      UARTx->DR = X_TxBuffer[X_tx_read_ptr++];
       if (X_tx_read_ptr == X_TxBuffer_Size) X_tx_read_ptr=0;
       X_tx_fill--;
     }
     else
-      UART1->CR2 &= ~UART1_CR2_TIEN;  // disable further TxINT
+      UARTx->CR2 &= ~UART1_CR2_TIEN;  // disable further TxINT
   }
 } // UART-TX ISR
 
 // we filteren hier al op call bytes voor ons, en starten TX bij inquiry call
 // zodat we enkel transmitten in ons timeslot
 // RxBuffer is 16-bit (bit8 also stored, so xpc can further handle the different call types)
-INTERRUPT_HANDLER(UART1_RX_IRQHandler, ITC_IRQ_UART1_RX) {
+INTERRUPT_HANDLER(UARTx_RX_IRQHandler, ITC_IRQ_UARTx_RX) {
   uint16_t aData = 0;
-  if (UART1->SR & UART1_SR_FE) { // frame error
-    UART1->DR; // read data anyway to stop the int
+  if (UARTx->SR & UART1_SR_FE) { // frame error
+    UARTx->DR; // read data anyway to stop the int
     return;
   }
 
-  if (UART1->SR & UART1_SR_OR){ // data overrun
+  if (UARTx->SR & UART1_SR_OR){ // data overrun
     // sds : we zijn data kwijt, xpc zal het wel oplossen, er zal een timeout of xor error volgen
   }
 
-  if (UART1->CR1 & UART1_CR1_R8) { // bit 8 is 1
+  if (UARTx->CR1 & UART1_CR1_R8) { // bit 8 is 1
     aData = 0x100;
   }
-  aData |= UART1->DR;
+  aData |= UARTx->DR;
 
   // NOTE : this code doesn't detect that another device is erroneously sending data on our slot
   // for now these bytes will be stored in X_RxBuffer and further discarded by xpc (data without preceding call byte in XPC_WAIT_FOR_CALL)
@@ -180,12 +182,12 @@ INTERRUPT_HANDLER(UART1_RX_IRQHandler, ITC_IRQ_UART1_RX) {
     if ((X_slotAddress == X_slaveAddress) && 
         ((aData & CALL_TYPE) == CALL_TYPE_INQUIRY)) { // a normal inquiry for us
       if (X_tx_write_ptr != X_tx_read_ptr) { /// we have something to send
-        set_XP_to_transmit();         // start data transmission!
-        UART1->SR &= ~UART1_SR_TC;    // clear any pending tx complete flag
-        UART1->CR2 |= UART1_CR2_TIEN; // enable TxINT
+        digitalWrite(rs485DirectionPin,RS485Transmit); // start data transmission!
+        UARTx->SR &= ~UART1_SR_TC;    // clear any pending tx complete flag
+        UARTx->CR2 |= UART1_CR2_TIEN; // enable TxINT
         // allicht overbodig, want die stonden al aan, en worden niet uitgezet
-        UART1->CR2 | UART1_CR2_TCIEN; // enable TX complete int
-        //UART1->CR2 | UART1_CR2_TEN;   // enable transmitter
+        UARTx->CR2 | UART1_CR2_TCIEN; // enable TX complete int
+        //UARTx->CR2 | UART1_CR2_TEN;   // enable transmitter
       }
       // TODO : we could return here and not store the normal inquiry in RxBuffer, but 
       // we need to track connection errors, and that's done in xpc for now
@@ -204,28 +206,27 @@ INTERRUPT_HANDLER(UART1_RX_IRQHandler, ITC_IRQ_UART1_RX) {
 // Upstream Interface
 //-----------------------------------------------------------------------------
 
-void XP_setAddress (uint8_t slaveAddress) {
+void rs485_SetSlaveAddress (uint8_t slaveAddress) {
   X_slaveAddress = slaveAddress;
 }
 
 // TX:
-bool XP_tx_ready (void) {
+bool rs485_tx_ready () {
   if (X_tx_fill < (X_TxBuffer_Size-18)) { // keep space for one complete message (16)
     return(true);
   }
   else return(false);
-} // XP_tx_ready
+} // rs485_tx_ready
 
 // true if TxBuffer empty & all bytes sent
-bool XP_tx_empty(void) {
+bool rs485_tx_empty() {
   // not enough to just look at driver bit, need to check the TxBuffer pointers too
   // we want to prevent multiple xpc_SendMessage() between the last completed transmission and the next inquiry call byte
   return (X_tx_write_ptr == X_tx_read_ptr) && (digitalRead(rs485DirectionPin) != RS485Transmit);
 
-} // XP_tx_empty
+} // rs485_tx_empty
 
-void XP_tx_clear (void) {
-  //uint8_t sreg;
+void rs485_tx_clear () {
   //sreg = SREG;
   //__asm__("push cc\npop _sreg");
 
@@ -236,14 +237,12 @@ void XP_tx_clear (void) {
   // SREG = sreg; // this will renable global ints (sei) if they were enabled before
   //__asm__("push _sreg\npop cc"); // TODO test -> volgens refman §6.2, table9
   enableInterrupts();
-  
 }
 
 // ret 1 if full
 // This goes with fifo (up to 32), bit 8 is 0.
-bool XP_send_byte (const uint8_t c)
+bool rs485_send_byte (const uint8_t c)
 {
-  //uint8_t sreg;
 
   X_TxBuffer[X_tx_write_ptr] = c;
 
@@ -258,31 +257,25 @@ bool XP_send_byte (const uint8_t c)
 
   if (X_tx_fill > (X_TxBuffer_Size-18)) return(true);
   return(false);
-} // XP_send_byte
+} // rs485_send_byte
 
 //------------------------------------------------------------------------------
 // RX:
 
 // SDS TODO 2021 : rename isAvailable() of zoiets
-bool XP_rx_ready (void)
+bool rs485_rx_ready ()
 {
   if (X_rx_read_ptr != X_rx_write_ptr)
     return(true);     // there is something
   else return(false);  
-} // XP_rx_ready
-
-
-//-------------------------------------------------------------------
-// XP_rx_peek : lees een 9-bit char uit de buffer, maar laat het in de buffer staan (!= XP_rx_read)
-// there is no check whether a char is ready, this must be
-// done before calling with a call to rx_fifo_ready();
+} // rs485_rx_ready
 
 //-------------------------------------------------------------------
 // rx_fifo_read gets one char from the input fifo
 //
 // there is no check whether a char is ready, this must be
 // done before calling with a call to rx_fifo_ready();
-uint16_t XP_rx_read (void)
+uint16_t rs485_rx_read ()
 {
   unsigned int retval;
 
@@ -291,4 +284,4 @@ uint16_t XP_rx_read (void)
   if (X_rx_read_ptr == X_RxBuffer_Size) X_rx_read_ptr=0;
 
   return(retval);
-} // XP_rx_read
+} // rs485_rx_read
